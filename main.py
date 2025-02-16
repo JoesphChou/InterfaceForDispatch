@@ -7,7 +7,6 @@ import time, math
 import urllib3
 from bs4 import BeautifulSoup
 
-
 def timeit(func):
     print('接到 func', func.__name__)
     def wrapper(*args, **kwargs):
@@ -21,7 +20,7 @@ def timeit(func):
 
 def query_pi(st, et, tags, extract_type, time_offset = 0):
     """
-        1. 從 PI 取出的 timestamp 時區改成 GMT+8
+        1. 從 PI 取出的 timestamp 時區改成 GMT+8   123
         2. 用 PI.PIServer().search 找出tag 對應的PIPoint，回傳的結果是list 型態。
            將該結果從list 提出，並新增到points 的list 中。
         3. 針對每一個PIPoint 透過 summaries 的方法，依extract_type 內容，決定特定區間取出值為何種形式。
