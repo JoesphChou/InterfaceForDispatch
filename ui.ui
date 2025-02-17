@@ -938,9 +938,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
      <property name="geometry">
       <rect>
        <x>9</x>
-       <y>50</y>
+       <y>10</y>
        <width>301</width>
-       <height>171</height>
+       <height>181</height>
       </rect>
      </property>
      <property name="verticalScrollBarPolicy">
@@ -980,6 +980,20 @@ li.checked::marker { content: &quot;\2612&quot;; }
       <property name="font">
        <font>
         <family>微軟正黑體</family>
+        <pointsize>12</pointsize>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>歷史平均電量</string>
+      </property>
+      <property name="font">
+       <font>
         <pointsize>12</pointsize>
         <bold>true</bold>
        </font>
@@ -1040,6 +1054,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
         </color>
        </brush>
       </property>
+      <property name="text">
+       <string/>
+      </property>
       <item>
        <property name="text">
         <string>鼓風機群</string>
@@ -1048,6 +1065,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <property name="text">
         <string/>
@@ -1076,6 +1096,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
           </color>
          </brush>
         </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1092,6 +1115,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
            <blue>125</blue>
           </color>
          </brush>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1115,6 +1141,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
           </color>
          </brush>
         </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
       </item>
       <item>
@@ -1129,10 +1158,16 @@ li.checked::marker { content: &quot;\2612&quot;; }
        <property name="text">
         <string/>
        </property>
+       <property name="text">
+        <string/>
+       </property>
       </item>
       <item>
        <property name="text">
         <string>#2 燒結風車</string>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <property name="text">
         <string/>
@@ -1167,6 +1202,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
           </color>
          </brush>
         </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1176,6 +1214,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
         </property>
         <property name="text">
          <string/>
@@ -1195,14 +1236,26 @@ Runner</string>
        <property name="text">
         <string/>
        </property>
+       <property name="text">
+        <string/>
+       </property>
        <item>
         <property name="text">
          <string>#1</string>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
         <property name="text">
          <string>#2</string>
+        </property>
+        <property name="text">
+         <string/>
         </property>
         <property name="text">
          <string/>
@@ -1217,6 +1270,9 @@ Runner</string>
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <property name="text">
         <string/>
@@ -1247,6 +1303,9 @@ Runner</string>
       <property name="textAlignment">
        <set>AlignTrailing|AlignVCenter</set>
       </property>
+      <property name="text">
+       <string/>
+      </property>
       <item>
        <property name="text">
         <string>EAF 集塵</string>
@@ -1256,10 +1315,22 @@ Runner</string>
          <family>微軟正黑體</family>
         </font>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
       </item>
       <item>
        <property name="text">
         <string>轉爐除塵</string>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <item>
         <property name="text">
@@ -1269,6 +1340,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1280,6 +1357,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1289,6 +1372,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1300,6 +1389,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
       </item>
       <item>
@@ -1310,6 +1405,12 @@ Runner</string>
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
       </item>
      </item>
@@ -1334,6 +1435,9 @@ Runner</string>
         <bold>false</bold>
        </font>
       </property>
+      <property name="text">
+       <string/>
+      </property>
       <item>
        <property name="text">
         <string>型鋼軋延機群</string>
@@ -1342,6 +1446,12 @@ Runner</string>
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
       </item>
       <item>
@@ -1352,6 +1462,12 @@ Runner</string>
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
       </item>
      </item>
@@ -1376,6 +1492,9 @@ Runner</string>
         <bold>false</bold>
        </font>
       </property>
+      <property name="text">
+       <string/>
+      </property>
       <item>
        <property name="text">
         <string>O2 #1</string>
@@ -1388,6 +1507,9 @@ Runner</string>
        <property name="text">
         <string>1</string>
        </property>
+       <property name="text">
+        <string/>
+       </property>
        <item>
         <property name="text">
          <string>1-1</string>
@@ -1396,6 +1518,9 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
         </property>
         <property name="text">
          <string/>
@@ -1413,6 +1538,9 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
       </item>
       <item>
@@ -1424,6 +1552,12 @@ Runner</string>
          <family>微軟正黑體</family>
         </font>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
        <item>
         <property name="text">
          <string>2-1</string>
@@ -1432,6 +1566,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1442,6 +1582,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
       </item>
@@ -1454,6 +1600,12 @@ Runner</string>
          <family>微軟正黑體</family>
         </font>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
        <item>
         <property name="text">
          <string>3-1</string>
@@ -1462,6 +1614,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1473,6 +1631,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1482,6 +1646,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
       </item>
@@ -1494,6 +1664,12 @@ Runner</string>
          <family>微軟正黑體</family>
         </font>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
        <item>
         <property name="text">
          <string>#1</string>
@@ -1502,6 +1678,9 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
         </property>
         <property name="text">
          <string/>
@@ -1516,6 +1695,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1525,6 +1710,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1536,6 +1727,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1545,6 +1742,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1556,6 +1759,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1565,6 +1774,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1576,6 +1791,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
       </item>
       <item>
@@ -1586,6 +1807,12 @@ Runner</string>
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <item>
         <property name="text">
@@ -1604,6 +1831,9 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1613,6 +1843,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
        <item>
@@ -1624,6 +1860,12 @@ Runner</string>
           <family>微軟正黑體</family>
          </font>
         </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </item>
        <item>
         <property name="text">
@@ -1633,6 +1875,12 @@ Runner</string>
          <font>
           <family>微軟正黑體</family>
          </font>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="text">
+         <string/>
         </property>
        </item>
       </item>
@@ -1652,6 +1900,9 @@ Runner</string>
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
        </property>
       </item>
      </item>
@@ -1676,13 +1927,16 @@ Runner</string>
         <bold>false</bold>
        </font>
       </property>
+      <property name="text">
+       <string/>
+      </property>
      </item>
     </widget>
     <widget class="QTreeWidget" name="tw2">
      <property name="geometry">
       <rect>
-       <x>310</x>
-       <y>50</y>
+       <x>440</x>
+       <y>10</y>
        <width>290</width>
        <height>171</height>
       </rect>
@@ -1726,6 +1980,20 @@ Runner</string>
        <set>AlignCenter</set>
       </property>
      </column>
+     <column>
+      <property name="text">
+       <string>歷史平均電量</string>
+      </property>
+      <property name="font">
+       <font>
+        <pointsize>12</pointsize>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+     </column>
      <item>
       <property name="text">
        <string>HSM 軋延機組</string>
@@ -1749,6 +2017,9 @@ Runner</string>
       </property>
       <property name="textAlignment">
        <set>AlignTrailing|AlignVCenter</set>
+      </property>
+      <property name="text">
+       <string/>
       </property>
      </item>
      <item>
@@ -1775,6 +2046,9 @@ Runner</string>
       <property name="textAlignment">
        <set>AlignTrailing|AlignVCenter</set>
       </property>
+      <property name="text">
+       <string/>
+      </property>
      </item>
      <item>
       <property name="text">
@@ -1799,6 +2073,9 @@ Runner</string>
       </property>
       <property name="textAlignment">
        <set>AlignTrailing|AlignVCenter</set>
+      </property>
+      <property name="text">
+       <string/>
       </property>
      </item>
      <item>
@@ -1825,6 +2102,9 @@ Runner</string>
       <property name="textAlignment">
        <set>AlignTrailing|AlignVCenter</set>
       </property>
+      <property name="text">
+       <string/>
+      </property>
      </item>
      <item>
       <property name="text">
@@ -1850,6 +2130,9 @@ Runner</string>
       <property name="textAlignment">
        <set>AlignTrailing|AlignVCenter</set>
       </property>
+      <property name="text">
+       <string/>
+      </property>
      </item>
      <item>
       <property name="text">
@@ -1874,6 +2157,9 @@ Runner</string>
       </property>
       <property name="textAlignment">
        <set>AlignTrailing|AlignVCenter</set>
+      </property>
+      <property name="text">
+       <string/>
       </property>
      </item>
     </widget>
@@ -2398,8 +2684,8 @@ Runner</string>
     <widget class="QCheckBox" name="checkBox">
      <property name="geometry">
       <rect>
-       <x>20</x>
-       <y>10</y>
+       <x>30</x>
+       <y>550</y>
        <width>171</width>
        <height>19</height>
       </rect>
@@ -2414,33 +2700,11 @@ Runner</string>
       <string>負載以迴路編號表示</string>
      </property>
     </widget>
-    <widget class="QLabel" name="label_16">
-     <property name="geometry">
-      <rect>
-       <x>180</x>
-       <y>10</y>
-       <width>171</width>
-       <height>21</height>
-      </rect>
-     </property>
-     <property name="font">
-      <font>
-       <family>微軟正黑體</family>
-       <pointsize>12</pointsize>
-      </font>
-     </property>
-     <property name="styleSheet">
-      <string notr="true"/>
-     </property>
-     <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:11pt; color:#ff6b15;&quot;&gt;每隔11秒自動更新數值&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-     </property>
-    </widget>
     <widget class="QLabel" name="label_17">
      <property name="geometry">
       <rect>
-       <x>610</x>
-       <y>100</y>
+       <x>20</x>
+       <y>430</y>
        <width>161</width>
        <height>16</height>
       </rect>
@@ -2676,7 +2940,6 @@ Runner</string>
     <zorder>tw2</zorder>
     <zorder>tw3</zorder>
     <zorder>checkBox</zorder>
-    <zorder>label_16</zorder>
     <zorder>label_17</zorder>
     <zorder>tableWidget_3</zorder>
    </widget>
