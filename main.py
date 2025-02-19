@@ -130,11 +130,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def __init__(self):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
-        self.pushButton.clicked.connect(self.query_CBL)
+        self.pushButton.clicked.connect(self.query_cbl)
         self.pushButton_2.clicked.connect(self.add_list_item)
         self.pushButton_3.clicked.connect(self.remove_list_item1)
         self.pushButton_4.clicked.connect(self.query_demand)
-        # self.pushButton_5.clicked.connect(lambda:self.query_current_value())
+        # self.pushButtcn_5.clicked.connect(lambda:self.query_current_value())
         self.dateEdit.setDate(QtCore.QDate().currentDate())
         self.dateEdit_2.setDate(QtCore.QDate().currentDate())
         self.spinBox.setValue(5)
@@ -152,17 +152,31 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.itemExpanded.connect(lambda item: self.tw3_expanded_event(item))
         self.tw3.itemCollapsed.connect(lambda item: self.tw3_expanded_event(item))
         self.checkBox.stateChanged.connect(self.check_box_event)
-
-        # self.query_CBL()      # 查詢特定條件的 基準用電容量(CBL)
-        # self.query_demand()   # 查詢某一天每一週期的Demand
+        self.query_cbl()      # 查詢特定條件的 基準用電容量(CBL)
+        self.query_demand()   # 查詢某一天每一週期的Demand
         self.tws_init()
         self.dashboard_value()
-
+        self.history_of_groups_demand()
         # 使用QThread 的多執行緒，與自動更新選項動作綁定，執行自動更新current value
         self.thread_to_update = QtCore.QThread()
         self.thread_to_update.run = self.update_current_value
         # self.checkBox.clicked.connect(self.thread_to_update.start)
         self.thread_to_update.start()
+
+    def history_of_groups_demand(self):
+        """
+            查詢特定週期，各設備群組(分類)的平均值
+
+        :return:
+        """
+        st = pd.Timestamp('09:00:00')
+        et = st + pd.offsets.Minute(15)
+        mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
+        groups_demand = self.tag_list.loc[mask,:]
+        name_list = groups_demand.loc[mask,'tag_name2'].values.tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
+        query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
+        groups_demand.loc[:,'demand'] = query_result.T.values * 4
+
 
     def check_box_event(self):
         """
@@ -953,7 +967,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_2.setAlternatingRowColors(True)    # 隔行交替背景色
     """
 
-    def query_CBL(self):
+    def query_cbl(self):
         """
             查詢特定條件的 基準用電容量(CBL)
         :return:
