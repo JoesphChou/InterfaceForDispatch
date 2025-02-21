@@ -261,6 +261,31 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw2.topLevelItem(4).setText(2, pre_check(current_p['1H360'], 0))
         self.tw2.topLevelItem(5).setText(2, pre_check(current_p['1H450'], 0))
 
+    def check_box2_event(self):
+        if self.checkBox.isChecked():
+            # tw1
+            self.tw1.setGeometry(QtCore.QRect(9, 10, 284, 191))
+            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
+            self.tw1.setColumnWidth(1, 90)
+            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnHidden(2,True)
+            self.tw2.setGeometry(QtCore.QRect(410, 10, 227, 191))
+            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
+            self.tw2.setColumnWidth(1, 90)
+            self.tw2.setColumnWidth(2, 100)
+            self.tw2.setColumnHidden(2,True)
+        else:
+            self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))     #scroller width 18
+            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
+            self.tw1.setColumnWidth(1, 90)
+            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnHidden(2, False)
+            self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
+            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
+            self.tw2.setColumnWidth(1, 90)
+            self.tw2.setColumnWidth(2, 90)
+            self.tw2.setColumnHidden(2, False)
+
     def check_box_event(self):
         """
         切換負載的顯示方式
