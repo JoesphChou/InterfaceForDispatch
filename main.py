@@ -169,20 +169,127 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         :return:
         """
-        st = pd.Timestamp('09:00:00')
+        st = pd.Timestamp('09:30:00')
         et = st + pd.offsets.Minute(15)
         mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
-        groups_demand = self.tag_list.loc[mask,:]
-        name_list = groups_demand.loc[mask,'tag_name2'].values.tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
+        groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
+        groups_demand.index = self.tag_list.loc[mask,'name']
+        name_list = groups_demand.loc[:,'tag_name2'].values.tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
         query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
-        groups_demand.loc[:,'demand'] = query_result.T.values * 4
 
+        groups_demand.loc[:, 'demand'] = query_result.T.values  # 把結果轉置後，複制並新增到到groups_demand 的最後一個column
+        groups_demand.loc[:, 'demand'] = pd.to_numeric(groups_demand.loc[:, 'demand'], errors='coerce')  # 轉換資料型態 object->float，若遇文字型態，則用Nan 取代。
+        groups_demand.loc[:, 'demand'] = groups_demand.loc[:, 'demand'] * 4     # kwh -> MW/15 min
+
+        wx_grouped = groups_demand.groupby(['Group1','Group2'])['demand'].sum()     # 7
+        wx = pd.DataFrame(wx_grouped.loc['W2':'WA', 'B'])
+        # wx = pd.DataFrame(wx_grouped.loc[(slice('W2','WA')),'B'])
+        wx.index = wx.index.get_level_values(0)     # 重新將index 設置為原multiIndex 的第一層index 內容
+        groups_demand = pd.concat([groups_demand, wx],axis=0)  # 9
+
+        self.update_history_to_tws(groups_demand['demand'])
+        # self.label_16.setText(str(st))
+
+    def update_history_to_tws(self, current_p):
+        w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
+        self.tw1.topLevelItem(0).setText(2, pre_check(w2_total))
+        self.tw1.topLevelItem(0).child(0).setText(2, pre_check(current_p['2H180':'1H350'].sum()))
+        self.tw1.topLevelItem(0).child(0).child(0).setText(2, pre_check(current_p['2H180']))
+        self.tw1.topLevelItem(0).child(0).child(1).setText(2, pre_check(current_p['2H280']))
+        self.tw1.topLevelItem(0).child(0).child(2).setText(2, pre_check(current_p['1H350']))
+        self.tw1.topLevelItem(0).child(1).setText(2, pre_check(current_p['4KA19']))
+        self.tw1.topLevelItem(0).child(2).setText(2, pre_check(current_p['4KB19':'4KB29'].sum()))
+        self.tw1.topLevelItem(0).child(2).child(0).setText(2, pre_check(current_p['4KB19']))
+        self.tw1.topLevelItem(0).child(2).child(1).setText(2, pre_check(current_p['4KB29']))
+        self.tw1.topLevelItem(0).child(3).setText(1, pre_check(current_p['2KA41':'2KB41'].sum()))
+        self.tw1.topLevelItem(0).child(3).child(0).setText(2, pre_check(current_p['2KA41']))
+        self.tw1.topLevelItem(0).child(3).child(1).setText(2, pre_check(current_p['2KB41']))
+        self.tw1.topLevelItem(0).child(4).setText(2, pre_check(current_p['W2']))
+
+        w3_total = current_p['AJ320':'5KB28'].sum() + current_p['W3']
+        self.tw1.topLevelItem(1).setText(2, pre_check(w3_total))
+        self.tw1.topLevelItem(1).child(0).setText(2, pre_check(current_p['AJ320']))
+        self.tw1.topLevelItem(1).child(1).setText(2, pre_check(current_p['5KA18':'5KB28'].sum()))
+        self.tw1.topLevelItem(1).child(1).child(0).setText(2, pre_check(current_p['5KA18']))
+        self.tw1.topLevelItem(1).child(1).child(1).setText(2, pre_check(current_p['5KA28']))
+        self.tw1.topLevelItem(1).child(1).child(2).setText(2, pre_check(current_p['5KB18']))
+        self.tw1.topLevelItem(1).child(1).child(3).setText(2, pre_check(current_p['5KB28']))
+        self.tw1.topLevelItem(1).child(2).setText(2, pre_check(current_p['W3']))
+
+        w42 = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
+        w4_total = current_p['AJ130':'AJ320'].sum() + w42
+
+        self.tw1.topLevelItem(2).setText(2, pre_check(w4_total))
+        self.tw1.topLevelItem(2).child(0).setText(2, pre_check(current_p['AJ130':'AJ320'].sum()))
+        self.tw1.topLevelItem(2).child(1).setText(2, pre_check(w42))
+
+        w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
+        self.tw1.topLevelItem(3).setText(2,pre_check(w5_total))
+        self.tw1.topLevelItem(3).child(0).setText(2, pre_check(current_p['3KA14':'3KA15'].sum()))
+        self.tw1.topLevelItem(3).child(0).child(0).setText(2, pre_check(current_p['3KA14']))
+        self.tw1.topLevelItem(3).child(0).child(1).setText(2, pre_check(current_p['3KA15']))
+        self.tw1.topLevelItem(3).child(1).setText(2, pre_check(current_p['3KA24':'3KA25'].sum()))
+        self.tw1.topLevelItem(3).child(1).child(0).setText(2, pre_check(current_p['3KA24']))
+        self.tw1.topLevelItem(3).child(1).child(1).setText(2, pre_check(current_p['3KA25']))
+        self.tw1.topLevelItem(3).child(2).setText(2, pre_check(current_p['3KB12':'3KB28'].sum()))
+        self.tw1.topLevelItem(3).child(2).child(0).setText(2, pre_check(current_p['3KB12']))
+        self.tw1.topLevelItem(3).child(2).child(1).setText(2, pre_check(current_p['3KB22']))
+        self.tw1.topLevelItem(3).child(2).child(2).setText(2, pre_check(current_p['3KB28']))
+        self.tw1.topLevelItem(3).child(3).setText(2, pre_check(current_p['3KA16':'3KB27'].sum()))
+        self.tw1.topLevelItem(3).child(3).child(0).setText(2, pre_check(current_p['3KA16']))
+        self.tw1.topLevelItem(3).child(3).child(1).setText(2, pre_check(current_p['3KA26']))
+        self.tw1.topLevelItem(3).child(3).child(2).setText(2, pre_check(current_p['3KA17']))
+        self.tw1.topLevelItem(3).child(3).child(3).setText(2, pre_check(current_p['3KA27']))
+        self.tw1.topLevelItem(3).child(3).child(4).setText(2, pre_check(current_p['3KB16']))
+        self.tw1.topLevelItem(3).child(3).child(5).setText(2, pre_check(current_p['3KB26']))
+        self.tw1.topLevelItem(3).child(3).child(6).setText(2, pre_check(current_p['3KB17']))
+        self.tw1.topLevelItem(3).child(3).child(7).setText(2, pre_check(current_p['3KB27']))
+        self.tw1.topLevelItem(3).child(4).setText(2, pre_check(current_p['2KA19':'2KB29'].sum()))
+        self.tw1.topLevelItem(3).child(4).child(0).setText(2, pre_check(current_p['2KA19']))
+        self.tw1.topLevelItem(3).child(4).child(1).setText(2, pre_check(current_p['2KA29']))
+        self.tw1.topLevelItem(3).child(4).child(2).setText(2, pre_check(current_p['2KB19']))
+        self.tw1.topLevelItem(3).child(4).child(3).setText(2, pre_check(current_p['2KB29']))
+        self.tw1.topLevelItem(3).child(5).setText(2, pre_check(current_p['W5']))
+        self.tw1.topLevelItem(4).setText(2, pre_check(current_p['WA']))
+        #other=w2_total+w3_total+w4_total+w5_total+current_p['WA']
+        #self.label_17.setText(str(other))
+
+        self.tw2.topLevelItem(0).setText(2, pre_check(current_p['9H140':'9KB33'].sum(), 0))
+        self.tw2.topLevelItem(1).setText(2, pre_check(current_p['AH120'], 0))
+        self.tw2.topLevelItem(2).setText(2, pre_check(current_p['AH190'], 0))
+        self.tw2.topLevelItem(3).setText(2, pre_check(current_p['AH130'],0))
+        self.tw2.topLevelItem(4).setText(2, pre_check(current_p['1H360'], 0))
+        self.tw2.topLevelItem(5).setText(2, pre_check(current_p['1H450'], 0))
 
     def check_box_event(self):
         """
         切換負載的顯示方式
         :return:
         """
+        if self.checkBox.isChecked():
+            # tw1
+            self.tw1.setGeometry(QtCore.QRect(9, 10, 284, 191))
+            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
+            self.tw1.setColumnWidth(1, 90)
+            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnHidden(2,True)
+            self.tw2.setGeometry(QtCore.QRect(410, 10, 227, 191))
+            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
+            self.tw2.setColumnWidth(1, 90)
+            self.tw2.setColumnWidth(2, 100)
+            self.tw2.setColumnHidden(2,True)
+        else:
+            self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))     #scroller width 18
+            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
+            self.tw1.setColumnWidth(1, 90)
+            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnHidden(2, False)
+            self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
+            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
+            self.tw2.setColumnWidth(1, 90)
+            self.tw2.setColumnWidth(2, 90)
+            self.tw2.setColumnHidden(2, False)
+
         if self.checkBox.isChecked():
             self.tw1.topLevelItem(0).child(0).child(0).setText(0, '2H180')
             self.tw1.topLevelItem(0).child(0).child(1).setText(0, '2H280')
@@ -423,7 +530,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def tws_init(self):
         """
-        由於treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
+        1. 因為treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
         :return:
         """
         self.tw1.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
@@ -432,16 +539,22 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
         self.tw1.headerItem().setForeground(1, brush)
         self.tw1.headerItem().setForeground(2, brush)
-        self.tw1.setColumnWidth(0, 175)  # 設置某一個column 的寬度
+        self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))     #scroller width 18, frame line width 1
+        self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
+        self.tw1.setColumnWidth(1, 90)
+        self.tw1.setColumnWidth(2, 90)
 
-        #self.tw2.setStyleSheet("QHeaderView::section{background:rgb(190, 90, 90);}")  # 設置表頭的背景顏色
+        #self.tw1.setColumnHidden(2,True)
+
         self.tw2.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
         self.tw2.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
-        self.tw2.headerItem().setForeground(1, brush)  # 設置表頭項目的字體顏色
-        self.tw2.headerItem().setForeground(2, brush)  # 設置表頭項目的字體顏色
-        self.tw2.setColumnWidth(0, 175)
-        self.tw1.hideColumn(2)
-        self.tw2.hideColumn(2)
+        self.tw2.headerItem().setForeground(1, brush)
+        self.tw2.headerItem().setForeground(2, brush)
+        self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
+        self.tw2.setColumnWidth(0, 135)     # 設定各column 的寬度
+        self.tw2.setColumnWidth(1, 90)
+        self.tw2.setColumnWidth(2, 90)
+        #self.tw1.setColumnHidden(2,True)
 
         self.tw3.setStyleSheet("QHeaderView::section{background:rgb(100, 170, 90);}")  # 設置表頭的背景顏色
         brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
@@ -860,7 +973,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     @timeit
     def dashboard_value(self):
         """
-        1. 從 parameter.xlse 讀取出tag name 相關對照表
+        1. 從 parameter.xlse 讀取出tag name 相關對照表, 轉換為list 指定給的 name_list這個變數
         2. tag_name 存成list當作search 的條件，找出符合條件的PIpoint 物件。(結果會存成list)
         3. 把 list 中的所有PIpoint 物件，取出其name、current_value 屬性，轉存在 DataFrame中。
         4. 透過 pd.merge() 的方法，做關聯式合併
@@ -872,17 +985,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         9. 將wx 內容新增到c_values 之後。
         :return:
         """
-        #1 tag_list = pd.read_excel('.\parameter.xlsx', sheet_name=0)  # 1
-        name_list = self.tag_list['tag_name'].values.tolist()
+        name_list = self.tag_list['tag_name'].values.tolist()   # 1
         current = Pi.PIServer().search(name_list)    # 2
         buffer = pd.DataFrame([_.name, _.current_value] for _ in current)   # 3
         buffer.columns=['tag_name','value']
         buffer = pd.merge(self.tag_list, buffer, on='tag_name')      # 4
-        buffer.loc[:,'value'] = pd.to_numeric(buffer.loc[:,'value'], errors='coerce') #6
+        buffer.loc[:,'value'] = pd.to_numeric(buffer.loc[:,'value'], errors='coerce') # 6
 
         c_values = buffer.loc[:,'value']
         c_values.index = buffer.loc[:,'name']     # 5
-        # c_values = pd.to_numeric(c_values, errors='coerce') # 6
 
         wx_grouped = buffer.groupby(['Group1','Group2'])['value'].sum()     # 7
         wx = wx_grouped.loc[(slice('W2','WA')),'B']      # 8
