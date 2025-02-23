@@ -1,3 +1,5 @@
+from cProfile import label
+
 import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
 from UI import Ui_Form
@@ -134,7 +136,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.pushButton_2.clicked.connect(self.add_list_item)
         self.pushButton_3.clicked.connect(self.remove_list_item1)
         self.pushButton_4.clicked.connect(self.query_demand)
-        # self.pushButtcn_5.clicked.connect(lambda:self.query_current_value())
         self.dateEdit.setDate(QtCore.QDate().currentDate())
         self.dateEdit_2.setDate(QtCore.QDate().currentDate())
         self.spinBox.setValue(5)
@@ -152,25 +153,124 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.itemExpanded.connect(lambda item: self.tw3_expanded_event(item))
         self.tw3.itemCollapsed.connect(lambda item: self.tw3_expanded_event(item))
         self.checkBox.stateChanged.connect(self.check_box_event)
+        self.checkBox_2.stateChanged.connect(self.check_box2_event)
         self.query_cbl()      # 查詢特定條件的 基準用電容量(CBL)
         self.query_demand()   # 查詢某一天每一週期的Demand
         self.tws_init()
         self.dashboard_value()
-        self.history_of_groups_demand()
+
         # 使用QThread 的多執行緒，與自動更新選項動作綁定，執行自動更新current value
         self.thread_to_update = QtCore.QThread()
         self.thread_to_update.run = self.update_current_value
-        # self.checkBox.clicked.connect(self.thread_to_update.start)
         self.thread_to_update.start()
 
-    def history_of_groups_demand(self):
+        # -------關於 水平scroller 的初始設定及執行---------
+        # 追蹤是否正在拖動滑塊
+        self.dragging = False
+        # 監聽 horizontalScrollBar 事件
+        self.horizontalScrollBar.sliderPressed.connect(self.start_dragging)   # 按下滑塊開始拖動
+        self.horizontalScrollBar.sliderMoved.connect(self.preview_value)      # 滑鼠拖動時只更新暫存數值
+        self.horizontalScrollBar.sliderReleased.connect(self.confirm_value)   # 滑鼠放開時才更新正式數值
+        self.horizontalScrollBar.actionTriggered.connect(self.handle_action)  # 點擊箭頭或空白區時，允許即時更新
+        self.dateEdit_3.userDateChanged.connect(self.confirm_value)
+        self.checkBox_2.setChecked(False)
+
+    def start_dragging(self):
+        """當使用者按住滑塊時，標記為拖動狀態"""
+        self.dragging = True
+
+    def preview_value(self, value):
+        """當滑鼠拖動時，只更新暫存數值，不更新正式數值"""
+        et = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * value
+        st = et - pd.offsets.Minute(15)
+        self.label_16.setText(st.strftime('%H:%M'))
+        self.label_17.setText(et.strftime('%H:%M'))
+
+    def handle_action(self, action):
+        """當數值變更時，根據是否正在拖動來決定是否更新正式數值"""
+        if not self.dragging:  # 如果不是拖動狀態，則允許正式數值更新
+             self.confirm_value()
+
+    def confirm_value(self):
+        """當滑鼠放開或點擊滾動條結束後，才正式更新數值"""
+        self.label_22.setText('')
+        self.dragging = False   # 解除拖動狀態
+        et = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
+        if et > pd.Timestamp.now():     # 欲查詢的時間段，屬於未來時間時
+            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值
+            et = pd.Timestamp.now().floor('15T')
+            self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T'))
+            self.label_22.setText('只能比對歷史紀錄！')
+        st = et - pd.offsets.Minute(15)
+
+        self.label_16.setText(st.strftime('%H:%M'))
+        self.label_17.setText(et.strftime('%H:%M'))
+        # 防止scroller 的值在最高時，日期值會更新到隔天，而引發不可預知的錯誤
+        if self.horizontalScrollBar.value() < 96:
+            self.dateEdit_3.setDate(QtCore.QDate(et.year,et.month,et.day))
+        else:
+            self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+        self.history_of_groups_demand(st=st, et=et)
+
+    def check_box2_event(self):
+        if self.checkBox_2.isChecked():
+            et = pd.Timestamp.now().floor('15T')
+            st = et - pd.offsets.Minute(15)
+            self.label_16.setText(st.strftime('%H:%M'))
+            self.label_17.setText(et.strftime('%H:%M'))
+            # 防止scroller 的值在最高時，日期值會更新到隔天，而引發不可預知的錯誤
+            if self.horizontalScrollBar.value() < 96:
+                self.dateEdit_3.setDate(QtCore.QDate(et.year, et.month, et.day))
+            else:
+                self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+            self.history_of_groups_demand(st=st, et=et)
+            #------function visible_____
+            self.dateEdit_3.setVisible(True)
+            self.horizontalScrollBar.setVisible(True)
+            self.label_16.setVisible(True)
+            self.label_17.setVisible(True)
+            self.label_19.setVisible(True)
+            self.label_21.setVisible(True)
+            self.label_22.setVisible(True)
+            #----------------------tree widget----------------
+            self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))  # scroller width 18
+            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
+            self.tw1.setColumnWidth(1, 90)
+            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnHidden(2, False)
+            self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
+            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
+            self.tw2.setColumnWidth(1, 90)
+            self.tw2.setColumnWidth(2, 90)
+            self.tw2.setColumnHidden(2, False)
+        else:
+            # ------function visible_____
+            self.dateEdit_3.setVisible(False)
+            self.horizontalScrollBar.setVisible(False)
+            self.label_16.setVisible(False)
+            self.label_17.setVisible(False)
+            self.label_19.setVisible(False)
+            self.label_21.setVisible(False)
+            self.label_22.setVisible(False)
+            # ----------------------tree widget----------------
+            self.tw1.setGeometry(QtCore.QRect(9, 10, 284, 191))
+            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
+            self.tw1.setColumnWidth(1, 90)
+            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnHidden(2, True)
+            self.tw2.setGeometry(QtCore.QRect(410, 10, 227, 191))
+            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
+            self.tw2.setColumnWidth(1, 90)
+            self.tw2.setColumnWidth(2, 100)
+            self.tw2.setColumnHidden(2, True)
+
+    # @timeit
+    def history_of_groups_demand(self, st, et):
         """
             查詢特定週期，各設備群組(分類)的平均值
 
         :return:
         """
-        st = pd.Timestamp('09:30:00')
-        et = st + pd.offsets.Minute(15)
         mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
         groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
         groups_demand.index = self.tag_list.loc[mask,'name']
@@ -179,18 +279,20 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         groups_demand.loc[:, 'demand'] = query_result.T.values  # 把結果轉置後，複制並新增到到groups_demand 的最後一個column
         groups_demand.loc[:, 'demand'] = pd.to_numeric(groups_demand.loc[:, 'demand'], errors='coerce')  # 轉換資料型態 object->float，若遇文字型態，則用Nan 取代。
-        groups_demand.loc[:, 'demand'] = groups_demand.loc[:, 'demand'] * 4     # kwh -> MW/15 min
-
-        wx_grouped = groups_demand.groupby(['Group1','Group2'])['demand'].sum()     # 7
+        groups_demand.loc[:, 'demand'] = groups_demand.loc[:, 'demand'] * 4         # kwh -> MW/15 min
+        wx_grouped = groups_demand.groupby(['Group1','Group2'])['demand'].sum()     # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
         wx = pd.DataFrame(wx_grouped.loc['W2':'WA', 'B'])
-        # wx = pd.DataFrame(wx_grouped.loc[(slice('W2','WA')),'B'])
-        wx.index = wx.index.get_level_values(0)     # 重新將index 設置為原multiIndex 的第一層index 內容
-        groups_demand = pd.concat([groups_demand, wx],axis=0)  # 9
+        wx.index = wx.index.get_level_values(0)             # 重新將index 設置為原multiIndex 的第一層index 內容
+        groups_demand = pd.concat([groups_demand, wx],axis=0) # 將wx 內容新增到group_demand 之後。
 
         self.update_history_to_tws(groups_demand['demand'])
-        # self.label_16.setText(str(st))
 
     def update_history_to_tws(self, current_p):
+        """
+        暫時用來將各群組的歷史平均量顯顯示在 各tree widget 的3rd column
+        :param current_p:
+        :return:
+        """
         w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
         self.tw1.topLevelItem(0).setText(2, pre_check(w2_total))
         self.tw1.topLevelItem(0).child(0).setText(2, pre_check(current_p['2H180':'1H350'].sum()))
@@ -266,30 +368,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         切換負載的顯示方式
         :return:
         """
-        if self.checkBox.isChecked():
-            # tw1
-            self.tw1.setGeometry(QtCore.QRect(9, 10, 284, 191))
-            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
-            self.tw1.setColumnWidth(1, 90)
-            self.tw1.setColumnWidth(2, 90)
-            self.tw1.setColumnHidden(2,True)
-            self.tw2.setGeometry(QtCore.QRect(410, 10, 227, 191))
-            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
-            self.tw2.setColumnWidth(1, 90)
-            self.tw2.setColumnWidth(2, 100)
-            self.tw2.setColumnHidden(2,True)
-        else:
-            self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))     #scroller width 18
-            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
-            self.tw1.setColumnWidth(1, 90)
-            self.tw1.setColumnWidth(2, 90)
-            self.tw1.setColumnHidden(2, False)
-            self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
-            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
-            self.tw2.setColumnWidth(1, 90)
-            self.tw2.setColumnWidth(2, 90)
-            self.tw2.setColumnHidden(2, False)
-
         if self.checkBox.isChecked():
             self.tw1.topLevelItem(0).child(0).child(0).setText(0, '2H180')
             self.tw1.topLevelItem(0).child(0).child(1).setText(0, '2H280')
@@ -970,7 +1048,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.dashboard_value()
             time.sleep(11)
 
-    @timeit
     def dashboard_value(self):
         """
         1. 從 parameter.xlse 讀取出tag name 相關對照表, 轉換為list 指定給的 name_list這個變數
@@ -1003,11 +1080,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         schedule = scrapy_schedule()
         if len(schedule) == 0:
-            self.label_17.setStyleSheet("color:black")
-            self.label_17.setText('目前無排程')
+            self.label_18.setStyleSheet("color:black")
+            self.label_18.setText('目前無排程')
         else:
-            self.label_17.setStyleSheet("color:red")
-            self.label_17.setText('下一爐時間： ' + str(schedule[0][0].time()))
+            self.label_18.setStyleSheet("color:red")
+            self.label_18.setText('下一爐時間： ' + str(schedule[0][0].time()))
 
     def handle_selection_changed(self):
         """
