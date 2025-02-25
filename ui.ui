@@ -990,7 +990,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
      </column>
      <column>
       <property name="text">
-       <string>歷史平均電量</string>
+       <string>平均值</string>
       </property>
       <property name="font">
        <font>
@@ -1982,7 +1982,7 @@ Runner</string>
      </column>
      <column>
       <property name="text">
-       <string>歷史平均電量</string>
+       <string>平均值</string>
       </property>
       <property name="font">
        <font>
@@ -2166,8 +2166,8 @@ Runner</string>
     <widget class="QTreeWidget" name="tw3">
      <property name="geometry">
       <rect>
-       <x>310</x>
-       <y>250</y>
+       <x>350</x>
+       <y>460</y>
        <width>441</width>
        <height>141</height>
       </rect>
@@ -2199,6 +2199,21 @@ Runner</string>
      <column>
       <property name="text">
        <string>即時量</string>
+      </property>
+      <property name="font">
+       <font>
+        <family>微軟正黑體</family>
+        <pointsize>12</pointsize>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>平均值</string>
       </property>
       <property name="font">
        <font>
@@ -2261,6 +2276,12 @@ Runner</string>
       <property name="text">
        <string/>
       </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
       <item>
        <property name="text">
         <string>TG1</string>
@@ -2284,6 +2305,12 @@ Runner</string>
        </property>
        <property name="textAlignment">
         <set>AlignTrailing|AlignVCenter</set>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <property name="text">
         <string/>
@@ -2316,6 +2343,12 @@ Runner</string>
        <property name="text">
         <string/>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
       </item>
       <item>
        <property name="text">
@@ -2340,6 +2373,12 @@ Runner</string>
        </property>
        <property name="textAlignment">
         <set>AlignTrailing|AlignVCenter</set>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <property name="text">
         <string/>
@@ -2369,6 +2408,12 @@ Runner</string>
        <property name="text">
         <string/>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
       </item>
      </item>
      <item>
@@ -2388,6 +2433,12 @@ Runner</string>
        <font>
         <pointsize>12</pointsize>
        </font>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="text">
+       <string/>
       </property>
       <property name="text">
        <string/>
@@ -2413,6 +2464,12 @@ Runner</string>
        <property name="text">
         <string/>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
       </item>
       <item>
        <property name="text">
@@ -2431,6 +2488,12 @@ Runner</string>
         <font>
          <pointsize>12</pointsize>
         </font>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <property name="text">
         <string/>
@@ -2458,6 +2521,12 @@ Runner</string>
       <property name="text">
        <string/>
       </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
       <item>
        <property name="text">
         <string>CDQ#1</string>
@@ -2475,6 +2544,12 @@ Runner</string>
         <font>
          <pointsize>12</pointsize>
         </font>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
        </property>
        <property name="text">
         <string/>
@@ -2501,14 +2576,20 @@ Runner</string>
        <property name="text">
         <string/>
        </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
       </item>
      </item>
     </widget>
     <widget class="QTreeWidget" name="tw4">
      <property name="geometry">
       <rect>
-       <x>440</x>
-       <y>240</y>
+       <x>420</x>
+       <y>460</y>
        <width>241</width>
        <height>141</height>
       </rect>
@@ -2705,7 +2786,7 @@ Runner</string>
       <rect>
        <x>10</x>
        <y>250</y>
-       <width>221</width>
+       <width>311</width>
        <height>151</height>
       </rect>
      </property>
@@ -2767,6 +2848,11 @@ Runner</string>
      <column>
       <property name="text">
        <string>即時量</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>平均值</string>
       </property>
      </column>
      <item row="0" column="0">
@@ -3119,8 +3205,8 @@ Runner</string>
     <widget class="QLabel" name="label_18">
      <property name="geometry">
       <rect>
-       <x>310</x>
-       <y>420</y>
+       <x>440</x>
+       <y>230</y>
        <width>161</width>
        <height>16</height>
       </rect>

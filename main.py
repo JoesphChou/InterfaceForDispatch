@@ -1,5 +1,3 @@
-from cProfile import label
-
 import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
 from UI import Ui_Form
@@ -60,7 +58,7 @@ def query_pi(st, et, tags, extract_type, time_offset = 0):
 
 def pre_check(pending_data, b=1, c='power'):
     """
-    此函式用來判顯示在tW1 的即時用電資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
+    此函式用來判顯示在tree,table widget  的即時資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
     :param pending_data:要判斷的數值。
     :param b:若數值接近 0，預設回傳'停機'的述述。
     :return: 回傳值為文字型態。
@@ -72,8 +70,24 @@ def pre_check(pending_data, b=1, c='power'):
         if c == 'gas':
             return str(format(round(pending_data, 1),'.1f'))
             # return str(format(round(pending_data, 1), '.1f')) + ' Nm3/hr'
+        elif c == 'h':
+            return str(format(round(pending_data, 2), '.2f'))
         else:
             return str(format(round(pending_data, 2),'.2f')) + ' MW'
+    else:
+        return describe[b]
+
+def pre_check2(pending_data, b=1):
+    """
+    此函式用來判顯示在tree,table widget  的 "歷史" 資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
+    :param pending_data:
+    :return:
+    """
+    describe = ['未生產', '停機', '資料異常', '未使用', '0 MW', '未發電']
+    if pd.isnull(pending_data):
+        return describe[2]
+    if pending_data > 0.1:
+        return str(format(round(pending_data, 2), '.2f'))
     else:
         return describe[b]
 
@@ -213,16 +227,21 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.history_of_groups_demand(st=st, et=et)
 
     def check_box2_event(self):
-        if self.checkBox_2.isChecked():
-            et = pd.Timestamp.now().floor('15T')
-            st = et - pd.offsets.Minute(15)
-            self.label_16.setText(st.strftime('%H:%M'))
-            self.label_17.setText(et.strftime('%H:%M'))
-            # 防止scroller 的值在最高時，日期值會更新到隔天，而引發不可預知的錯誤
-            if self.horizontalScrollBar.value() < 96:
-                self.dateEdit_3.setDate(QtCore.QDate(et.year, et.month, et.day))
-            else:
+        et = pd.Timestamp.now().floor('15T')
+        st = et - pd.offsets.Minute(15)
+        self.label_16.setText(st.strftime('%H:%M'))
+        self.label_17.setText(et.strftime('%H:%M'))
+
+        # 防止scroller 的值在最高時，日期值會更新到隔天，而引發不可預知的錯誤
+        if self.horizontalScrollBar.value() < 96:
+            self.dateEdit_3.setDate(QtCore.QDate(et.year, et.month, et.day))
+            if st.date() < et.date():       # 當天第一個週期時，dateEdit 會預設在昨日
                 self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+        else:
+            self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+
+
+        if self.checkBox_2.isChecked():
             self.history_of_groups_demand(st=st, et=et)
             #------function visible_____
             self.dateEdit_3.setVisible(True)
@@ -243,6 +262,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw2.setColumnWidth(1, 90)
             self.tw2.setColumnWidth(2, 90)
             self.tw2.setColumnHidden(2, False)
+            self.tw3.setGeometry(QtCore.QRect(300, 460, 530, 141))
+            self.tw3.setColumnHidden(2, False)
+            self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 301, 151))
+            self.tableWidget_3.setColumnHidden(2, False)
         else:
             # ------function visible_____
             self.dateEdit_3.setVisible(False)
@@ -263,7 +286,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw2.setColumnWidth(1, 90)
             self.tw2.setColumnWidth(2, 100)
             self.tw2.setColumnHidden(2, True)
-
+            self.tw3.setGeometry(QtCore.QRect(300, 460, 430, 141))
+            self.tw3.setColumnHidden(2, True)
+            self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 201, 151))
+            self.tableWidget_3.setColumnHidden(2, True)
     # @timeit
     def history_of_groups_demand(self, st, et):
         """
@@ -294,75 +320,137 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         :return:
         """
         w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
-        self.tw1.topLevelItem(0).setText(2, pre_check(w2_total))
-        self.tw1.topLevelItem(0).child(0).setText(2, pre_check(current_p['2H180':'1H350'].sum()))
-        self.tw1.topLevelItem(0).child(0).child(0).setText(2, pre_check(current_p['2H180']))
-        self.tw1.topLevelItem(0).child(0).child(1).setText(2, pre_check(current_p['2H280']))
-        self.tw1.topLevelItem(0).child(0).child(2).setText(2, pre_check(current_p['1H350']))
-        self.tw1.topLevelItem(0).child(1).setText(2, pre_check(current_p['4KA19']))
-        self.tw1.topLevelItem(0).child(2).setText(2, pre_check(current_p['4KB19':'4KB29'].sum()))
-        self.tw1.topLevelItem(0).child(2).child(0).setText(2, pre_check(current_p['4KB19']))
-        self.tw1.topLevelItem(0).child(2).child(1).setText(2, pre_check(current_p['4KB29']))
-        self.tw1.topLevelItem(0).child(3).setText(1, pre_check(current_p['2KA41':'2KB41'].sum()))
-        self.tw1.topLevelItem(0).child(3).child(0).setText(2, pre_check(current_p['2KA41']))
-        self.tw1.topLevelItem(0).child(3).child(1).setText(2, pre_check(current_p['2KB41']))
-        self.tw1.topLevelItem(0).child(4).setText(2, pre_check(current_p['W2']))
+        self.tw1.topLevelItem(0).setText(2, pre_check2(w2_total))
+        self.tw1.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H180':'1H350'].sum()))
+        self.tw1.topLevelItem(0).child(0).child(0).setText(2, pre_check2(current_p['2H180']))
+        self.tw1.topLevelItem(0).child(0).child(1).setText(2, pre_check2(current_p['2H280']))
+        self.tw1.topLevelItem(0).child(0).child(2).setText(2, pre_check2(current_p['1H350']))
+        self.tw1.topLevelItem(0).child(1).setText(2, pre_check2(current_p['4KA19']))
+        self.tw1.topLevelItem(0).child(2).setText(2, pre_check2(current_p['4KB19':'4KB29'].sum()))
+        self.tw1.topLevelItem(0).child(2).child(0).setText(2, pre_check2(current_p['4KB19']))
+        self.tw1.topLevelItem(0).child(2).child(1).setText(2, pre_check2(current_p['4KB29']))
+        self.tw1.topLevelItem(0).child(3).setText(1, pre_check2(current_p['2KA41':'2KB41'].sum()))
+        self.tw1.topLevelItem(0).child(3).child(0).setText(2, pre_check2(current_p['2KA41']))
+        self.tw1.topLevelItem(0).child(3).child(1).setText(2, pre_check2(current_p['2KB41']))
+        self.tw1.topLevelItem(0).child(4).setText(2, pre_check2(current_p['W2']))
 
         w3_total = current_p['AJ320':'5KB28'].sum() + current_p['W3']
-        self.tw1.topLevelItem(1).setText(2, pre_check(w3_total))
-        self.tw1.topLevelItem(1).child(0).setText(2, pre_check(current_p['AJ320']))
-        self.tw1.topLevelItem(1).child(1).setText(2, pre_check(current_p['5KA18':'5KB28'].sum()))
-        self.tw1.topLevelItem(1).child(1).child(0).setText(2, pre_check(current_p['5KA18']))
-        self.tw1.topLevelItem(1).child(1).child(1).setText(2, pre_check(current_p['5KA28']))
-        self.tw1.topLevelItem(1).child(1).child(2).setText(2, pre_check(current_p['5KB18']))
-        self.tw1.topLevelItem(1).child(1).child(3).setText(2, pre_check(current_p['5KB28']))
-        self.tw1.topLevelItem(1).child(2).setText(2, pre_check(current_p['W3']))
+        self.tw1.topLevelItem(1).setText(2, pre_check2(w3_total))
+        self.tw1.topLevelItem(1).child(0).setText(2, pre_check2(current_p['AJ320']))
+        self.tw1.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KA18':'5KB28'].sum()))
+        self.tw1.topLevelItem(1).child(1).child(0).setText(2, pre_check2(current_p['5KA18']))
+        self.tw1.topLevelItem(1).child(1).child(1).setText(2, pre_check2(current_p['5KA28']))
+        self.tw1.topLevelItem(1).child(1).child(2).setText(2, pre_check2(current_p['5KB18']))
+        self.tw1.topLevelItem(1).child(1).child(3).setText(2, pre_check2(current_p['5KB28']))
+        self.tw1.topLevelItem(1).child(2).setText(2, pre_check2(current_p['W3']))
 
         w42 = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
         w4_total = current_p['AJ130':'AJ320'].sum() + w42
 
-        self.tw1.topLevelItem(2).setText(2, pre_check(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(2, pre_check(current_p['AJ130':'AJ320'].sum()))
-        self.tw1.topLevelItem(2).child(1).setText(2, pre_check(w42))
+        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total))
+        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(current_p['AJ130':'AJ320'].sum()))
+        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w42))
 
         w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
-        self.tw1.topLevelItem(3).setText(2,pre_check(w5_total))
-        self.tw1.topLevelItem(3).child(0).setText(2, pre_check(current_p['3KA14':'3KA15'].sum()))
-        self.tw1.topLevelItem(3).child(0).child(0).setText(2, pre_check(current_p['3KA14']))
-        self.tw1.topLevelItem(3).child(0).child(1).setText(2, pre_check(current_p['3KA15']))
-        self.tw1.topLevelItem(3).child(1).setText(2, pre_check(current_p['3KA24':'3KA25'].sum()))
-        self.tw1.topLevelItem(3).child(1).child(0).setText(2, pre_check(current_p['3KA24']))
-        self.tw1.topLevelItem(3).child(1).child(1).setText(2, pre_check(current_p['3KA25']))
-        self.tw1.topLevelItem(3).child(2).setText(2, pre_check(current_p['3KB12':'3KB28'].sum()))
-        self.tw1.topLevelItem(3).child(2).child(0).setText(2, pre_check(current_p['3KB12']))
-        self.tw1.topLevelItem(3).child(2).child(1).setText(2, pre_check(current_p['3KB22']))
-        self.tw1.topLevelItem(3).child(2).child(2).setText(2, pre_check(current_p['3KB28']))
-        self.tw1.topLevelItem(3).child(3).setText(2, pre_check(current_p['3KA16':'3KB27'].sum()))
-        self.tw1.topLevelItem(3).child(3).child(0).setText(2, pre_check(current_p['3KA16']))
-        self.tw1.topLevelItem(3).child(3).child(1).setText(2, pre_check(current_p['3KA26']))
-        self.tw1.topLevelItem(3).child(3).child(2).setText(2, pre_check(current_p['3KA17']))
-        self.tw1.topLevelItem(3).child(3).child(3).setText(2, pre_check(current_p['3KA27']))
-        self.tw1.topLevelItem(3).child(3).child(4).setText(2, pre_check(current_p['3KB16']))
-        self.tw1.topLevelItem(3).child(3).child(5).setText(2, pre_check(current_p['3KB26']))
-        self.tw1.topLevelItem(3).child(3).child(6).setText(2, pre_check(current_p['3KB17']))
-        self.tw1.topLevelItem(3).child(3).child(7).setText(2, pre_check(current_p['3KB27']))
-        self.tw1.topLevelItem(3).child(4).setText(2, pre_check(current_p['2KA19':'2KB29'].sum()))
-        self.tw1.topLevelItem(3).child(4).child(0).setText(2, pre_check(current_p['2KA19']))
-        self.tw1.topLevelItem(3).child(4).child(1).setText(2, pre_check(current_p['2KA29']))
-        self.tw1.topLevelItem(3).child(4).child(2).setText(2, pre_check(current_p['2KB19']))
-        self.tw1.topLevelItem(3).child(4).child(3).setText(2, pre_check(current_p['2KB29']))
-        self.tw1.topLevelItem(3).child(5).setText(2, pre_check(current_p['W5']))
-        self.tw1.topLevelItem(4).setText(2, pre_check(current_p['WA']))
+        self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
+        self.tw1.topLevelItem(3).child(0).setText(2, pre_check2(current_p['3KA14':'3KA15'].sum()))
+        self.tw1.topLevelItem(3).child(0).child(0).setText(2, pre_check2(current_p['3KA14']))
+        self.tw1.topLevelItem(3).child(0).child(1).setText(2, pre_check2(current_p['3KA15']))
+        self.tw1.topLevelItem(3).child(1).setText(2, pre_check2(current_p['3KA24':'3KA25'].sum()))
+        self.tw1.topLevelItem(3).child(1).child(0).setText(2, pre_check2(current_p['3KA24']))
+        self.tw1.topLevelItem(3).child(1).child(1).setText(2, pre_check2(current_p['3KA25']))
+        self.tw1.topLevelItem(3).child(2).setText(2, pre_check2(current_p['3KB12':'3KB28'].sum()))
+        self.tw1.topLevelItem(3).child(2).child(0).setText(2, pre_check2(current_p['3KB12']))
+        self.tw1.topLevelItem(3).child(2).child(1).setText(2, pre_check2(current_p['3KB22']))
+        self.tw1.topLevelItem(3).child(2).child(2).setText(2, pre_check2(current_p['3KB28']))
+        self.tw1.topLevelItem(3).child(3).setText(2, pre_check2(current_p['3KA16':'3KB27'].sum()))
+        self.tw1.topLevelItem(3).child(3).child(0).setText(2, pre_check2(current_p['3KA16']))
+        self.tw1.topLevelItem(3).child(3).child(1).setText(2, pre_check2(current_p['3KA26']))
+        self.tw1.topLevelItem(3).child(3).child(2).setText(2, pre_check2(current_p['3KA17']))
+        self.tw1.topLevelItem(3).child(3).child(3).setText(2, pre_check2(current_p['3KA27']))
+        self.tw1.topLevelItem(3).child(3).child(4).setText(2, pre_check2(current_p['3KB16']))
+        self.tw1.topLevelItem(3).child(3).child(5).setText(2, pre_check2(current_p['3KB26']))
+        self.tw1.topLevelItem(3).child(3).child(6).setText(2, pre_check2(current_p['3KB17']))
+        self.tw1.topLevelItem(3).child(3).child(7).setText(2, pre_check2(current_p['3KB27']))
+        self.tw1.topLevelItem(3).child(4).setText(2, pre_check2(current_p['2KA19':'2KB29'].sum()))
+        self.tw1.topLevelItem(3).child(4).child(0).setText(2, pre_check2(current_p['2KA19']))
+        self.tw1.topLevelItem(3).child(4).child(1).setText(2, pre_check2(current_p['2KA29']))
+        self.tw1.topLevelItem(3).child(4).child(2).setText(2, pre_check2(current_p['2KB19']))
+        self.tw1.topLevelItem(3).child(4).child(3).setText(2, pre_check2(current_p['2KB29']))
+        self.tw1.topLevelItem(3).child(5).setText(2, pre_check2(current_p['W5']))
+        self.tw1.topLevelItem(4).setText(2, pre_check2(current_p['WA']))
         #other=w2_total+w3_total+w4_total+w5_total+current_p['WA']
         #self.label_17.setText(str(other))
 
-        self.tw2.topLevelItem(0).setText(2, pre_check(current_p['9H140':'9KB33'].sum(), 0))
-        self.tw2.topLevelItem(1).setText(2, pre_check(current_p['AH120'], 0))
-        self.tw2.topLevelItem(2).setText(2, pre_check(current_p['AH190'], 0))
-        self.tw2.topLevelItem(3).setText(2, pre_check(current_p['AH130'],0))
-        self.tw2.topLevelItem(4).setText(2, pre_check(current_p['1H360'], 0))
-        self.tw2.topLevelItem(5).setText(2, pre_check(current_p['1H450'], 0))
+        self.tw2.topLevelItem(0).setText(2, pre_check2(current_p['9H140':'9KB33'].sum(),b=0))
+        self.tw2.topLevelItem(1).setText(2, pre_check2(current_p['AH120'],b=0))
+        self.tw2.topLevelItem(2).setText(2, pre_check2(current_p['AH190'],b=0))
+        self.tw2.topLevelItem(3).setText(2, pre_check2(current_p['AH130'],b=0))
+        self.tw2.topLevelItem(4).setText(2, pre_check2(current_p['1H360'],b=0))
+        self.tw2.topLevelItem(5).setText(2, pre_check2(current_p['1H450'],b=0))
 
+        self.tw3.topLevelItem(0).setText(2, pre_check2(current_p['2H120':'1H420'].sum()))
+        self.tw3.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H120':'2H220'].sum()))
+        self.tw3.topLevelItem(0).child(1).setText(2, pre_check2(current_p['5H120':'5H220'].sum()))
+        self.tw3.topLevelItem(0).child(2).setText(2, pre_check2(current_p['1H120':'1H220'].sum()))
+        self.tw3.topLevelItem(0).child(3).setText(2, pre_check2(current_p['1H320':'1H420'].sum()))
+
+        self.tw3.topLevelItem(1).setText(2, pre_check2(current_p['4KA18':'5KB19'].sum()))
+        self.tw3.topLevelItem(1).child(0).setText(2, pre_check2(current_p['4KA18']))
+        self.tw3.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KB19']))
+        self.tw3.topLevelItem(2).setText(2, pre_check2(current_p['4H120':'4H220'].sum()))
+        self.tw3.topLevelItem(2).child(0).setText(2, pre_check2(current_p['4H120']))
+        self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
+
+        brush1 = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # 給白色文字用的設定
+        brush1.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
+        brush2 = QtGui.QBrush(QtGui.QColor(80, 191, 200))  # 全廠用電量的背景色
+        brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
+        brush3 = QtGui.QBrush(QtGui.QColor(100, 170, 90))  # 中龍發電量的背景色
+        brush3.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
+        brush4 = QtGui.QBrush(QtGui.QColor(170, 170, 0))  # 中龍發電量的背景色
+        brush4.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
+        brush5 = QtGui.QBrush(QtGui.QColor(190, 90, 90))  # 中龍發電量的背景色
+        brush5.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
+
+        font = QtGui.QFont()
+        font.setFamily("微軟正黑體")
+        font.setPointSize(12)
+        font.setBold(True)
+
+        #taipower = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
+        #            - current_p['sp_real_time']
+        sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
+        taipower = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
+
+        item01 = QtWidgets.QTableWidgetItem(pre_check2(taipower))
+        item01.setForeground(brush1)
+        item01.setBackground(brush2)
+        item01.setFont(font)
+        item01.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self.tableWidget_3.setItem(0, 2, item01)
+
+        item11 = QtWidgets.QTableWidgetItem(pre_check2(current_p['2H120':'5KB19'].sum()))
+        item11.setForeground(brush1)
+        item11.setBackground(brush3)
+        item11.setFont(font)
+        item11.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self.tableWidget_3.setItem(1, 2, item11)
+
+        item21 = QtWidgets.QTableWidgetItem(pre_check2(sun_power,b=5))
+        item21.setForeground(brush1)
+        item21.setBackground(brush4)
+        item21.setFont(font)
+        item21.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self.tableWidget_3.setItem(2, 2, item21)
+                                           #pre_check(current_p['TG1 NG'], 3, 'gas'))
+        item31 = QtWidgets.QTableWidgetItem(pre_check2(current_p['feeder 1510':'feeder 1520'].sum()))
+        item31.setForeground(brush1)
+        item31.setBackground(brush5)
+        item31.setFont(font)
+        item31.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self.tableWidget_3.setItem(3, 2, item31)
+        
     def check_box_event(self):
         """
         切換負載的顯示方式
@@ -641,7 +729,12 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.headerItem().setForeground(1, brush)
         self.tw3.headerItem().setForeground(2, brush)
         self.tw3.headerItem().setForeground(3, brush)
+        self.tw3.setGeometry(QtCore.QRect(300, 460, 530, 141))
         self.tw3.setColumnWidth(0, 110)  # tw3 total width: 221
+        self.tw3.setColumnWidth(1, 100)
+        self.tw3.setColumnWidth(2, 100)
+        self.tw3.setColumnWidth(3, 100)
+        self.tw3.setColumnWidth(4, 100)
 
         self.tw4.setStyleSheet("QHeaderView::section{background:rgb(100, 170, 90);}")  # 設置表頭的背景顏色
         brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
@@ -649,6 +742,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw4.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
         self.tw4.headerItem().setForeground(1, brush)
         self.tw4.setColumnWidth(0, 125)
+
+        self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 201, 151))
         """
         # self.treeWidget.hideColumn(0) # 用來隱藏指定的column
         # self.treeWidget.clear()       # clean all data
@@ -660,49 +755,64 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # other -> W2
         self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).setForeground(1, brush3)
         # other -> W2 -> 鼓風機
         self.tw1.topLevelItem(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
         self.tw1.topLevelItem(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).child(0).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).child(0).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).child(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(0).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(0).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(0).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(0).child(0).child(1).setForeground(1, brush2)
         self.tw1.topLevelItem(0).child(0).child(2).setForeground(1, brush2)
         # other -> W2 -> #1 燒結風車
         self.tw1.topLevelItem(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         # other -> W2 -> #2 燒結風車
         self.tw1.topLevelItem(0).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
         self.tw1.topLevelItem(0).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(2).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).child(2).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).child(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(2).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(0).child(2).child(1).setForeground(1, brush2)
         # other -> W2 -> Roof Fan and runner
         self.tw1.topLevelItem(0).child(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.tw1.topLevelItem(0).child(3).setTextAlignment(1,
-                                                           QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self.tw1.topLevelItem(0).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(3).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).child(3).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(0).child(3).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(3).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(3).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(3).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(0).child(3).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(0).child(3).child(1).setForeground(1, brush2)
+
         # other -> W2 -> 其它
         self.tw1.topLevelItem(0).child(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(0).child(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
 
         # other -> W3
         self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(1).setForeground(1, brush3)
         # other -> W3 -> EAF 集塵
         self.tw1.topLevelItem(1).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         # other -> W3 -> 轉爐除塵
         self.tw1.topLevelItem(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(1).child(1).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
@@ -713,53 +823,73 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(1).child(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(1).child(1).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(1).child(1).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(1).child(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(1).child(1).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(1).child(1).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(1).child(1).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(1).child(1).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(1).child(1).child(1).setForeground(1, brush2)
         self.tw1.topLevelItem(1).child(1).child(2).setForeground(1, brush2)
         self.tw1.topLevelItem(1).child(1).child(3).setForeground(1, brush2)
         self.tw1.topLevelItem(1).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(1).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         # other -> W4
         self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(2).setForeground(1, brush3)
-        # other -> W4
+        # other -> W4 -> 型鋼,廠區
         self.tw1.topLevelItem(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
 
         # other -> W5
         self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).setForeground(1, brush3)
         # other -> W5 -> o2 #1
         self.tw1.topLevelItem(3).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(0).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(0).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(0).child(1).setForeground(1, brush2)
 
         # other -> W5 -> o2 #2
         self.tw1.topLevelItem(3).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(1).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(1).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(1).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(1).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(1).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(1).child(1).setForeground(1, brush2)
         # other -> W5 -> o2 #3
         self.tw1.topLevelItem(3).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(2).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(2).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(2).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(2).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(2).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(2).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(2).child(1).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(2).child(2).setForeground(1, brush2)
         # other -> W5 -> 空壓機群
         self.tw1.topLevelItem(3).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(3).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(3).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(3).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
@@ -776,6 +906,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(3).child(3).child(5).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(3).child(6).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(3).child(7).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(5).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(6).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(3).child(7).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(3).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(3).child(1).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(3).child(2).setForeground(1, brush2)
@@ -786,6 +924,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(3).child(3).child(7).setForeground(1, brush2)
         # other -> W5 -> IDF
         self.tw1.topLevelItem(3).child(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(4).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(4).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(4).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
@@ -794,17 +933,23 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(3).child(4).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(4).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(4).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(4).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(4).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(4).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(3).child(4).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(3).child(4).child(0).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(4).child(1).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(4).child(2).setForeground(1, brush2)
         self.tw1.topLevelItem(3).child(4).child(3).setForeground(1, brush2)
         # other -> W5 -> 廠區用電
         self.tw1.topLevelItem(3).child(5).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-
+        self.tw1.topLevelItem(3).child(5).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         # other
         self.tw1.topLevelItem(4).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw1.topLevelItem(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw1.topLevelItem(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw1.topLevelItem(4).setForeground(1, brush3)
+
         # 常調度負載
         self.tw2.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw2.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -818,6 +963,12 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw2.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw2.topLevelItem(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw2.topLevelItem(5).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw2.topLevelItem(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw2.topLevelItem(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw2.topLevelItem(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw2.topLevelItem(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw2.topLevelItem(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw2.topLevelItem(5).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
 
         # 發電 #1
         self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -830,9 +981,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # tw3 擴增、tw4刪除
+
+        # TGs,tg1~4 的第3~5 column
         self.tw3.topLevelItem(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).setTextAlignment(3, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(0).setTextAlignment(4, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
@@ -841,19 +994,30 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(0).child(1).setTextAlignment(3, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).child(2).setTextAlignment(3, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(0).child(3).setTextAlignment(3, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(0).child(0).setTextAlignment(4, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(0).child(1).setTextAlignment(4, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(0).child(2).setTextAlignment(4, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(0).child(3).setTextAlignment(4, QtCore.Qt.AlignmentFlag.AlignRight)
 
+        # TRTs、CDQs
         self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw3.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(1).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(1).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(1).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(1).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self.tw3.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        self.tw3.topLevelItem(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         """
         tw3 擴增、tw4刪除
         self.tw4.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
@@ -950,23 +1114,22 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         ng_to_power = self.unit_prices.loc['可轉換電力', 'current']
 
         # tw 的總寬度 = columnWidth(0..1..2) lineWidth() frameWidth()
-        # print(aa)
         self.tw3.topLevelItem(0).setText(1, pre_check(current_p['2H120':'1H420'].sum()))
         self.tw3.topLevelItem(0).child(0).setText(1, pre_check(current_p['2H120':'2H220'].sum()))
         self.tw3.topLevelItem(0).child(1).setText(1, pre_check(current_p['5H120':'5H220'].sum()))
         self.tw3.topLevelItem(0).child(2).setText(1, pre_check(current_p['1H120':'1H220'].sum()))
         self.tw3.topLevelItem(0).child(3).setText(1, pre_check(current_p['1H320':'1H420'].sum()))
         # tw3 擴增、tw4刪除
-        self.tw3.topLevelItem(0).setText(2, pre_check(current_p['TG1 NG':'TG4 NG'].sum() * ng_to_power /1000, 4))
-        self.tw3.topLevelItem(0).child(0).setText(2, pre_check(current_p['TG1 NG'] * ng_to_power / 1000, 4))
-        self.tw3.topLevelItem(0).child(1).setText(2, pre_check(current_p['TG2 NG'] * ng_to_power / 1000, 4))
-        self.tw3.topLevelItem(0).child(2).setText(2, pre_check(current_p['TG3 NG'] * ng_to_power / 1000, 4))
-        self.tw3.topLevelItem(0).child(3).setText(2, pre_check(current_p['TG4 NG'] * ng_to_power / 1000, 4))
-        self.tw3.topLevelItem(0).setText(3, pre_check(current_p['TG1 NG':'TG4 NG'].sum(), 3, 'gas'))
-        self.tw3.topLevelItem(0).child(0).setText(3, pre_check(current_p['TG1 NG'], 3, 'gas'))
-        self.tw3.topLevelItem(0).child(1).setText(3, pre_check(current_p['TG2 NG'], 3, 'gas'))
-        self.tw3.topLevelItem(0).child(2).setText(3, pre_check(current_p['TG3 NG'], 3, 'gas'))
-        self.tw3.topLevelItem(0).child(3).setText(3, pre_check(current_p['TG4 NG'], 3, 'gas'))
+        self.tw3.topLevelItem(0).setText(3, pre_check(current_p['TG1 NG':'TG4 NG'].sum() * ng_to_power /1000, 4))
+        self.tw3.topLevelItem(0).child(0).setText(3, pre_check(current_p['TG1 NG'] * ng_to_power / 1000, 4))
+        self.tw3.topLevelItem(0).child(1).setText(3, pre_check(current_p['TG2 NG'] * ng_to_power / 1000, 4))
+        self.tw3.topLevelItem(0).child(2).setText(3, pre_check(current_p['TG3 NG'] * ng_to_power / 1000, 4))
+        self.tw3.topLevelItem(0).child(3).setText(3, pre_check(current_p['TG4 NG'] * ng_to_power / 1000, 4))
+        self.tw3.topLevelItem(0).setText(4, pre_check(current_p['TG1 NG':'TG4 NG'].sum(), 3, 'gas'))
+        self.tw3.topLevelItem(0).child(0).setText(4, pre_check(current_p['TG1 NG'], 3, 'gas'))
+        self.tw3.topLevelItem(0).child(1).setText(4, pre_check(current_p['TG2 NG'], 3, 'gas'))
+        self.tw3.topLevelItem(0).child(2).setText(4, pre_check(current_p['TG3 NG'], 3, 'gas'))
+        self.tw3.topLevelItem(0).child(3).setText(4, pre_check(current_p['TG4 NG'], 3, 'gas'))
 
         self.tw3.topLevelItem(1).setText(1, pre_check(current_p['4KA18':'5KB19'].sum()))
         self.tw3.topLevelItem(1).child(0).setText(1, pre_check(current_p['4KA18']))
