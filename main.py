@@ -224,7 +224,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.dateEdit_3.setDate(QtCore.QDate(et.year,et.month,et.day))
         else:
             self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+        self.horizontalScrollBar.setVisible(False)
         self.history_of_groups_demand(st=st, et=et)
+        self.horizontalScrollBar.setVisible(True)
 
     def check_box2_event(self):
         et = pd.Timestamp.now().floor('15T')
@@ -294,7 +296,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def history_of_groups_demand(self, st, et):
         """
             查詢特定週期，各設備群組(分類)的平均值
-
         :return:
         """
         mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
@@ -444,7 +445,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         item21.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
         self.tableWidget_3.setItem(2, 2, item21)
                                            #pre_check(current_p['TG1 NG'], 3, 'gas'))
-        item31 = QtWidgets.QTableWidgetItem(pre_check2(current_p['feeder 1510':'feeder 1520'].sum()))
+        item31 = QtWidgets.QTableWidgetItem(pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
         item31.setForeground(brush1)
         item31.setBackground(brush5)
         item31.setFont(font)
@@ -1195,7 +1196,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         item21.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
         self.tableWidget_3.setItem(2, 1, item21)
 
-        item31 = QtWidgets.QTableWidgetItem(pre_check(current_p['feeder 1510':'feeder 1520'].sum()))
+        item31= QtWidgets.QTableWidgetItem(str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW')
+        #item31 = QtWidgets.QTableWidgetItem(pre_check(current_p['feeder 1510':'feeder 1520'].sum()))
         item31.setForeground(brush1)
         item31.setBackground(brush5)
         item31.setFont(font)
