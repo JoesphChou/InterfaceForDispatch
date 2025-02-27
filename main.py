@@ -293,7 +293,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 201, 151))
             self.tableWidget_3.setColumnHidden(2, True)
     # @timeit
-    def history_of_groups_demand(self, st, et):
+    def history_demand_of_groups(self, st, et):
         """
             查詢特定週期，各設備群組(分類)的平均值
         :return:
