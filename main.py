@@ -1,3 +1,5 @@
+from calendar import month
+
 import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
 from UI import Ui_Form
@@ -178,57 +180,58 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_to_update.run = self.update_current_value
         self.thread_to_update.start()
 
-        # -------關於 水平scroller 的初始設定及執行---------
-        # 追蹤是否正在拖動滑塊
-        self.dragging = False
-        # 監聽 horizontalScrollBar 事件
-        self.horizontalScrollBar.sliderPressed.connect(self.start_dragging)   # 按下滑塊開始拖動
-        self.horizontalScrollBar.sliderMoved.connect(self.preview_value)      # 滑鼠拖動時只更新暫存數值
-        self.horizontalScrollBar.sliderReleased.connect(self.confirm_value)   # 滑鼠放開時才更新正式數值
-        self.horizontalScrollBar.actionTriggered.connect(self.handle_action)  # 點擊箭頭或空白區時，允許即時更新
-        self.dateEdit_3.userDateChanged.connect(self.confirm_value)
+        self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
+        # ------- 關於比對歷史紀錄相關功能的監聽事件、初始狀況及執行設定等 ---------
+        self.horizontalScrollBar.valueChanged.connect(self.confirm_value)
+        self.dateEdit_3.dateChanged.connect(self.date_edit3_user_change)
         self.checkBox_2.setChecked(False)
 
-    def start_dragging(self):
-        """當使用者按住滑塊時，標記為拖動狀態"""
-        self.dragging = True
+    def date_edit3_user_change(self):
+        self.label_22.setText('')
+        if self.dateEdit_3.date() > pd.Timestamp.today().date():
+            # ----選定到未來日期時，查詢當天的各週期資料，並顯示最後一個結束週期的資料----
+            self.label_22.setText('無法查詢未來的紀錄！')
+            sd = pd.Timestamp(pd.Timestamp.now().date())
+            self.dateEdit_3.blockSignals(True)  # 屏蔽dateEdit 的signal, 避免無限執行
+            self.dateEdit_3.setDate(QtCore.QDate(sd.year, sd.month, sd.day))
+            self.dateEdit_3.blockSignals(False) # 設定完dateEdit 後重新開啟DateEdit 的signal
+            ed = sd + pd.offsets.Day(1)
+            self.history_demand_of_groups(st=sd, et=ed)
 
-    def preview_value(self, value):
-        """當滑鼠拖動時，只更新暫存數值，不更新正式數值"""
-        et = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * value
-        st = et - pd.offsets.Minute(15)
-        self.label_16.setText(st.strftime('%H:%M'))
-        self.label_17.setText(et.strftime('%H:%M'))
+            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值
+            # 並觸發scrollerBar 的valuechanged 事件，執行後續動作。
+            sp = pd.Timestamp.now().floor('15T')
+            self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
 
-    def handle_action(self, action):
-        """當數值變更時，根據是否正在拖動來決定是否更新正式數值"""
-        if not self.dragging:  # 如果不是拖動狀態，則允許正式數值更新
-             self.confirm_value()
+        else:
+            # ------ 初始帶入或選擇非未來日期時，查詢完資料後，顯示第一個週期的資料
+            sd = pd.Timestamp(self.dateEdit_3.date().toString())
+            ed = sd + pd.offsets.Day(1)
+            self.history_demand_of_groups(st=sd, et=ed)
+            self.label_16.setText('00:00')
+            self.label_17.setText('00:15')
+            self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
+            self.horizontalScrollBar.setValue(0)
 
     def confirm_value(self):
-        """當滑鼠放開或點擊滾動條結束後，才正式更新數值"""
-        self.label_22.setText('')
-        self.dragging = False   # 解除拖動狀態
-        et = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
+        """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
+        st = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
+        et = st + pd.offsets.Minute(15)
+
         if et > pd.Timestamp.now():     # 欲查詢的時間段，屬於未來時間時
-            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值
+            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值,
             et = pd.Timestamp.now().floor('15T')
-            self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T'))
-            self.label_22.setText('只能比對歷史紀錄！')
-        st = et - pd.offsets.Minute(15)
+            self.label_22.setText('無法查詢未來的紀錄！')
+            self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
+            print(self.horizontalScrollBar.value())
+            st = et - pd.offsets.Minute(15)
 
         self.label_16.setText(st.strftime('%H:%M'))
         self.label_17.setText(et.strftime('%H:%M'))
-        # 防止scroller 的值在最高時，日期值會更新到隔天，而引發不可預知的錯誤
-        if self.horizontalScrollBar.value() < 96:
-            self.dateEdit_3.setDate(QtCore.QDate(et.year,et.month,et.day))
-        else:
-            self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
-        self.horizontalScrollBar.setVisible(False)
-        self.history_of_groups_demand(st=st, et=et)
-        self.horizontalScrollBar.setVisible(True)
+        self.update_history_to_tws(self.history_datas_of_groups.loc[:,st.strftime('%H:%M')])
 
     def check_box2_event(self):
+        """
         et = pd.Timestamp.now().floor('15T')
         st = et - pd.offsets.Minute(15)
         self.label_16.setText(st.strftime('%H:%M'))
@@ -241,10 +244,16 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
         else:
             self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
-
+        """
+        #-----------調出當天的各週期平均-----------
+        st = pd.Timestamp.today().date()
+        et = st + pd.offsets.Day(1)
+        self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+        # self.history_demand_of_groups(st=st,et=et)
+        # self.confirm_value()
 
         if self.checkBox_2.isChecked():
-            self.history_of_groups_demand(st=st, et=et)
+            self.history_demand_of_groups(st=st, et=et)
             #------function visible_____
             self.dateEdit_3.setVisible(True)
             self.horizontalScrollBar.setVisible(True)
@@ -304,15 +313,25 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         name_list = groups_demand.loc[:,'tag_name2'].values.tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
         query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
 
-        groups_demand.loc[:, 'demand'] = query_result.T.values  # 把結果轉置後，複制並新增到到groups_demand 的最後一個column
-        groups_demand.loc[:, 'demand'] = pd.to_numeric(groups_demand.loc[:, 'demand'], errors='coerce')  # 轉換資料型態 object->float，若遇文字型態，則用Nan 取代。
-        groups_demand.loc[:, 'demand'] = groups_demand.loc[:, 'demand'] * 4         # kwh -> MW/15 min
-        wx_grouped = groups_demand.groupby(['Group1','Group2'])['demand'].sum()     # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
-        wx = pd.DataFrame(wx_grouped.loc['W2':'WA', 'B'])
-        wx.index = wx.index.get_level_values(0)             # 重新將index 設置為原multiIndex 的第一層index 內容
-        groups_demand = pd.concat([groups_demand, wx],axis=0) # 將wx 內容新增到group_demand 之後。
-
-        self.update_history_to_tws(groups_demand['demand'])
+        query_result.columns = groups_demand.index
+        query_result = query_result.T       # 將query_result 轉置 shape:(96,178) -> (178,96)
+        query_result.reset_index(inplace=True, drop=True)  # 重置及捨棄原本的 index
+        query_result.index = groups_demand.index    # 將index 更新為各迴路或gas 的名稱 (套用groups_demands.index 即可)
+        time_list = [t.strftime('%H:%M') for t in  pd.date_range('00:00', '23:45', freq='15min')]
+        query_result.columns = time_list        # 用週期的起始時間，作為各column 的名稱
+        query_result.loc[:,'00:00':'23:45'] = query_result.loc[:,'00:00':'23:45'] * 4 # kwh -> MW/15 min
+        groups_demand = pd.concat([groups_demand, query_result], axis=1, copy=False)
+        wx_list = list()    # 暫存各wx的計算結果用
+        for _ in time_list:
+            # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
+            wx_grouped = groups_demand.groupby(['Group1','Group2'])[_].sum()
+            c = wx_grouped.loc['W2':'WA', 'B']
+            c.name = _
+            c.index = c.index.get_level_values(0)   # 重新將index 設置為原multiIndex 的第一層index 內容
+            wx_list.append(c)
+        wx = pd.DataFrame([wx_list[_] for _ in range(96)])
+        # 將wx 計算結果轉置，並along index 合併於groups_demand 下方, 並將結果存在class 變數中
+        self.history_datas_of_groups = pd.concat([groups_demand, wx.T], axis=0)
 
     def update_history_to_tws(self, current_p):
         """

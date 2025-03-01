@@ -2166,9 +2166,9 @@ Runner</string>
     <widget class="QTreeWidget" name="tw3">
      <property name="geometry">
       <rect>
-       <x>350</x>
+       <x>300</x>
        <y>460</y>
-       <width>441</width>
+       <width>510</width>
        <height>141</height>
       </rect>
      </property>
@@ -2786,7 +2786,7 @@ Runner</string>
       <rect>
        <x>10</x>
        <y>250</y>
-       <width>311</width>
+       <width>201</width>
        <height>151</height>
       </rect>
      </property>
@@ -3162,7 +3162,10 @@ Runner</string>
        </rect>
       </property>
       <property name="maximum">
-       <number>96</number>
+       <number>95</number>
+      </property>
+      <property name="tracking">
+       <bool>false</bool>
       </property>
       <property name="orientation">
        <enum>Qt::Horizontal</enum>
@@ -3221,6 +3224,247 @@ Runner</string>
       <string>預計下一爐時間點：</string>
      </property>
     </widget>
+    <widget class="QTableWidget" name="tableWidget_4">
+     <property name="geometry">
+      <rect>
+       <x>300</x>
+       <y>250</y>
+       <width>201</width>
+       <height>151</height>
+      </rect>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::StyledPanel</enum>
+     </property>
+     <property name="verticalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
+     </property>
+     <property name="horizontalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
+     </property>
+     <property name="autoScroll">
+      <bool>true</bool>
+     </property>
+     <property name="gridStyle">
+      <enum>Qt::SolidLine</enum>
+     </property>
+     <attribute name="horizontalHeaderVisible">
+      <bool>true</bool>
+     </attribute>
+     <attribute name="horizontalHeaderDefaultSectionSize">
+      <number>100</number>
+     </attribute>
+     <attribute name="horizontalHeaderStretchLastSection">
+      <bool>true</bool>
+     </attribute>
+     <attribute name="verticalHeaderVisible">
+      <bool>false</bool>
+     </attribute>
+     <attribute name="verticalHeaderStretchLastSection">
+      <bool>true</bool>
+     </attribute>
+     <row>
+      <property name="text">
+       <string>New Row</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>New Row</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>New Row</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>New Row</string>
+      </property>
+     </row>
+     <column>
+      <property name="text">
+       <string>種類</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>EAF 時間</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>備註</string>
+      </property>
+     </column>
+     <item row="0" column="0">
+      <property name="text">
+       <string>生產中</string>
+      </property>
+      <property name="font">
+       <font>
+        <family>微軟正黑體</family>
+        <pointsize>12</pointsize>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+      <property name="background">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>80</red>
+         <green>191</green>
+         <blue>200</blue>
+        </color>
+       </brush>
+      </property>
+      <property name="foreground">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>255</red>
+         <green>255</green>
+         <blue>255</blue>
+        </color>
+       </brush>
+      </property>
+     </item>
+     <item row="0" column="1">
+      <property name="text">
+       <string>22:30 ~ 23:20</string>
+      </property>
+      <property name="font">
+       <font>
+        <family>Microsoft JhengHei UI</family>
+        <pointsize>10</pointsize>
+        <bold>false</bold>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+      <property name="background">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>80</red>
+         <green>191</green>
+         <blue>200</blue>
+        </color>
+       </brush>
+      </property>
+      <property name="foreground">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>255</red>
+         <green>255</green>
+         <blue>255</blue>
+        </color>
+       </brush>
+      </property>
+     </item>
+     <item row="1" column="0">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="font">
+       <font>
+        <family>微軟正黑體</family>
+        <pointsize>12</pointsize>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+      <property name="background">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>100</red>
+         <green>170</green>
+         <blue>90</blue>
+        </color>
+       </brush>
+      </property>
+      <property name="foreground">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>255</red>
+         <green>255</green>
+         <blue>255</blue>
+        </color>
+       </brush>
+      </property>
+     </item>
+     <item row="1" column="1">
+      <property name="text">
+       <string>1</string>
+      </property>
+      <property name="font">
+       <font>
+        <pointsize>10</pointsize>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+      <property name="background">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>100</red>
+         <green>170</green>
+         <blue>90</blue>
+        </color>
+       </brush>
+      </property>
+      <property name="foreground">
+       <brush brushstyle="SolidPattern">
+        <color alpha="255">
+         <red>255</red>
+         <green>255</green>
+         <blue>255</blue>
+        </color>
+       </brush>
+      </property>
+     </item>
+     <item row="2" column="0">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="textAlignment">
+       <set>AlignCenter</set>
+      </property>
+     </item>
+     <item row="2" column="1">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="font">
+       <font>
+        <pointsize>10</pointsize>
+       </font>
+      </property>
+      <property name="textAlignment">
+       <set>AlignTrailing|AlignVCenter</set>
+      </property>
+     </item>
+     <item row="3" column="0">
+      <property name="text">
+       <string/>
+      </property>
+     </item>
+     <item row="3" column="1">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="font">
+       <font>
+        <pointsize>10</pointsize>
+       </font>
+      </property>
+     </item>
+    </widget>
     <zorder>tw4</zorder>
     <zorder>tw1</zorder>
     <zorder>tw2</zorder>
@@ -3229,6 +3473,7 @@ Runner</string>
     <zorder>tableWidget_3</zorder>
     <zorder>groupBox_2</zorder>
     <zorder>label_18</zorder>
+    <zorder>tableWidget_4</zorder>
    </widget>
   </widget>
  </widget>
