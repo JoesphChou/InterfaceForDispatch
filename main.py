@@ -2,6 +2,8 @@ from calendar import month
 
 import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
+from PyQt6.QtWidgets import QTableWidgetItem
+
 from UI import Ui_Form
 import sys, re
 import pandas as pd
@@ -185,12 +187,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.horizontalScrollBar.valueChanged.connect(self.confirm_value)
         self.dateEdit_3.dateChanged.connect(self.date_edit3_user_change)
         self.checkBox_2.setChecked(False)
+        #-------- 各tree widgets、table widgets 的欄位寬、總寬、高等設定---------
+
 
     def date_edit3_user_change(self):
-        self.label_22.setText('')
+        # self.label_22.setText('')
         if self.dateEdit_3.date() > pd.Timestamp.today().date():
             # ----選定到未來日期時，查詢當天的各週期資料，並顯示最後一個結束週期的資料----
-            self.label_22.setText('無法查詢未來的紀錄！')
+            # self.label_22.setText('無法查詢未來的紀錄！')
             sd = pd.Timestamp(pd.Timestamp.now().date())
             self.dateEdit_3.blockSignals(True)  # 屏蔽dateEdit 的signal, 避免無限執行
             self.dateEdit_3.setDate(QtCore.QDate(sd.year, sd.month, sd.day))
@@ -221,9 +225,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         if et > pd.Timestamp.now():     # 欲查詢的時間段，屬於未來時間時
             # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值,
             et = pd.Timestamp.now().floor('15T')
-            self.label_22.setText('無法查詢未來的紀錄！')
+            # self.label_22.setText('無法查詢未來的紀錄！')
             self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
-            print(self.horizontalScrollBar.value())
             st = et - pd.offsets.Minute(15)
 
         self.label_16.setText(st.strftime('%H:%M'))
@@ -231,26 +234,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.update_history_to_tws(self.history_datas_of_groups.loc[:,st.strftime('%H:%M')])
 
     def check_box2_event(self):
-        """
-        et = pd.Timestamp.now().floor('15T')
-        st = et - pd.offsets.Minute(15)
-        self.label_16.setText(st.strftime('%H:%M'))
-        self.label_17.setText(et.strftime('%H:%M'))
-
-        # 防止scroller 的值在最高時，日期值會更新到隔天，而引發不可預知的錯誤
-        if self.horizontalScrollBar.value() < 96:
-            self.dateEdit_3.setDate(QtCore.QDate(et.year, et.month, et.day))
-            if st.date() < et.date():       # 當天第一個週期時，dateEdit 會預設在昨日
-                self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
-        else:
-            self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
-        """
         #-----------調出當天的各週期平均-----------
         st = pd.Timestamp.today().date()
         et = st + pd.offsets.Day(1)
         self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
-        # self.history_demand_of_groups(st=st,et=et)
-        # self.confirm_value()
 
         if self.checkBox_2.isChecked():
             self.history_demand_of_groups(st=st, et=et)
@@ -263,19 +250,20 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.label_21.setVisible(True)
             self.label_22.setVisible(True)
             #----------------------tree widget----------------
-            self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))  # scroller width 18
+            #self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))  # scroller width 18
+            self.tw1.setGeometry(QtCore.QRect(9, 10, 340, 191))  # scroller width 18
             self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
             self.tw1.setColumnWidth(1, 90)
-            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnWidth(2, 56)
             self.tw1.setColumnHidden(2, False)
             self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
             self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
             self.tw2.setColumnWidth(1, 90)
             self.tw2.setColumnWidth(2, 90)
             self.tw2.setColumnHidden(2, False)
-            self.tw3.setGeometry(QtCore.QRect(300, 460, 530, 141))
+            self.tw3.setGeometry(QtCore.QRect(300, 250, 530, 141))
             self.tw3.setColumnHidden(2, False)
-            self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 301, 151))
+            self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 271, 151))
             self.tableWidget_3.setColumnHidden(2, False)
         else:
             # ------function visible_____
@@ -290,14 +278,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw1.setGeometry(QtCore.QRect(9, 10, 284, 191))
             self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
             self.tw1.setColumnWidth(1, 90)
-            self.tw1.setColumnWidth(2, 90)
+            self.tw1.setColumnWidth(2, 70)
             self.tw1.setColumnHidden(2, True)
             self.tw2.setGeometry(QtCore.QRect(410, 10, 227, 191))
             self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
             self.tw2.setColumnWidth(1, 90)
             self.tw2.setColumnWidth(2, 100)
             self.tw2.setColumnHidden(2, True)
-            self.tw3.setGeometry(QtCore.QRect(300, 460, 430, 141))
+            self.tw3.setGeometry(QtCore.QRect(300, 250, 430, 141))
             self.tw3.setColumnHidden(2, True)
             self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 201, 151))
             self.tableWidget_3.setColumnHidden(2, True)
@@ -728,7 +716,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))     #scroller width 18, frame line width 1
         self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
         self.tw1.setColumnWidth(1, 90)
-        self.tw1.setColumnWidth(2, 90)
+        self.tw1.setColumnWidth(2, 70)
 
         #self.tw1.setColumnHidden(2,True)
 
@@ -749,21 +737,22 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.headerItem().setForeground(1, brush)
         self.tw3.headerItem().setForeground(2, brush)
         self.tw3.headerItem().setForeground(3, brush)
-        self.tw3.setGeometry(QtCore.QRect(300, 460, 530, 141))
+        self.tw3.setGeometry(QtCore.QRect(300, 250, 530, 141))
         self.tw3.setColumnWidth(0, 110)  # tw3 total width: 221
         self.tw3.setColumnWidth(1, 100)
-        self.tw3.setColumnWidth(2, 100)
+        self.tw3.setColumnWidth(2, 70)
         self.tw3.setColumnWidth(3, 100)
         self.tw3.setColumnWidth(4, 100)
 
-        self.tw4.setStyleSheet("QHeaderView::section{background:rgb(100, 170, 90);}")  # 設置表頭的背景顏色
-        brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
-        brush.setStyle(QtCore.Qt.BrushStyle.SolidPattern)  # 設定顏色的分佈方式
-        self.tw4.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
-        self.tw4.headerItem().setForeground(1, brush)
-        self.tw4.setColumnWidth(0, 125)
-
         self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 201, 151))
+        self.tableWidget_3.setColumnWidth(0, 100)
+        self.tableWidget_3.setColumnWidth(1, 100)
+        self.tableWidget_3.setColumnWidth(2, 56)
+
+        self.tableWidget_4.setRowCount(1)
+        self.tableWidget_4.setColumnWidth(0, 160)
+        self.tableWidget_4.setColumnWidth(1, 80)
+
         """
         # self.treeWidget.hideColumn(0) # 用來隱藏指定的column
         # self.treeWidget.clear()       # clean all data
@@ -1038,19 +1027,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        """
-        tw3 擴增、tw4刪除
-        self.tw4.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw4.topLevelItem(0).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)   
-        """
 
     def tws_update(self, current_p):
         """
@@ -1264,11 +1240,31 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         schedule = scrapy_schedule()
         if len(schedule) == 0:
-            self.label_18.setStyleSheet("color:black")
-            self.label_18.setText('目前無排程')
+            self.tableWidget_4.setItem(0, 0, QTableWidgetItem('目前無排程'))
         else:
-            self.label_18.setStyleSheet("color:red")
-            self.label_18.setText('下一爐時間： ' + str(schedule[0][0].time()))
+            self.tableWidget_4.setRowCount(len(schedule))
+
+        for x in range(len(schedule)):
+            self.tableWidget_4.setItem(x, 0, QTableWidgetItem(f'%s ~ %s' %(str(schedule[x][0].time()), str(schedule[x][1].time()))))
+
+    def schedule_update(self,future):
+        for x in range(len(future)):
+            self.tableWidget_4.setItem(x+1, 1, future[x])
+
+        """
+            new_item = QtWidgets.QTableWidgetItem('test')
+            self.tableWidget.setItem(0,0,new_item)              # 設定某表格內容
+            self.tableWidget.item(0,0).text()                   # 表格指定位置的內容
+            self.tableWidget.horizontalHeaderItem(0).text()     # 表格第n列的名稱
+            self.tableWidget.setHorizontalHeaderLabels()        # 設定表格column 名稱
+            self.tableWidget.item(row, column).setToolTip(QString & toolTip)        # 個別item 的提示信息 
+            self.tableWidget.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers) # 設表格為唯讀
+            self.tableWidget.verticalHeader().setVisible(False)       # 表格row 名稱顯示與否
+            self.tableWidget.horizontalHeader().setVisible(False)     # 表格column 名稱顯示與否
+            self.tableWidget.setRowHeight(int row, int height)        # 設置指定row 的高度
+            self.tableWidget.setColumnWidth(int column, int width)    # 設置指定column 的寬度
+            self.tableWidget_2.setAlternatingRowColors(True)    # 隔行交替背景色
+        """
 
     def handle_selection_changed(self):
         """
