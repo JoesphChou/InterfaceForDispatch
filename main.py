@@ -1,5 +1,3 @@
-from calendar import month
-
 import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtWidgets import QTableWidgetItem
@@ -63,6 +61,7 @@ def query_pi(st, et, tags, extract_type, time_offset = 0):
 def pre_check(pending_data, b=1, c='power'):
     """
     此函式用來判顯示在tree,table widget  的即時資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
+    :param c: 用來判斷是燃氣或電力的類別
     :param pending_data:要判斷的數值。
     :param b:若數值接近 0，預設回傳'停機'的述述。
     :return: 回傳值為文字型態。
@@ -84,6 +83,7 @@ def pre_check(pending_data, b=1, c='power'):
 def pre_check2(pending_data, b=1):
     """
     此函式用來判顯示在tree,table widget  的 "歷史" 資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
+    :param b: 用來指定用那一個describe，預設為'停機'
     :param pending_data:
     :return:
     """
@@ -168,8 +168,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.define_cbl_date(pd.Timestamp.now().date())   # 初始化時，便立即找出預設的cbl參考日，並更新在list widget 裡
         self.tw1.itemExpanded.connect(self.tw1_expanded_event)
         self.tw1.itemCollapsed.connect(self.tw1_expanded_event)
-        self.tw3.itemExpanded.connect(lambda item: self.tw3_expanded_event(item))
-        self.tw3.itemCollapsed.connect(lambda item: self.tw3_expanded_event(item))
+        self.tw3.itemExpanded.connect(self.tw3_expanded_event)
+        self.tw3.itemCollapsed.connect(self.tw3_expanded_event)
         self.checkBox.stateChanged.connect(self.check_box_event)
         self.checkBox_2.stateChanged.connect(self.check_box2_event)
         self.query_cbl()      # 查詢特定條件的 基準用電容量(CBL)
@@ -189,7 +189,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.checkBox_2.setChecked(False)
         #-------- 各tree widgets、table widgets 的欄位寬、總寬、高等設定---------
 
-
     def date_edit3_user_change(self):
         # self.label_22.setText('')
         if self.dateEdit_3.date() > pd.Timestamp.today().date():
@@ -203,7 +202,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.history_demand_of_groups(st=sd, et=ed)
 
             # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值
-            # 並觸發scrollerBar 的valuechanged 事件，執行後續動作。
+            # 並觸發scrollerBar 的value changed 事件，執行後續動作。
             sp = pd.Timestamp.now().floor('15T')
             self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
 
@@ -410,55 +409,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(0).setText(2, pre_check2(current_p['4H120']))
         self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
 
-        brush1 = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # 給白色文字用的設定
-        brush1.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush2 = QtGui.QBrush(QtGui.QColor(80, 191, 200))  # 全廠用電量的背景色
-        brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush3 = QtGui.QBrush(QtGui.QColor(100, 170, 90))  # 中龍發電量的背景色
-        brush3.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush4 = QtGui.QBrush(QtGui.QColor(170, 170, 0))  # 中龍發電量的背景色
-        brush4.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush5 = QtGui.QBrush(QtGui.QColor(190, 90, 90))  # 中龍發電量的背景色
-        brush5.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-
-        font = QtGui.QFont()
-        font.setFamily("微軟正黑體")
-        font.setPointSize(12)
-        font.setBold(True)
-
-        #taipower = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
-        #            - current_p['sp_real_time']
         sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
-        taipower = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
+        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
 
-        item01 = QtWidgets.QTableWidgetItem(pre_check2(taipower))
-        item01.setForeground(brush1)
-        item01.setBackground(brush2)
-        item01.setFont(font)
-        item01.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(0, 2, item01)
+        # 方式 2：table widget 3 利用 self.update_and_style_table_item 函式，在更新內容後，重新套用樣式
+        self.update_and_style_table_item(self.tableWidget_3, 0, 2, pre_check2(tai_power))
+        self.update_and_style_table_item(self.tableWidget_3,1 ,2, pre_check2(current_p['2H120':'5KB19'].sum()))
+        self.update_and_style_table_item(self.tableWidget_3, 2, 2, pre_check2(sun_power,b=5))
+        self.update_and_style_table_item(self.tableWidget_3, 3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
 
-        item11 = QtWidgets.QTableWidgetItem(pre_check2(current_p['2H120':'5KB19'].sum()))
-        item11.setForeground(brush1)
-        item11.setBackground(brush3)
-        item11.setFont(font)
-        item11.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(1, 2, item11)
-
-        item21 = QtWidgets.QTableWidgetItem(pre_check2(sun_power,b=5))
-        item21.setForeground(brush1)
-        item21.setBackground(brush4)
-        item21.setFont(font)
-        item21.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(2, 2, item21)
-                                           #pre_check(current_p['TG1 NG'], 3, 'gas'))
-        item31 = QtWidgets.QTableWidgetItem(pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
-        item31.setForeground(brush1)
-        item31.setBackground(brush5)
-        item31.setFont(font)
-        item31.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(3, 2, item31)
-        
     def check_box_event(self):
         """
         切換負載的顯示方式
@@ -557,19 +516,12 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw3.topLevelItem(2).child(0).setText(0, 'CDQ#1')
             self.tw3.topLevelItem(2).child(1).setText(0, 'CDQ#2')
 
-    def tw3_expanded_event(self,item):
+    def tw3_expanded_event(self):
         """
         1. 用來同步TGs 發電量、NG貢獻電量、NG使用量的項目展開、收縮
         2. 所有項目在expanded 或 collapsed 時，變更文字顯示的方式
-        :param item: tw3 發生expanded 或 collased 的子項目
         :return:
         """
-        if item.text(0) == 'TGs':
-            if item.isExpanded():
-                self.tw4.topLevelItem(0).setExpanded(True)
-            else:
-                self.tw4.topLevelItem(0).setExpanded(False)
-
         b_transparent = QtGui.QBrush(QtGui.QColor(0,0,0,0))
         b_solid  = QtGui.QBrush(QtGui.QColor(0,0,0, 255))
         # TGs
@@ -605,17 +557,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
             self.tw3.topLevelItem(2).setForeground(1, b_solid)
             # self.tw3.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # NGs
-        if self.tw4.topLevelItem(0).isExpanded():
-            self.tw4.topLevelItem(0).setForeground(0, b_transparent)
-            self.tw4.topLevelItem(0).setForeground(1, b_transparent)
-            # self.tw4.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            # self.tw4.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw4.topLevelItem(0).setForeground(0, b_solid)
-            self.tw4.topLevelItem(0).setForeground(1, b_solid)
-            # self.tw4.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            # self.tw4.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
 
     def tw1_expanded_event(self):
         """
@@ -707,6 +648,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         1. 因為treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
         :return:
         """
+        # 美化 tw1, tw2, tw3（QTreeWidget）
+        self.beautify_avg_column(self.tw1, 2)
+        self.beautify_avg_column(self.tw2, 2)
+        self.beautify_avg_column(self.tw3, 2)
+
+        # 美化 tableWidget_3（QTableWidget）
+        self.beautify_avg_column(self.tableWidget_3, 2)
+        self.beautify_avg_column(self.tableWidget_4, 0)
+
         self.tw1.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
         brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
         brush.setStyle(QtCore.Qt.BrushStyle.SolidPattern)  # 設定顏色的分佈方式
@@ -718,8 +668,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.setColumnWidth(1, 90)
         self.tw1.setColumnWidth(2, 70)
 
-        #self.tw1.setColumnHidden(2,True)
-
         self.tw2.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
         self.tw2.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
         self.tw2.headerItem().setForeground(1, brush)
@@ -728,7 +676,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw2.setColumnWidth(0, 135)     # 設定各column 的寬度
         self.tw2.setColumnWidth(1, 90)
         self.tw2.setColumnWidth(2, 90)
-        #self.tw1.setColumnHidden(2,True)
 
         self.tw3.setStyleSheet("QHeaderView::section{background:rgb(100, 170, 90);}")  # 設置表頭的背景顏色
         brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
@@ -757,6 +704,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # self.treeWidget.hideColumn(0) # 用來隱藏指定的column
         # self.treeWidget.clear()       # clean all data
         """
+
         brush2 = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # brush2 用來設定設備群子項的即時量顏色
         brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
         brush3 = QtGui.QBrush(QtGui.QColor(0, 0, 255))  # brush3 用來各一級單位即時量的顏色
@@ -1133,24 +1081,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).setText(1, pre_check(current_p['4H120':'4H220'].sum()))
         self.tw3.topLevelItem(2).child(0).setText(1, pre_check(current_p['4H120']))
         self.tw3.topLevelItem(2).child(1).setText(1, pre_check(current_p['4H220']))
-        """
-        tw3 擴增、tw4刪除
-        self.tw4.topLevelItem(0).setText(0, pre_check(current_p['TG1 NG':'TG4 NG'].sum() * ng_to_power /1000, 4))
-        self.tw4.topLevelItem(0).setText(1, pre_check(current_p['TG1 NG':'TG4 NG'].sum(), 3, 'gas'))
-        self.tw4.topLevelItem(0).child(0).setText(0, pre_check(current_p['TG1 NG'] * ng_to_power / 1000, 4))
-        self.tw4.topLevelItem(0).child(0).setText(1, pre_check(current_p['TG1 NG'], 3, 'gas'))
-        self.tw4.topLevelItem(0).child(1).setText(0, pre_check(current_p['TG2 NG'] * ng_to_power / 1000, 4))
-        self.tw4.topLevelItem(0).child(1).setText(1, pre_check(current_p['TG2 NG'], 3, 'gas'))
-        self.tw4.topLevelItem(0).child(2).setText(0, pre_check(current_p['TG3 NG'] * ng_to_power / 1000, 4))
-        self.tw4.topLevelItem(0).child(2).setText(1, pre_check(current_p['TG3 NG'], 3, 'gas'))
-        self.tw4.topLevelItem(0).child(3).setText(0, pre_check(current_p['TG4 NG'] * ng_to_power / 1000, 4))
-        self.tw4.topLevelItem(0).child(3).setText(1, pre_check(current_p['TG4 NG'], 3, 'gas'))
-        
-        self.tw4.topLevelItem(1).setText(1, pre_check(current_p['4KA18'], 3))
-        self.tw4.topLevelItem(1).setText(1, pre_check(current_p['5KB19'], 3))
-        self.tw4.topLevelItem(2).setText(1, pre_check(current_p['4H120'],3))
-        self.tw4.topLevelItem(3).setText(1, pre_check(current_p['4H220'],3))
-        """
+
         brush1 = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # 給白色文字用的設定
         brush1.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
         brush2 = QtGui.QBrush(QtGui.QColor(80, 191, 200))  # 全廠用電量的背景色
@@ -1167,37 +1098,41 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         font.setPointSize(12)
         font.setBold(True)
 
-        taipower = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
+        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
+        # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
+        self.update_table_item(self.tableWidget_3, 0, 1, pre_check(tai_power))
+        self.update_table_item(self.tableWidget_3, 1, 1, pre_check(current_p['2H120':'5KB19'].sum()))
+        self.update_table_item(self.tableWidget_3, 2, 1, pre_check(current_p['sp_real_time'], b=5))
+        self.update_table_item(self.tableWidget_3, 3, 1, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(), b=4))
+        #item01 = QtWidgets.QTableWidgetItem(pre_check(tai_power))
+        #item01.setForeground(brush1)
+        #item01.setBackground(brush2)
+        #item01.setFont(font)
+        #item01.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        #self.tableWidget_3.setItem(0, 1, item01)
 
-        item01 = QtWidgets.QTableWidgetItem(pre_check(taipower))
-        item01.setForeground(brush1)
-        item01.setBackground(brush2)
-        item01.setFont(font)
-        item01.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(0, 1, item01)
+        #item11 = QtWidgets.QTableWidgetItem(pre_check(current_p['2H120':'5KB19'].sum()))
+        #item11.setForeground(brush1)
+        #item11.setBackground(brush3)
+        #item11.setFont(font)
+        #item11.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        #self.tableWidget_3.setItem(1, 1, item11)
 
-        item11 = QtWidgets.QTableWidgetItem(pre_check(current_p['2H120':'5KB19'].sum()))
-        item11.setForeground(brush1)
-        item11.setBackground(brush3)
-        item11.setFont(font)
-        item11.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(1, 1, item11)
+        #item21 = QtWidgets.QTableWidgetItem(pre_check(current_p['sp_real_time'], b=5))
+        #item21.setForeground(brush1)
+        #item21.setBackground(brush4)
+        #item21.setFont(font)
+        #item21.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        #self.tableWidget_3.setItem(2, 1, item21)
 
-        item21 = QtWidgets.QTableWidgetItem(pre_check(current_p['sp_real_time'], b=5))
-        item21.setForeground(brush1)
-        item21.setBackground(brush4)
-        item21.setFont(font)
-        item21.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(2, 1, item21)
-
-        item31= QtWidgets.QTableWidgetItem(str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW')
-        #item31 = QtWidgets.QTableWidgetItem(pre_check(current_p['feeder 1510':'feeder 1520'].sum()))
-        item31.setForeground(brush1)
-        item31.setBackground(brush5)
-        item31.setFont(font)
-        item31.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self.tableWidget_3.setItem(3, 1, item31)
+        #item31= QtWidgets.QTableWidgetItem(str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW')
+        ##item31 = QtWidgets.QTableWidgetItem(pre_check(current_p['feeder 1510':'feeder 1520'].sum()))
+        #item31.setForeground(brush1)
+        #item31.setBackground(brush5)
+        #item31.setFont(font)
+        #item31.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        #self.tableWidget_3.setItem(3, 1, item31)
 
     def update_current_value(self):
         """
@@ -1535,12 +1470,72 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def show_box(self, content):
         mbox = QtWidgets.QMessageBox(self)
         mbox.warning(self, '警告', content)
+
+    @staticmethod
+    def apply_style_to_item(item):
+        """ 套用固定的樣式到 QTableWidgetItem """
+        item.setFont(QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold))
+        item.setBackground(QtGui.QBrush(QtGui.QColor("#FFFACD")))  # 淡黃色背景
+        item.setForeground(QtGui.QBrush(QtGui.QColor("#000080")))  # 深藍色文字
+        item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+
+    def update_table_item(self, table_widget, row, column, new_text):
+        """ 更新 QTableWidget 的指定儲存格內容，同時保留原來的樣式 """
+        item = table_widget.item(row, column)
+        if item is None:  # 如果該儲存格沒有 item，則創建一個新的 item
+            item = QtWidgets.QTableWidgetItem()
+            table_widget.setItem(row, column, item)
+
+        item.setText(new_text)  # 只更新內容，不改變格式
+
+    def update_and_style_table_item(self, table_widget, row, column, new_text):
+        """ 更新 QTableWidget 的儲存格內容，並確保樣式不會變 """
+        item = table_widget.item(row, column)
+        if item is None:  # 若 item 不存在，創建並套用樣式
+            item = QtWidgets.QTableWidgetItem(new_text)
+            self.apply_style_to_item(item)
+            table_widget.setItem(row, column, item)
+        else:
+            item.setText(new_text)  # 只修改文字
+            self.apply_style_to_item(item)  # 重新套用樣式
+
+    def beautify_avg_column(self, widget, column_index):
         """
-        mbox.setText(content)   # 通知文字
-        mbox.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
-        mbox.setIcon(QtWidgets.QMessageBox.Icon.Question)  # 加入問號 icon
-        mbox.exec()
+        用來美化treeWidget、tableWidget 的平块值欄位
+        :param widget: 用來接收傳入的widget
+        :param column_index: 要修改的 column欄位編號
+        :return:
         """
+        if isinstance(widget, QtWidgets.QTreeWidget):  # 若為 QTreeWidget
+            for i in range(widget.topLevelItemCount()):
+                item = widget.topLevelItem(i)
+                if item:
+                    item.setFont(column_index, QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold))
+                    item.setBackground(column_index, QtGui.QBrush(QtGui.QColor("#FFFACD")))  # 淡黃色背景
+                    item.setForeground(column_index, QtGui.QBrush(QtGui.QColor("#000080")))  # 深藍色文字
+                    item.setTextAlignment(column_index, QtCore.Qt.AlignmentFlag.AlignRight)
+                    # 遞迴處理子節點
+                    self.beautify_avg_children(item, column_index)
+
+        elif isinstance(widget, QtWidgets.QTableWidget):  # 若為 QTableWidget
+            for row in range(widget.rowCount()):
+                item = widget.item(row, column_index)
+                if item:
+                    item.setFont(QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold))
+                    item.setBackground(QtGui.QBrush(QtGui.QColor("#FFFACD")))
+                    item.setForeground(QtGui.QBrush(QtGui.QColor("#000080")))
+                    item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+
+    def beautify_avg_children(self, parent_item, column_index):
+        """遞迴處理 QTreeWidgetItem 子節點"""
+        for i in range(parent_item.childCount()):
+            child = parent_item.child(i)
+            if child:
+                child.setFont(column_index, QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold))
+                child.setBackground(column_index, QtGui.QBrush(QtGui.QColor("#FFFACD")))
+                child.setForeground(column_index, QtGui.QBrush(QtGui.QColor("#000080")))
+                child.setTextAlignment(column_index, QtCore.Qt.AlignmentFlag.AlignRight)
+                self.beautify_avg_children(child, column_index)  # 遞迴處理下一層
 
 
 if __name__ == "__main__":
