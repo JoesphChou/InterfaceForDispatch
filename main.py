@@ -189,460 +189,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.checkBox_2.setChecked(False)
         #-------- 各tree widgets、table widgets 的欄位寬、總寬、高等設定---------
 
-    def date_edit3_user_change(self):
-        # self.label_22.setText('')
-        if self.dateEdit_3.date() > pd.Timestamp.today().date():
-            # ----選定到未來日期時，查詢當天的各週期資料，並顯示最後一個結束週期的資料----
-            # self.label_22.setText('無法查詢未來的紀錄！')
-            sd = pd.Timestamp(pd.Timestamp.now().date())
-            self.dateEdit_3.blockSignals(True)  # 屏蔽dateEdit 的signal, 避免無限執行
-            self.dateEdit_3.setDate(QtCore.QDate(sd.year, sd.month, sd.day))
-            self.dateEdit_3.blockSignals(False) # 設定完dateEdit 後重新開啟DateEdit 的signal
-            ed = sd + pd.offsets.Day(1)
-            self.history_demand_of_groups(st=sd, et=ed)
-
-            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值
-            # 並觸發scrollerBar 的value changed 事件，執行後續動作。
-            sp = pd.Timestamp.now().floor('15T')
-            self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
-
-        else:
-            # ------ 初始帶入或選擇非未來日期時，查詢完資料後，顯示第一個週期的資料
-            sd = pd.Timestamp(self.dateEdit_3.date().toString())
-            ed = sd + pd.offsets.Day(1)
-            self.history_demand_of_groups(st=sd, et=ed)
-            self.label_16.setText('00:00')
-            self.label_17.setText('00:15')
-            self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
-            self.horizontalScrollBar.setValue(0)
-
-    def confirm_value(self):
-        """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
-        st = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
-        et = st + pd.offsets.Minute(15)
-
-        if et > pd.Timestamp.now():     # 欲查詢的時間段，屬於未來時間時
-            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值,
-            et = pd.Timestamp.now().floor('15T')
-            # self.label_22.setText('無法查詢未來的紀錄！')
-            self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
-            st = et - pd.offsets.Minute(15)
-
-        self.label_16.setText(st.strftime('%H:%M'))
-        self.label_17.setText(et.strftime('%H:%M'))
-        self.update_history_to_tws(self.history_datas_of_groups.loc[:,st.strftime('%H:%M')])
-
-    def check_box2_event(self):
-        #-----------調出當天的各週期平均-----------
-        st = pd.Timestamp.today().date()
-        et = st + pd.offsets.Day(1)
-        self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
-
-        if self.checkBox_2.isChecked():
-            self.history_demand_of_groups(st=st, et=et)
-            #------function visible_____
-            self.dateEdit_3.setVisible(True)
-            self.horizontalScrollBar.setVisible(True)
-            self.label_16.setVisible(True)
-            self.label_17.setVisible(True)
-            self.label_19.setVisible(True)
-            self.label_21.setVisible(True)
-            self.label_22.setVisible(True)
-            #----------------------tree widget----------------
-            #self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))  # scroller width 18
-            self.tw1.setGeometry(QtCore.QRect(9, 10, 340, 191))  # scroller width 18
-            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
-            self.tw1.setColumnWidth(1, 90)
-            self.tw1.setColumnWidth(2, 56)
-            self.tw1.setColumnHidden(2, False)
-            self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
-            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
-            self.tw2.setColumnWidth(1, 90)
-            self.tw2.setColumnWidth(2, 90)
-            self.tw2.setColumnHidden(2, False)
-            self.tw3.setGeometry(QtCore.QRect(300, 250, 530, 141))
-            self.tw3.setColumnHidden(2, False)
-            self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 271, 151))
-            self.tableWidget_3.setColumnHidden(2, False)
-        else:
-            # ------function visible_____
-            self.dateEdit_3.setVisible(False)
-            self.horizontalScrollBar.setVisible(False)
-            self.label_16.setVisible(False)
-            self.label_17.setVisible(False)
-            self.label_19.setVisible(False)
-            self.label_21.setVisible(False)
-            self.label_22.setVisible(False)
-            # ----------------------tree widget----------------
-            self.tw1.setGeometry(QtCore.QRect(9, 10, 284, 191))
-            self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
-            self.tw1.setColumnWidth(1, 90)
-            self.tw1.setColumnWidth(2, 70)
-            self.tw1.setColumnHidden(2, True)
-            self.tw2.setGeometry(QtCore.QRect(410, 10, 227, 191))
-            self.tw2.setColumnWidth(0, 135)  # 設定各column 的寬度
-            self.tw2.setColumnWidth(1, 90)
-            self.tw2.setColumnWidth(2, 100)
-            self.tw2.setColumnHidden(2, True)
-            self.tw3.setGeometry(QtCore.QRect(300, 250, 430, 141))
-            self.tw3.setColumnHidden(2, True)
-            self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 201, 151))
-            self.tableWidget_3.setColumnHidden(2, True)
-    # @timeit
-    def history_demand_of_groups(self, st, et):
-        """
-            查詢特定週期，各設備群組(分類)的平均值
-        :return:
-        """
-        mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
-        groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
-        groups_demand.index = self.tag_list.loc[mask,'name']
-        name_list = groups_demand.loc[:,'tag_name2'].values.tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
-        query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
-
-        query_result.columns = groups_demand.index
-        query_result = query_result.T       # 將query_result 轉置 shape:(96,178) -> (178,96)
-        query_result.reset_index(inplace=True, drop=True)  # 重置及捨棄原本的 index
-        query_result.index = groups_demand.index    # 將index 更新為各迴路或gas 的名稱 (套用groups_demands.index 即可)
-        time_list = [t.strftime('%H:%M') for t in  pd.date_range('00:00', '23:45', freq='15min')]
-        query_result.columns = time_list        # 用週期的起始時間，作為各column 的名稱
-        query_result.loc[:,'00:00':'23:45'] = query_result.loc[:,'00:00':'23:45'] * 4 # kwh -> MW/15 min
-        groups_demand = pd.concat([groups_demand, query_result], axis=1, copy=False)
-        wx_list = list()    # 暫存各wx的計算結果用
-        for _ in time_list:
-            # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
-            wx_grouped = groups_demand.groupby(['Group1','Group2'])[_].sum()
-            c = wx_grouped.loc['W2':'WA', 'B']
-            c.name = _
-            c.index = c.index.get_level_values(0)   # 重新將index 設置為原multiIndex 的第一層index 內容
-            wx_list.append(c)
-        wx = pd.DataFrame([wx_list[_] for _ in range(96)])
-        # 將wx 計算結果轉置，並along index 合併於groups_demand 下方, 並將結果存在class 變數中
-        self.history_datas_of_groups = pd.concat([groups_demand, wx.T], axis=0)
-
-    def update_history_to_tws(self, current_p):
-        """
-        暫時用來將各群組的歷史平均量顯顯示在 各tree widget 的3rd column
-        :param current_p:
-        :return:
-        """
-        w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
-        self.tw1.topLevelItem(0).setText(2, pre_check2(w2_total))
-        self.tw1.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H180':'1H350'].sum()))
-        self.tw1.topLevelItem(0).child(0).child(0).setText(2, pre_check2(current_p['2H180']))
-        self.tw1.topLevelItem(0).child(0).child(1).setText(2, pre_check2(current_p['2H280']))
-        self.tw1.topLevelItem(0).child(0).child(2).setText(2, pre_check2(current_p['1H350']))
-        self.tw1.topLevelItem(0).child(1).setText(2, pre_check2(current_p['4KA19']))
-        self.tw1.topLevelItem(0).child(2).setText(2, pre_check2(current_p['4KB19':'4KB29'].sum()))
-        self.tw1.topLevelItem(0).child(2).child(0).setText(2, pre_check2(current_p['4KB19']))
-        self.tw1.topLevelItem(0).child(2).child(1).setText(2, pre_check2(current_p['4KB29']))
-        self.tw1.topLevelItem(0).child(3).setText(1, pre_check2(current_p['2KA41':'2KB41'].sum()))
-        self.tw1.topLevelItem(0).child(3).child(0).setText(2, pre_check2(current_p['2KA41']))
-        self.tw1.topLevelItem(0).child(3).child(1).setText(2, pre_check2(current_p['2KB41']))
-        self.tw1.topLevelItem(0).child(4).setText(2, pre_check2(current_p['W2']))
-
-        w3_total = current_p['AJ320':'5KB28'].sum() + current_p['W3']
-        self.tw1.topLevelItem(1).setText(2, pre_check2(w3_total))
-        self.tw1.topLevelItem(1).child(0).setText(2, pre_check2(current_p['AJ320']))
-        self.tw1.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KA18':'5KB28'].sum()))
-        self.tw1.topLevelItem(1).child(1).child(0).setText(2, pre_check2(current_p['5KA18']))
-        self.tw1.topLevelItem(1).child(1).child(1).setText(2, pre_check2(current_p['5KA28']))
-        self.tw1.topLevelItem(1).child(1).child(2).setText(2, pre_check2(current_p['5KB18']))
-        self.tw1.topLevelItem(1).child(1).child(3).setText(2, pre_check2(current_p['5KB28']))
-        self.tw1.topLevelItem(1).child(2).setText(2, pre_check2(current_p['W3']))
-
-        w42 = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
-        w4_total = current_p['AJ130':'AJ320'].sum() + w42
-
-        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(current_p['AJ130':'AJ320'].sum()))
-        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w42))
-
-        w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
-        self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
-        self.tw1.topLevelItem(3).child(0).setText(2, pre_check2(current_p['3KA14':'3KA15'].sum()))
-        self.tw1.topLevelItem(3).child(0).child(0).setText(2, pre_check2(current_p['3KA14']))
-        self.tw1.topLevelItem(3).child(0).child(1).setText(2, pre_check2(current_p['3KA15']))
-        self.tw1.topLevelItem(3).child(1).setText(2, pre_check2(current_p['3KA24':'3KA25'].sum()))
-        self.tw1.topLevelItem(3).child(1).child(0).setText(2, pre_check2(current_p['3KA24']))
-        self.tw1.topLevelItem(3).child(1).child(1).setText(2, pre_check2(current_p['3KA25']))
-        self.tw1.topLevelItem(3).child(2).setText(2, pre_check2(current_p['3KB12':'3KB28'].sum()))
-        self.tw1.topLevelItem(3).child(2).child(0).setText(2, pre_check2(current_p['3KB12']))
-        self.tw1.topLevelItem(3).child(2).child(1).setText(2, pre_check2(current_p['3KB22']))
-        self.tw1.topLevelItem(3).child(2).child(2).setText(2, pre_check2(current_p['3KB28']))
-        self.tw1.topLevelItem(3).child(3).setText(2, pre_check2(current_p['3KA16':'3KB27'].sum()))
-        self.tw1.topLevelItem(3).child(3).child(0).setText(2, pre_check2(current_p['3KA16']))
-        self.tw1.topLevelItem(3).child(3).child(1).setText(2, pre_check2(current_p['3KA26']))
-        self.tw1.topLevelItem(3).child(3).child(2).setText(2, pre_check2(current_p['3KA17']))
-        self.tw1.topLevelItem(3).child(3).child(3).setText(2, pre_check2(current_p['3KA27']))
-        self.tw1.topLevelItem(3).child(3).child(4).setText(2, pre_check2(current_p['3KB16']))
-        self.tw1.topLevelItem(3).child(3).child(5).setText(2, pre_check2(current_p['3KB26']))
-        self.tw1.topLevelItem(3).child(3).child(6).setText(2, pre_check2(current_p['3KB17']))
-        self.tw1.topLevelItem(3).child(3).child(7).setText(2, pre_check2(current_p['3KB27']))
-        self.tw1.topLevelItem(3).child(4).setText(2, pre_check2(current_p['2KA19':'2KB29'].sum()))
-        self.tw1.topLevelItem(3).child(4).child(0).setText(2, pre_check2(current_p['2KA19']))
-        self.tw1.topLevelItem(3).child(4).child(1).setText(2, pre_check2(current_p['2KA29']))
-        self.tw1.topLevelItem(3).child(4).child(2).setText(2, pre_check2(current_p['2KB19']))
-        self.tw1.topLevelItem(3).child(4).child(3).setText(2, pre_check2(current_p['2KB29']))
-        self.tw1.topLevelItem(3).child(5).setText(2, pre_check2(current_p['W5']))
-        self.tw1.topLevelItem(4).setText(2, pre_check2(current_p['WA']))
-        #other=w2_total+w3_total+w4_total+w5_total+current_p['WA']
-        #self.label_17.setText(str(other))
-
-        self.tw2.topLevelItem(0).setText(2, pre_check2(current_p['9H140':'9KB33'].sum(),b=0))
-        self.tw2.topLevelItem(1).setText(2, pre_check2(current_p['AH120'],b=0))
-        self.tw2.topLevelItem(2).setText(2, pre_check2(current_p['AH190'],b=0))
-        self.tw2.topLevelItem(3).setText(2, pre_check2(current_p['AH130'],b=0))
-        self.tw2.topLevelItem(4).setText(2, pre_check2(current_p['1H360'],b=0))
-        self.tw2.topLevelItem(5).setText(2, pre_check2(current_p['1H450'],b=0))
-
-        self.tw3.topLevelItem(0).setText(2, pre_check2(current_p['2H120':'1H420'].sum()))
-        self.tw3.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H120':'2H220'].sum()))
-        self.tw3.topLevelItem(0).child(1).setText(2, pre_check2(current_p['5H120':'5H220'].sum()))
-        self.tw3.topLevelItem(0).child(2).setText(2, pre_check2(current_p['1H120':'1H220'].sum()))
-        self.tw3.topLevelItem(0).child(3).setText(2, pre_check2(current_p['1H320':'1H420'].sum()))
-
-        self.tw3.topLevelItem(1).setText(2, pre_check2(current_p['4KA18':'5KB19'].sum()))
-        self.tw3.topLevelItem(1).child(0).setText(2, pre_check2(current_p['4KA18']))
-        self.tw3.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KB19']))
-        self.tw3.topLevelItem(2).setText(2, pre_check2(current_p['4H120':'4H220'].sum()))
-        self.tw3.topLevelItem(2).child(0).setText(2, pre_check2(current_p['4H120']))
-        self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
-
-        sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
-        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
-
-        # 方式 2：table widget 3 利用 self.update_and_style_table_item 函式，在更新內容後，重新套用樣式
-        self.update_and_style_table_item(self.tableWidget_3, 0, 2, pre_check2(tai_power))
-        self.update_and_style_table_item(self.tableWidget_3,1 ,2, pre_check2(current_p['2H120':'5KB19'].sum()))
-        self.update_and_style_table_item(self.tableWidget_3, 2, 2, pre_check2(sun_power,b=5))
-        self.update_and_style_table_item(self.tableWidget_3, 3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
-
-    def check_box_event(self):
-        """
-        切換負載的顯示方式
-        :return:
-        """
-        if self.checkBox.isChecked():
-            self.tw1.topLevelItem(0).child(0).child(0).setText(0, '2H180')
-            self.tw1.topLevelItem(0).child(0).child(1).setText(0, '2H280')
-            self.tw1.topLevelItem(0).child(0).child(2).setText(0, '1H350')
-            self.tw1.topLevelItem(0).child(1).setText(0, '4KA19')
-            self.tw1.topLevelItem(0).child(2).child(0).setText(0, '4KB19')
-            self.tw1.topLevelItem(0).child(2).child(1).setText(0, '4KB29')
-            self.tw1.topLevelItem(0).child(3).child(0).setText(0, '2KA41')
-            self.tw1.topLevelItem(0).child(3).child(1).setText(0, '2KB41')
-            self.tw1.topLevelItem(1).child(0).setText(0, 'AJ320')
-            self.tw1.topLevelItem(1).child(1).child(0).setText(0, '5KA18')
-            self.tw1.topLevelItem(1).child(1).child(1).setText(0, '5KA28')
-            self.tw1.topLevelItem(1).child(1).child(2).setText(0, '5KB18')
-            self.tw1.topLevelItem(1).child(1).child(3).setText(0, '5KB28')
-            self.tw1.topLevelItem(3).child(0).child(0).setText(0, '3KA14')
-            self.tw1.topLevelItem(3).child(0).child(1).setText(0, '3KA15')
-            self.tw1.topLevelItem(3).child(1).child(0).setText(0, '3KA24')
-            self.tw1.topLevelItem(3).child(1).child(1).setText(0, '3KA25')
-            self.tw1.topLevelItem(3).child(2).child(0).setText(0, '3KB12')
-            self.tw1.topLevelItem(3).child(2).child(1).setText(0, '3KB22')
-            self.tw1.topLevelItem(3).child(2).child(2).setText(0, '3KB28')
-            self.tw1.topLevelItem(3).child(3).child(0).setText(0, '3KA16')
-            self.tw1.topLevelItem(3).child(3).child(1).setText(0, '3KA26')
-            self.tw1.topLevelItem(3).child(3).child(2).setText(0, '3KA17')
-            self.tw1.topLevelItem(3).child(3).child(3).setText(0, '3KA27')
-            self.tw1.topLevelItem(3).child(3).child(4).setText(0, '3KB16')
-            self.tw1.topLevelItem(3).child(3).child(5).setText(0, '3KB26')
-            self.tw1.topLevelItem(3).child(3).child(6).setText(0, '3KB17')
-            self.tw1.topLevelItem(3).child(3).child(7).setText(0, '3KB27')
-            self.tw1.topLevelItem(3).child(4).child(0).setText(0, '2KA19')
-            self.tw1.topLevelItem(3).child(4).child(1).setText(0, '2KA29')
-            self.tw1.topLevelItem(3).child(4).child(2).setText(0, '2KB19')
-            self.tw1.topLevelItem(3).child(4).child(3).setText(0, '2KB29')
-            self.tw2.topLevelItem(1).setText(0,'AH120')
-            self.tw2.topLevelItem(2).setText(0,'AH190')
-            self.tw2.topLevelItem(3).setText(0,'AH130')
-            self.tw2.topLevelItem(4).setText(0,'1H360')
-            self.tw2.topLevelItem(5).setText(0,'1H450')
-            self.tw3.topLevelItem(0).child(0).setText(0, '2H120 & 2H220')
-            self.tw3.topLevelItem(0).child(1).setText(0, '5H120 & 5H220')
-            self.tw3.topLevelItem(0).child(2).setText(0, '1H120 & 1H220')
-            self.tw3.topLevelItem(0).child(3).setText(0, '1H320 & 1H420')
-            self.tw3.topLevelItem(1).child(0).setText(0, '4KA18')
-            self.tw3.topLevelItem(1).child(1).setText(0, '5KB19')
-            self.tw3.topLevelItem(2).child(0).setText(0, '4H120')
-            self.tw3.topLevelItem(2).child(1).setText(0, '4H220')
-        else:
-            self.tw1.topLevelItem(0).child(0).child(0).setText(0, '#1 鼓風機')
-            self.tw1.topLevelItem(0).child(0).child(1).setText(0, '#2 鼓風機')
-            self.tw1.topLevelItem(0).child(0).child(2).setText(0, '#3 鼓風機')
-            self.tw1.topLevelItem(0).child(1).setText(0, '#1 燒結風車')
-            self.tw1.topLevelItem(0).child(2).child(0).setText(0, '#2-1')
-            self.tw1.topLevelItem(0).child(2).child(1).setText(0, '#2-2')
-            self.tw1.topLevelItem(0).child(3).child(0).setText(0, '#1')
-            self.tw1.topLevelItem(0).child(3).child(1).setText(0, '#2')
-            self.tw1.topLevelItem(1).child(0).setText(0, 'EAF 集塵')
-            self.tw1.topLevelItem(1).child(1).child(0).setText(0, '#1')
-            self.tw1.topLevelItem(1).child(1).child(1).setText(0, '#2')
-            self.tw1.topLevelItem(1).child(1).child(2).setText(0, '#3')
-            self.tw1.topLevelItem(1).child(1).child(3).setText(0, '#4')
-            self.tw1.topLevelItem(3).child(0).child(0).setText(0, '1-1')
-            self.tw1.topLevelItem(3).child(0).child(1).setText(0, '1-2')
-            self.tw1.topLevelItem(3).child(1).child(0).setText(0, '2-1')
-            self.tw1.topLevelItem(3).child(1).child(1).setText(0, '2-2')
-            self.tw1.topLevelItem(3).child(2).child(0).setText(0, '3-1')
-            self.tw1.topLevelItem(3).child(2).child(1).setText(0, '3-2')
-            self.tw1.topLevelItem(3).child(2).child(2).setText(0, '3-3')
-            self.tw1.topLevelItem(3).child(3).child(0).setText(0, '#1')
-            self.tw1.topLevelItem(3).child(3).child(1).setText(0, '#2')
-            self.tw1.topLevelItem(3).child(3).child(2).setText(0, '#3')
-            self.tw1.topLevelItem(3).child(3).child(3).setText(0, '#4')
-            self.tw1.topLevelItem(3).child(3).child(4).setText(0, '#5')
-            self.tw1.topLevelItem(3).child(3).child(5).setText(0, '#6')
-            self.tw1.topLevelItem(3).child(3).child(6).setText(0, '#7')
-            self.tw1.topLevelItem(3).child(3).child(7).setText(0, '#8')
-            self.tw1.topLevelItem(3).child(4).child(0).setText(0, 'IDF1 & BFP1,2')
-            self.tw1.topLevelItem(3).child(4).child(1).setText(0, 'IDF2 & BFP3,4')
-            self.tw1.topLevelItem(3).child(4).child(2).setText(0, 'IDF3 & BFP5,6')
-            self.tw1.topLevelItem(3).child(4).child(3).setText(0, 'IDF4 & BFP7,8')
-            self.tw2.topLevelItem(1).setText(0,'電爐')
-            self.tw2.topLevelItem(2).setText(0,'#1 精煉爐')
-            self.tw2.topLevelItem(3).setText(0,'#2 精煉爐')
-            self.tw2.topLevelItem(4).setText(0,'#1 轉爐精煉爐')
-            self.tw2.topLevelItem(5).setText(0,'#2 轉爐精煉爐')
-            self.tw3.topLevelItem(0).child(0).setText(0, 'TG1')
-            self.tw3.topLevelItem(0).child(1).setText(0, 'TG2')
-            self.tw3.topLevelItem(0).child(2).setText(0, 'TG3')
-            self.tw3.topLevelItem(0).child(3).setText(0, 'TG4')
-            self.tw3.topLevelItem(1).child(0).setText(0, 'TRT#1')
-            self.tw3.topLevelItem(1).child(1).setText(0, 'TRT#2')
-            self.tw3.topLevelItem(2).child(0).setText(0, 'CDQ#1')
-            self.tw3.topLevelItem(2).child(1).setText(0, 'CDQ#2')
-
-    def tw3_expanded_event(self):
-        """
-        1. 用來同步TGs 發電量、NG貢獻電量、NG使用量的項目展開、收縮
-        2. 所有項目在expanded 或 collapsed 時，變更文字顯示的方式
-        :return:
-        """
-        b_transparent = QtGui.QBrush(QtGui.QColor(0,0,0,0))
-        b_solid  = QtGui.QBrush(QtGui.QColor(0,0,0, 255))
-        # TGs
-        if self.tw3.topLevelItem(0).isExpanded():
-            self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw3.topLevelItem(0).setForeground(1, b_transparent)
-            # tw3 擴增、tw4刪除
-            self.tw3.topLevelItem(0).setForeground(2, b_transparent)
-            self.tw3.topLevelItem(0).setForeground(3, b_transparent)
-            # self.tw3.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw3.topLevelItem(0).setForeground(1, b_solid)
-            # tw3 擴增、tw4刪除
-            self.tw3.topLevelItem(0).setForeground(2, b_solid)
-            self.tw3.topLevelItem(0).setForeground(3, b_solid)
-            # self.tw3.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # TRTs
-        if self.tw3.topLevelItem(1).isExpanded():
-            self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw3.topLevelItem(1).setForeground(1, b_transparent)
-            # self.tw3.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw3.topLevelItem(1).setForeground(1, b_solid)
-            # self.tw3.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # CDQs
-        if self.tw3.topLevelItem(2).isExpanded():
-            self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw3.topLevelItem(2).setForeground(1, b_transparent)
-            # self.tw3.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw3.topLevelItem(2).setForeground(1, b_solid)
-            # self.tw3.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-
-    def tw1_expanded_event(self):
-        """
-        For the event of tw1 about being expanded or collapsed
-        :return:
-        """
-        b_transparent = QtGui.QBrush(QtGui.QColor(0,0,0,0))
-        b_solid  = QtGui.QBrush(QtGui.QColor(0,0,0, 255))
-
-        # w2
-        if self.tw1.topLevelItem(0).isExpanded():
-            self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # w2 --> 鼓風機群
-        if self.tw1.topLevelItem(0).child(0).isExpanded():
-            self.tw1.topLevelItem(0).child(0).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(0).child(0).setForeground(1, b_solid)
-        # w2 --> #2 燒結風車群
-        if self.tw1.topLevelItem(0).child(2).isExpanded():
-            self.tw1.topLevelItem(0).child(2).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(0).child(2).setForeground(1, b_solid)
-        # w2 --> #2 屋頂風扇&runner 群
-        if self.tw1.topLevelItem(0).child(3).isExpanded():
-            self.tw1.topLevelItem(0).child(3).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(0).child(3).setForeground(1, b_solid)
-
-        # w3
-        if self.tw1.topLevelItem(1).isExpanded():
-            self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-
-        # w3 --> 轉爐除塵
-        if self.tw1.topLevelItem(1).child(1).isExpanded():
-            self.tw1.topLevelItem(1).child(1).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(1).child(1).setForeground(1, b_solid)
-        # w4
-        if self.tw1.topLevelItem(2).isExpanded():
-            self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # w5
-        if self.tw1.topLevelItem(3).isExpanded():
-            self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-
-        # w5 --> O2#1
-        if self.tw1.topLevelItem(3).child(0).isExpanded():
-            self.tw1.topLevelItem(3).child(0).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(0).setForeground(1, b_solid)
-        # w5 --> O2#2
-        if self.tw1.topLevelItem(3).child(1).isExpanded():
-            self.tw1.topLevelItem(3).child(1).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(1).setForeground(1, b_solid)
-        # w5 --> O2#3
-        if self.tw1.topLevelItem(3).child(2).isExpanded():
-            self.tw1.topLevelItem(3).child(2).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(2).setForeground(1, b_solid)
-        # w5 --> 空壓機群
-        if self.tw1.topLevelItem(3).child(3).isExpanded():
-            self.tw1.topLevelItem(3).child(3).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(3).setForeground(1, b_solid)
-        # w5 --> IDF 群
-        if self.tw1.topLevelItem(3).child(4).isExpanded():
-            self.tw1.topLevelItem(3).child(4).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(4).setForeground(1, b_solid)
-
     def tws_init(self):
         """
         1. 因為treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
@@ -653,29 +199,35 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.beautify_avg_column(self.tw2, 2)
         self.beautify_avg_column(self.tw3, 2)
 
-        # 美化 tableWidget_3（QTableWidget）
+        # 初始化及美化 tableWidget_3（QTableWidget）
+        self.initialize_tableWidget_3_colors()
         self.beautify_avg_column(self.tableWidget_3, 2)
         self.beautify_avg_column(self.tableWidget_4, 0)
 
+        avg_column_width = 65
         self.tw1.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
         brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
         brush.setStyle(QtCore.Qt.BrushStyle.SolidPattern)  # 設定顏色的分佈方式
         self.tw1.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
         self.tw1.headerItem().setForeground(1, brush)
         self.tw1.headerItem().setForeground(2, brush)
-        self.tw1.setGeometry(QtCore.QRect(9, 10, 374, 191))     #scroller width 18, frame line width 1
+
+        #scroller width 18, frame line width 1
         self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
         self.tw1.setColumnWidth(1, 90)
-        self.tw1.setColumnWidth(2, 70)
+        self.tw1.setColumnWidth(2, avg_column_width)
+        tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + self.tw1.columnWidth(2) + 20
+        self.tw1.setFixedWidth(tw1_width)
 
         self.tw2.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
         self.tw2.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
         self.tw2.headerItem().setForeground(1, brush)
         self.tw2.headerItem().setForeground(2, brush)
-        self.tw2.setGeometry(QtCore.QRect(410, 10, 334, 191))
         self.tw2.setColumnWidth(0, 135)     # 設定各column 的寬度
         self.tw2.setColumnWidth(1, 90)
-        self.tw2.setColumnWidth(2, 90)
+        self.tw2.setColumnWidth(2, avg_column_width)
+        tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + self.tw2.columnWidth(2)
+        self.tw2.setFixedWidth(tw2_width)
 
         self.tw3.setStyleSheet("QHeaderView::section{background:rgb(100, 170, 90);}")  # 設置表頭的背景顏色
         brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
@@ -684,17 +236,17 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.headerItem().setForeground(1, brush)
         self.tw3.headerItem().setForeground(2, brush)
         self.tw3.headerItem().setForeground(3, brush)
-        self.tw3.setGeometry(QtCore.QRect(300, 250, 530, 141))
         self.tw3.setColumnWidth(0, 110)  # tw3 total width: 221
         self.tw3.setColumnWidth(1, 100)
-        self.tw3.setColumnWidth(2, 70)
+        self.tw3.setColumnWidth(2, avg_column_width)
         self.tw3.setColumnWidth(3, 100)
-        self.tw3.setColumnWidth(4, 100)
-
-        self.tableWidget_3.setGeometry(QtCore.QRect(10, 250, 201, 151))
+        self.tw3.setColumnWidth(4, 90)
         self.tableWidget_3.setColumnWidth(0, 100)
         self.tableWidget_3.setColumnWidth(1, 100)
-        self.tableWidget_3.setColumnWidth(2, 56)
+        self.tableWidget_3.setColumnWidth(2, avg_column_width)
+        new_width  = (self.tw3.columnWidth(0) + self.tw3.columnWidth(1) + self.tw3.columnWidth(2)
+                          + self.tw3.columnWidth(3) + self.tw3.columnWidth(4) + 20)
+        self.tableWidget_3.setFixedWidth(new_width)
 
         self.tableWidget_4.setRowCount(1)
         self.tableWidget_4.setColumnWidth(0, 160)
@@ -976,6 +528,506 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
 
+    def initialize_tableWidget_3_colors(self):
+        """ 設定 tableWidget_3 內特定行與欄位的背景顏色、文字顏色與對齊方式 """
+
+        # 定義要修改的行與顏色
+        color_mappings = {
+            0: QtGui.QColor(80, 191, 200),  # 全廠用電量（第 0 列）
+            1: QtGui.QColor(100, 170, 90),  # 中龍發電量（第 1 列）
+            2: QtGui.QColor(170, 170, 0),  # 太陽能(直供)（第 2 列）
+            3: QtGui.QColor(190, 90, 90),  # 台電供電量（第 3 列）
+        }
+
+        header_bg_color = QtGui.QColor(50, 50, 50)  # 深灰色背景
+        header_text_color = QtGui.QColor(255, 255, 255)  # 白色文字
+        text_color = QtGui.QColor(255, 255, 255)  # 白色文字
+        font = QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold)
+
+        # 美化表頭
+        header = self.tableWidget_3.horizontalHeader()
+        header.setStyleSheet(
+            "QHeaderView::section {"
+            "background-color: rgb(50, 50, 50);"  # 深灰色背景
+            "color: white;"  # 文字顏色
+            "font-size: 14px;"  # 字體大小
+            "font-weight: bold;"  # 加粗
+            "text-align: center;"  # 文字置中
+            "border: 1px solid rgb(80, 80, 80);"  # 邊框顏色
+            "}"
+        )
+        header.setFixedHeight(30)  # 設定表頭高度
+
+        # 遍歷需要變色的行
+        for row, bg_color in color_mappings.items():
+            for col in [0, 1]:  # 只修改第 0 欄（名稱）和第 1 欄（即時量）
+                item = self.tableWidget_3.item(row, col)
+                if item is None:
+                    item = QtWidgets.QTableWidgetItem()
+                    self.tableWidget_3.setItem(row, col, item)
+
+                # 設定顏色
+                item.setBackground(QtGui.QBrush(bg_color))
+                item.setForeground(QtGui.QBrush(text_color))
+                item.setFont(font)
+
+                # 設定對齊方式
+                if col == 0:
+                    item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)  # 名稱 → 置中
+                else:
+                    item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight)  # 即時量 → 靠右
+
+        self.tableWidget_3.viewport().update()  # 強制 UI 重新繪製
+
+    def date_edit3_user_change(self):
+        if self.dateEdit_3.date() > pd.Timestamp.today().date():
+            # ----選定到未來日期時，查詢當天的各週期資料，並顯示最後一個結束週期的資料----
+            sd = pd.Timestamp(pd.Timestamp.now().date())
+            self.dateEdit_3.blockSignals(True)  # 屏蔽dateEdit 的signal, 避免無限執行
+            self.dateEdit_3.setDate(QtCore.QDate(sd.year, sd.month, sd.day))
+            self.dateEdit_3.blockSignals(False) # 設定完dateEdit 後重新開啟DateEdit 的signal
+            ed = sd + pd.offsets.Day(1)
+            self.history_demand_of_groups(st=sd, et=ed)
+
+            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值
+            # 並觸發scrollerBar 的value changed 事件，執行後續動作。
+            sp = pd.Timestamp.now().floor('15T')
+            self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
+
+        else:
+            # ------ 初始帶入或選擇非未來日期時，查詢完資料後，顯示第一個週期的資料
+            sd = pd.Timestamp(self.dateEdit_3.date().toString())
+            ed = sd + pd.offsets.Day(1)
+            self.history_demand_of_groups(st=sd, et=ed)
+            self.label_16.setText('00:00')
+            self.label_17.setText('00:15')
+            self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
+            self.horizontalScrollBar.setValue(0)
+
+    def confirm_value(self):
+        """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
+        st = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
+        et = st + pd.offsets.Minute(15)
+
+        if et > pd.Timestamp.now():     # 欲查詢的時間段，屬於未來時間時
+            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值,
+            et = pd.Timestamp.now().floor('15T')
+            # self.label_22.setText('無法查詢未來的紀錄！')
+            self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
+            st = et - pd.offsets.Minute(15)
+
+        self.label_16.setText(st.strftime('%H:%M'))
+        self.label_17.setText(et.strftime('%H:%M'))
+        self.update_history_to_tws(self.history_datas_of_groups.loc[:,st.strftime('%H:%M')])
+
+    def check_box2_event(self):
+        #-----------調出當天的各週期平均-----------
+        st = pd.Timestamp.today().date()
+        et = st + pd.offsets.Day(1)
+        self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+        tw3_base_width = (self.tw3.columnWidth(0) + self.tw3.columnWidth(1)
+                          + self.tw3.columnWidth(3) + self.tw3.columnWidth(4) + 20)
+        base_width = self.tableWidget_3.columnWidth(0) + self.tableWidget_3.columnWidth(1)
+
+        if self.checkBox_2.isChecked():     # 顯示歷史平均值
+            self.history_demand_of_groups(st=st, et=et)
+            #------function visible_____
+            self.dateEdit_3.setVisible(True)
+            self.horizontalScrollBar.setVisible(True)
+            self.label_16.setVisible(True)
+            self.label_17.setVisible(True)
+            self.label_19.setVisible(True)
+            self.label_21.setVisible(True)
+            self.label_22.setVisible(True)
+            # ----------------------顯示平均值欄位，並增加 tree widget 總寬度 ----------------
+            self.tw1.setColumnHidden(2, False)  # 隱藏模式必須先解除，columnWidth() 才能讀取到值
+            self.tw2.setColumnHidden(2, False)
+            self.tw3.setColumnHidden(2, False)
+            tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + self.tw1.columnWidth(2) + 20
+            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + self.tw2.columnWidth(2)
+            tw3_width = tw3_base_width + self.tw3.columnWidth(2)
+            # ----------------------顯示平均值欄位，並增加 tablewidget3 總寬度 ----------------
+            self.tableWidget_3.setColumnHidden(2, False)
+            new_width = base_width + self.tableWidget_3.columnWidth(2)
+        else:
+            # ------function visible_____
+            self.dateEdit_3.setVisible(False)
+            self.horizontalScrollBar.setVisible(False)
+            self.label_16.setVisible(False)
+            self.label_17.setVisible(False)
+            self.label_19.setVisible(False)
+            self.label_21.setVisible(False)
+            self.label_22.setVisible(False)
+            # ----------------------平均值欄位隱藏，並增加 tree widget 總寬度 ----------------
+            tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + 20
+            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1)
+            tw3_width = tw3_base_width
+            self.tw1.setColumnHidden(2, True)
+            self.tw2.setColumnHidden(2, True)
+            self.tw3.setColumnHidden(2, True)
+            # ----------------------顯示平均值欄位，並減少 tablewidget3 總寬度 ----------------
+            self.tableWidget_3.setColumnHidden(2, True)
+            new_width = base_width
+        self.tw1.setFixedWidth(tw1_width)
+        self.tw2.setFixedWidth(tw2_width)
+        self.tw3.setFixedWidth(tw3_width)
+        self.tableWidget_3.setFixedWidth(new_width)
+
+    def check_box_event(self):
+        """
+        切換負載的顯示方式
+        :return:
+        """
+        if self.checkBox.isChecked():
+            self.tw1.topLevelItem(0).child(0).child(0).setText(0, '2H180')
+            self.tw1.topLevelItem(0).child(0).child(1).setText(0, '2H280')
+            self.tw1.topLevelItem(0).child(0).child(2).setText(0, '1H350')
+            self.tw1.topLevelItem(0).child(1).setText(0, '4KA19')
+            self.tw1.topLevelItem(0).child(2).child(0).setText(0, '4KB19')
+            self.tw1.topLevelItem(0).child(2).child(1).setText(0, '4KB29')
+            self.tw1.topLevelItem(0).child(3).child(0).setText(0, '2KA41')
+            self.tw1.topLevelItem(0).child(3).child(1).setText(0, '2KB41')
+            self.tw1.topLevelItem(1).child(0).setText(0, 'AJ320')
+            self.tw1.topLevelItem(1).child(1).child(0).setText(0, '5KA18')
+            self.tw1.topLevelItem(1).child(1).child(1).setText(0, '5KA28')
+            self.tw1.topLevelItem(1).child(1).child(2).setText(0, '5KB18')
+            self.tw1.topLevelItem(1).child(1).child(3).setText(0, '5KB28')
+            self.tw1.topLevelItem(3).child(0).child(0).setText(0, '3KA14')
+            self.tw1.topLevelItem(3).child(0).child(1).setText(0, '3KA15')
+            self.tw1.topLevelItem(3).child(1).child(0).setText(0, '3KA24')
+            self.tw1.topLevelItem(3).child(1).child(1).setText(0, '3KA25')
+            self.tw1.topLevelItem(3).child(2).child(0).setText(0, '3KB12')
+            self.tw1.topLevelItem(3).child(2).child(1).setText(0, '3KB22')
+            self.tw1.topLevelItem(3).child(2).child(2).setText(0, '3KB28')
+            self.tw1.topLevelItem(3).child(3).child(0).setText(0, '3KA16')
+            self.tw1.topLevelItem(3).child(3).child(1).setText(0, '3KA26')
+            self.tw1.topLevelItem(3).child(3).child(2).setText(0, '3KA17')
+            self.tw1.topLevelItem(3).child(3).child(3).setText(0, '3KA27')
+            self.tw1.topLevelItem(3).child(3).child(4).setText(0, '3KB16')
+            self.tw1.topLevelItem(3).child(3).child(5).setText(0, '3KB26')
+            self.tw1.topLevelItem(3).child(3).child(6).setText(0, '3KB17')
+            self.tw1.topLevelItem(3).child(3).child(7).setText(0, '3KB27')
+            self.tw1.topLevelItem(3).child(4).child(0).setText(0, '2KA19')
+            self.tw1.topLevelItem(3).child(4).child(1).setText(0, '2KA29')
+            self.tw1.topLevelItem(3).child(4).child(2).setText(0, '2KB19')
+            self.tw1.topLevelItem(3).child(4).child(3).setText(0, '2KB29')
+            self.tw2.topLevelItem(1).setText(0,'AH120')
+            self.tw2.topLevelItem(2).setText(0,'AH190')
+            self.tw2.topLevelItem(3).setText(0,'AH130')
+            self.tw2.topLevelItem(4).setText(0,'1H360')
+            self.tw2.topLevelItem(5).setText(0,'1H450')
+            self.tw3.topLevelItem(0).child(0).setText(0, '2H120 & 2H220')
+            self.tw3.topLevelItem(0).child(1).setText(0, '5H120 & 5H220')
+            self.tw3.topLevelItem(0).child(2).setText(0, '1H120 & 1H220')
+            self.tw3.topLevelItem(0).child(3).setText(0, '1H320 & 1H420')
+            self.tw3.topLevelItem(1).child(0).setText(0, '4KA18')
+            self.tw3.topLevelItem(1).child(1).setText(0, '5KB19')
+            self.tw3.topLevelItem(2).child(0).setText(0, '4H120')
+            self.tw3.topLevelItem(2).child(1).setText(0, '4H220')
+        else:
+            self.tw1.topLevelItem(0).child(0).child(0).setText(0, '#1 鼓風機')
+            self.tw1.topLevelItem(0).child(0).child(1).setText(0, '#2 鼓風機')
+            self.tw1.topLevelItem(0).child(0).child(2).setText(0, '#3 鼓風機')
+            self.tw1.topLevelItem(0).child(1).setText(0, '#1 燒結風車')
+            self.tw1.topLevelItem(0).child(2).child(0).setText(0, '#2-1')
+            self.tw1.topLevelItem(0).child(2).child(1).setText(0, '#2-2')
+            self.tw1.topLevelItem(0).child(3).child(0).setText(0, '#1')
+            self.tw1.topLevelItem(0).child(3).child(1).setText(0, '#2')
+            self.tw1.topLevelItem(1).child(0).setText(0, 'EAF 集塵')
+            self.tw1.topLevelItem(1).child(1).child(0).setText(0, '#1')
+            self.tw1.topLevelItem(1).child(1).child(1).setText(0, '#2')
+            self.tw1.topLevelItem(1).child(1).child(2).setText(0, '#3')
+            self.tw1.topLevelItem(1).child(1).child(3).setText(0, '#4')
+            self.tw1.topLevelItem(3).child(0).child(0).setText(0, '1-1')
+            self.tw1.topLevelItem(3).child(0).child(1).setText(0, '1-2')
+            self.tw1.topLevelItem(3).child(1).child(0).setText(0, '2-1')
+            self.tw1.topLevelItem(3).child(1).child(1).setText(0, '2-2')
+            self.tw1.topLevelItem(3).child(2).child(0).setText(0, '3-1')
+            self.tw1.topLevelItem(3).child(2).child(1).setText(0, '3-2')
+            self.tw1.topLevelItem(3).child(2).child(2).setText(0, '3-3')
+            self.tw1.topLevelItem(3).child(3).child(0).setText(0, '#1')
+            self.tw1.topLevelItem(3).child(3).child(1).setText(0, '#2')
+            self.tw1.topLevelItem(3).child(3).child(2).setText(0, '#3')
+            self.tw1.topLevelItem(3).child(3).child(3).setText(0, '#4')
+            self.tw1.topLevelItem(3).child(3).child(4).setText(0, '#5')
+            self.tw1.topLevelItem(3).child(3).child(5).setText(0, '#6')
+            self.tw1.topLevelItem(3).child(3).child(6).setText(0, '#7')
+            self.tw1.topLevelItem(3).child(3).child(7).setText(0, '#8')
+            self.tw1.topLevelItem(3).child(4).child(0).setText(0, 'IDF1 & BFP1,2')
+            self.tw1.topLevelItem(3).child(4).child(1).setText(0, 'IDF2 & BFP3,4')
+            self.tw1.topLevelItem(3).child(4).child(2).setText(0, 'IDF3 & BFP5,6')
+            self.tw1.topLevelItem(3).child(4).child(3).setText(0, 'IDF4 & BFP7,8')
+            self.tw2.topLevelItem(1).setText(0,'電爐')
+            self.tw2.topLevelItem(2).setText(0,'#1 精煉爐')
+            self.tw2.topLevelItem(3).setText(0,'#2 精煉爐')
+            self.tw2.topLevelItem(4).setText(0,'#1 轉爐精煉爐')
+            self.tw2.topLevelItem(5).setText(0,'#2 轉爐精煉爐')
+            self.tw3.topLevelItem(0).child(0).setText(0, 'TG1')
+            self.tw3.topLevelItem(0).child(1).setText(0, 'TG2')
+            self.tw3.topLevelItem(0).child(2).setText(0, 'TG3')
+            self.tw3.topLevelItem(0).child(3).setText(0, 'TG4')
+            self.tw3.topLevelItem(1).child(0).setText(0, 'TRT#1')
+            self.tw3.topLevelItem(1).child(1).setText(0, 'TRT#2')
+            self.tw3.topLevelItem(2).child(0).setText(0, 'CDQ#1')
+            self.tw3.topLevelItem(2).child(1).setText(0, 'CDQ#2')
+
+    # @timeit
+    def history_demand_of_groups(self, st, et):
+        """
+            查詢特定週期，各設備群組(分類)的平均值
+        :return:
+        """
+        mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
+        groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
+        groups_demand.index = self.tag_list.loc[mask,'name']
+        name_list = groups_demand.loc[:,'tag_name2'].values.tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
+        query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
+
+        query_result.columns = groups_demand.index
+        query_result = query_result.T       # 將query_result 轉置 shape:(96,178) -> (178,96)
+        query_result.reset_index(inplace=True, drop=True)  # 重置及捨棄原本的 index
+        query_result.index = groups_demand.index    # 將index 更新為各迴路或gas 的名稱 (套用groups_demands.index 即可)
+        time_list = [t.strftime('%H:%M') for t in  pd.date_range('00:00', '23:45', freq='15min')]
+        query_result.columns = time_list        # 用週期的起始時間，作為各column 的名稱
+        query_result.loc[:,'00:00':'23:45'] = query_result.loc[:,'00:00':'23:45'] * 4 # kwh -> MW/15 min
+        groups_demand = pd.concat([groups_demand, query_result], axis=1, copy=False)
+        wx_list = list()    # 暫存各wx的計算結果用
+        for _ in time_list:
+            # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
+            wx_grouped = groups_demand.groupby(['Group1','Group2'])[_].sum()
+            c = wx_grouped.loc['W2':'WA', 'B']
+            c.name = _
+            c.index = c.index.get_level_values(0)   # 重新將index 設置為原multiIndex 的第一層index 內容
+            wx_list.append(c)
+        wx = pd.DataFrame([wx_list[_] for _ in range(96)])
+        # 將wx 計算結果轉置，並along index 合併於groups_demand 下方, 並將結果存在class 變數中
+        self.history_datas_of_groups = pd.concat([groups_demand, wx.T], axis=0)
+
+    def update_history_to_tws(self, current_p):
+        """
+        暫時用來將各群組的歷史平均量顯顯示在 各tree widget 的3rd column
+        :param current_p:
+        :return:
+        """
+        w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
+        self.tw1.topLevelItem(0).setText(2, pre_check2(w2_total))
+        self.tw1.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H180':'1H350'].sum()))
+        self.tw1.topLevelItem(0).child(0).child(0).setText(2, pre_check2(current_p['2H180']))
+        self.tw1.topLevelItem(0).child(0).child(1).setText(2, pre_check2(current_p['2H280']))
+        self.tw1.topLevelItem(0).child(0).child(2).setText(2, pre_check2(current_p['1H350']))
+        self.tw1.topLevelItem(0).child(1).setText(2, pre_check2(current_p['4KA19']))
+        self.tw1.topLevelItem(0).child(2).setText(2, pre_check2(current_p['4KB19':'4KB29'].sum()))
+        self.tw1.topLevelItem(0).child(2).child(0).setText(2, pre_check2(current_p['4KB19']))
+        self.tw1.topLevelItem(0).child(2).child(1).setText(2, pre_check2(current_p['4KB29']))
+        self.tw1.topLevelItem(0).child(3).setText(1, pre_check2(current_p['2KA41':'2KB41'].sum()))
+        self.tw1.topLevelItem(0).child(3).child(0).setText(2, pre_check2(current_p['2KA41']))
+        self.tw1.topLevelItem(0).child(3).child(1).setText(2, pre_check2(current_p['2KB41']))
+        self.tw1.topLevelItem(0).child(4).setText(2, pre_check2(current_p['W2']))
+
+        w3_total = current_p['AJ320':'5KB28'].sum() + current_p['W3']
+        self.tw1.topLevelItem(1).setText(2, pre_check2(w3_total))
+        self.tw1.topLevelItem(1).child(0).setText(2, pre_check2(current_p['AJ320']))
+        self.tw1.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KA18':'5KB28'].sum()))
+        self.tw1.topLevelItem(1).child(1).child(0).setText(2, pre_check2(current_p['5KA18']))
+        self.tw1.topLevelItem(1).child(1).child(1).setText(2, pre_check2(current_p['5KA28']))
+        self.tw1.topLevelItem(1).child(1).child(2).setText(2, pre_check2(current_p['5KB18']))
+        self.tw1.topLevelItem(1).child(1).child(3).setText(2, pre_check2(current_p['5KB28']))
+        self.tw1.topLevelItem(1).child(2).setText(2, pre_check2(current_p['W3']))
+
+        w42 = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
+        w4_total = current_p['AJ130':'AJ320'].sum() + w42
+
+        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total))
+        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(current_p['AJ130':'AJ320'].sum()))
+        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w42))
+
+        w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
+        self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
+        self.tw1.topLevelItem(3).child(0).setText(2, pre_check2(current_p['3KA14':'3KA15'].sum()))
+        self.tw1.topLevelItem(3).child(0).child(0).setText(2, pre_check2(current_p['3KA14']))
+        self.tw1.topLevelItem(3).child(0).child(1).setText(2, pre_check2(current_p['3KA15']))
+        self.tw1.topLevelItem(3).child(1).setText(2, pre_check2(current_p['3KA24':'3KA25'].sum()))
+        self.tw1.topLevelItem(3).child(1).child(0).setText(2, pre_check2(current_p['3KA24']))
+        self.tw1.topLevelItem(3).child(1).child(1).setText(2, pre_check2(current_p['3KA25']))
+        self.tw1.topLevelItem(3).child(2).setText(2, pre_check2(current_p['3KB12':'3KB28'].sum()))
+        self.tw1.topLevelItem(3).child(2).child(0).setText(2, pre_check2(current_p['3KB12']))
+        self.tw1.topLevelItem(3).child(2).child(1).setText(2, pre_check2(current_p['3KB22']))
+        self.tw1.topLevelItem(3).child(2).child(2).setText(2, pre_check2(current_p['3KB28']))
+        self.tw1.topLevelItem(3).child(3).setText(2, pre_check2(current_p['3KA16':'3KB27'].sum()))
+        self.tw1.topLevelItem(3).child(3).child(0).setText(2, pre_check2(current_p['3KA16']))
+        self.tw1.topLevelItem(3).child(3).child(1).setText(2, pre_check2(current_p['3KA26']))
+        self.tw1.topLevelItem(3).child(3).child(2).setText(2, pre_check2(current_p['3KA17']))
+        self.tw1.topLevelItem(3).child(3).child(3).setText(2, pre_check2(current_p['3KA27']))
+        self.tw1.topLevelItem(3).child(3).child(4).setText(2, pre_check2(current_p['3KB16']))
+        self.tw1.topLevelItem(3).child(3).child(5).setText(2, pre_check2(current_p['3KB26']))
+        self.tw1.topLevelItem(3).child(3).child(6).setText(2, pre_check2(current_p['3KB17']))
+        self.tw1.topLevelItem(3).child(3).child(7).setText(2, pre_check2(current_p['3KB27']))
+        self.tw1.topLevelItem(3).child(4).setText(2, pre_check2(current_p['2KA19':'2KB29'].sum()))
+        self.tw1.topLevelItem(3).child(4).child(0).setText(2, pre_check2(current_p['2KA19']))
+        self.tw1.topLevelItem(3).child(4).child(1).setText(2, pre_check2(current_p['2KA29']))
+        self.tw1.topLevelItem(3).child(4).child(2).setText(2, pre_check2(current_p['2KB19']))
+        self.tw1.topLevelItem(3).child(4).child(3).setText(2, pre_check2(current_p['2KB29']))
+        self.tw1.topLevelItem(3).child(5).setText(2, pre_check2(current_p['W5']))
+        self.tw1.topLevelItem(4).setText(2, pre_check2(current_p['WA']))
+        #other=w2_total+w3_total+w4_total+w5_total+current_p['WA']
+        #self.label_17.setText(str(other))
+
+        self.tw2.topLevelItem(0).setText(2, pre_check2(current_p['9H140':'9KB33'].sum(),b=0))
+        self.tw2.topLevelItem(1).setText(2, pre_check2(current_p['AH120'],b=0))
+        self.tw2.topLevelItem(2).setText(2, pre_check2(current_p['AH190'],b=0))
+        self.tw2.topLevelItem(3).setText(2, pre_check2(current_p['AH130'],b=0))
+        self.tw2.topLevelItem(4).setText(2, pre_check2(current_p['1H360'],b=0))
+        self.tw2.topLevelItem(5).setText(2, pre_check2(current_p['1H450'],b=0))
+
+        self.tw3.topLevelItem(0).setText(2, pre_check2(current_p['2H120':'1H420'].sum()))
+        self.tw3.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H120':'2H220'].sum()))
+        self.tw3.topLevelItem(0).child(1).setText(2, pre_check2(current_p['5H120':'5H220'].sum()))
+        self.tw3.topLevelItem(0).child(2).setText(2, pre_check2(current_p['1H120':'1H220'].sum()))
+        self.tw3.topLevelItem(0).child(3).setText(2, pre_check2(current_p['1H320':'1H420'].sum()))
+
+        self.tw3.topLevelItem(1).setText(2, pre_check2(current_p['4KA18':'5KB19'].sum()))
+        self.tw3.topLevelItem(1).child(0).setText(2, pre_check2(current_p['4KA18']))
+        self.tw3.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KB19']))
+        self.tw3.topLevelItem(2).setText(2, pre_check2(current_p['4H120':'4H220'].sum()))
+        self.tw3.topLevelItem(2).child(0).setText(2, pre_check2(current_p['4H120']))
+        self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
+
+        sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
+        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
+
+        # 方式 2：table widget 3 利用 self.update_and_style_table_item 函式，在更新內容後，重新套用樣式
+        self.update_and_style_table_item(self.tableWidget_3, 0, 2, pre_check2(tai_power))
+        self.update_and_style_table_item(self.tableWidget_3,1 ,2, pre_check2(current_p['2H120':'5KB19'].sum()))
+        self.update_and_style_table_item(self.tableWidget_3, 2, 2, pre_check2(sun_power,b=5))
+        self.update_and_style_table_item(self.tableWidget_3, 3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
+
+    def tw3_expanded_event(self):
+        """
+        1. 用來同步TGs 發電量、NG貢獻電量、NG使用量的項目展開、收縮
+        2. 所有項目在expanded 或 collapsed 時，變更文字顯示的方式
+        :return:
+        """
+        b_transparent = QtGui.QBrush(QtGui.QColor(0,0,0,0))
+        b_solid  = QtGui.QBrush(QtGui.QColor(0,0,0, 255))
+        # TGs
+        if self.tw3.topLevelItem(0).isExpanded():
+            self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.tw3.topLevelItem(0).setForeground(1, b_transparent)
+            # tw3 擴增、tw4刪除
+            self.tw3.topLevelItem(0).setForeground(2, b_transparent)
+            self.tw3.topLevelItem(0).setForeground(3, b_transparent)
+            # self.tw3.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+        else:
+            self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.tw3.topLevelItem(0).setForeground(1, b_solid)
+            # tw3 擴增、tw4刪除
+            self.tw3.topLevelItem(0).setForeground(2, b_solid)
+            self.tw3.topLevelItem(0).setForeground(3, b_solid)
+            # self.tw3.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        # TRTs
+        if self.tw3.topLevelItem(1).isExpanded():
+            self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.tw3.topLevelItem(1).setForeground(1, b_transparent)
+            # self.tw3.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+        else:
+            self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.tw3.topLevelItem(1).setForeground(1, b_solid)
+            # self.tw3.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        # CDQs
+        if self.tw3.topLevelItem(2).isExpanded():
+            self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.tw3.topLevelItem(2).setForeground(1, b_transparent)
+            # self.tw3.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+        else:
+            self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.tw3.topLevelItem(2).setForeground(1, b_solid)
+            # self.tw3.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+
+    def tw1_expanded_event(self):
+        """
+        For the event of tw1 about being expanded or collapsed
+        :return:
+        """
+        b_transparent = QtGui.QBrush(QtGui.QColor(0,0,0,0))
+        b_solid  = QtGui.QBrush(QtGui.QColor(0,0,0, 255))
+
+        # w2
+        if self.tw1.topLevelItem(0).isExpanded():
+            self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+        else:
+            self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        # w2 --> 鼓風機群
+        if self.tw1.topLevelItem(0).child(0).isExpanded():
+            self.tw1.topLevelItem(0).child(0).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(0).child(0).setForeground(1, b_solid)
+        # w2 --> #2 燒結風車群
+        if self.tw1.topLevelItem(0).child(2).isExpanded():
+            self.tw1.topLevelItem(0).child(2).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(0).child(2).setForeground(1, b_solid)
+        # w2 --> #2 屋頂風扇&runner 群
+        if self.tw1.topLevelItem(0).child(3).isExpanded():
+            self.tw1.topLevelItem(0).child(3).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(0).child(3).setForeground(1, b_solid)
+
+        # w3
+        if self.tw1.topLevelItem(1).isExpanded():
+            self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+        else:
+            self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+
+        # w3 --> 轉爐除塵
+        if self.tw1.topLevelItem(1).child(1).isExpanded():
+            self.tw1.topLevelItem(1).child(1).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(1).child(1).setForeground(1, b_solid)
+        # w4
+        if self.tw1.topLevelItem(2).isExpanded():
+            self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+        else:
+            self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        # w5
+        if self.tw1.topLevelItem(3).isExpanded():
+            self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+        else:
+            self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+
+        # w5 --> O2#1
+        if self.tw1.topLevelItem(3).child(0).isExpanded():
+            self.tw1.topLevelItem(3).child(0).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(3).child(0).setForeground(1, b_solid)
+        # w5 --> O2#2
+        if self.tw1.topLevelItem(3).child(1).isExpanded():
+            self.tw1.topLevelItem(3).child(1).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(3).child(1).setForeground(1, b_solid)
+        # w5 --> O2#3
+        if self.tw1.topLevelItem(3).child(2).isExpanded():
+            self.tw1.topLevelItem(3).child(2).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(3).child(2).setForeground(1, b_solid)
+        # w5 --> 空壓機群
+        if self.tw1.topLevelItem(3).child(3).isExpanded():
+            self.tw1.topLevelItem(3).child(3).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(3).child(3).setForeground(1, b_solid)
+        # w5 --> IDF 群
+        if self.tw1.topLevelItem(3).child(4).isExpanded():
+            self.tw1.topLevelItem(3).child(4).setForeground(1, b_transparent)
+        else:
+            self.tw1.topLevelItem(3).child(4).setForeground(1, b_solid)
+
     def tws_update(self, current_p):
         """
         更新樹狀結構(tree widget)、表格結構(table widget) 裡的資料
@@ -1082,22 +1134,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(0).setText(1, pre_check(current_p['4H120']))
         self.tw3.topLevelItem(2).child(1).setText(1, pre_check(current_p['4H220']))
 
-        brush1 = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # 給白色文字用的設定
-        brush1.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush2 = QtGui.QBrush(QtGui.QColor(80, 191, 200))  # 全廠用電量的背景色
-        brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush3 = QtGui.QBrush(QtGui.QColor(100, 170, 90))  # 中龍發電量的背景色
-        brush3.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush4 = QtGui.QBrush(QtGui.QColor(170, 170, 0))  # 中龍發電量的背景色
-        brush4.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush5 = QtGui.QBrush(QtGui.QColor(190, 90, 90))  # 中龍發電量的背景色
-        brush5.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-
-        font = QtGui.QFont()
-        font.setFamily("微軟正黑體")
-        font.setPointSize(12)
-        font.setBold(True)
-
         tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
         # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
@@ -1105,34 +1141,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.update_table_item(self.tableWidget_3, 1, 1, pre_check(current_p['2H120':'5KB19'].sum()))
         self.update_table_item(self.tableWidget_3, 2, 1, pre_check(current_p['sp_real_time'], b=5))
         self.update_table_item(self.tableWidget_3, 3, 1, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(), b=4))
-        #item01 = QtWidgets.QTableWidgetItem(pre_check(tai_power))
-        #item01.setForeground(brush1)
-        #item01.setBackground(brush2)
-        #item01.setFont(font)
-        #item01.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        #self.tableWidget_3.setItem(0, 1, item01)
-
-        #item11 = QtWidgets.QTableWidgetItem(pre_check(current_p['2H120':'5KB19'].sum()))
-        #item11.setForeground(brush1)
-        #item11.setBackground(brush3)
-        #item11.setFont(font)
-        #item11.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        #self.tableWidget_3.setItem(1, 1, item11)
-
-        #item21 = QtWidgets.QTableWidgetItem(pre_check(current_p['sp_real_time'], b=5))
-        #item21.setForeground(brush1)
-        #item21.setBackground(brush4)
-        #item21.setFont(font)
-        #item21.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        #self.tableWidget_3.setItem(2, 1, item21)
-
-        #item31= QtWidgets.QTableWidgetItem(str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW')
-        ##item31 = QtWidgets.QTableWidgetItem(pre_check(current_p['feeder 1510':'feeder 1520'].sum()))
-        #item31.setForeground(brush1)
-        #item31.setBackground(brush5)
-        #item31.setFont(font)
-        #item31.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        #self.tableWidget_3.setItem(3, 1, item31)
 
     def update_current_value(self):
         """
