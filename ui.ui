@@ -929,7 +929,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
      <bool>true</bool>
     </property>
     <attribute name="title">
-     <string>開發中....</string>
+     <string>DashBoard</string>
     </attribute>
     <widget class="QTreeWidget" name="tw1">
      <property name="enabled">
@@ -938,7 +938,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
      <property name="geometry">
       <rect>
        <x>0</x>
-       <y>220</y>
+       <y>10</y>
        <width>301</width>
        <height>191</height>
       </rect>
@@ -1959,7 +1959,7 @@ Runner</string>
      <property name="geometry">
       <rect>
        <x>0</x>
-       <y>10</y>
+       <y>210</y>
        <width>290</width>
        <height>191</height>
       </rect>
@@ -2518,7 +2518,7 @@ Runner</string>
     <widget class="QTableWidget" name="tableWidget_3">
      <property name="geometry">
       <rect>
-       <x>330</x>
+       <x>370</x>
        <y>10</y>
        <width>201</width>
        <height>151</height>
@@ -2716,7 +2716,7 @@ Runner</string>
      </item>
      <item row="2" column="0">
       <property name="text">
-       <string>太陽能(直供)</string>
+       <string>太陽能</string>
       </property>
       <property name="textAlignment">
        <set>AlignCenter</set>
@@ -2739,7 +2739,7 @@ Runner</string>
     <widget class="QGroupBox" name="groupBox_2">
      <property name="geometry">
       <rect>
-       <x>620</x>
+       <x>630</x>
        <y>10</y>
        <width>191</width>
        <height>151</height>
@@ -2766,7 +2766,8 @@ Runner</string>
        <bool>false</bool>
       </property>
       <property name="styleSheet">
-       <string notr="true">background-color: rgb(255, 255, 255);</string>
+       <string notr="true">background-color: rgb(255, 245, 204);
+color: rgb(255, 0, 0);</string>
       </property>
       <property name="text">
        <string>00:15</string>
@@ -2791,7 +2792,8 @@ Runner</string>
        </font>
       </property>
       <property name="styleSheet">
-       <string notr="true">background-color: rgb(255, 255, 255);</string>
+       <string notr="true">background-color: rgb(255, 245, 204);
+color: rgb(255, 0, 0);</string>
       </property>
       <property name="text">
        <string>00:30</string>
@@ -2816,7 +2818,8 @@ Runner</string>
        </font>
       </property>
       <property name="styleSheet">
-       <string notr="true">background-color: rgb(255, 255, 255);</string>
+       <string notr="true">background-color: rgb(255, 245, 204);
+color: rgb(255, 0, 0);</string>
       </property>
       <property name="text">
        <string>~</string>
@@ -2829,9 +2832,9 @@ Runner</string>
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>83</y>
+        <y>70</y>
         <width>41</width>
-        <height>16</height>
+        <height>41</height>
        </rect>
       </property>
       <property name="font">
@@ -2841,7 +2844,8 @@ Runner</string>
        </font>
       </property>
       <property name="text">
-       <string>時段</string>
+       <string>顯示
+區間</string>
       </property>
      </widget>
      <widget class="QCheckBox" name="checkBox_2">
@@ -2943,10 +2947,10 @@ font: 11pt &quot;微軟正黑體&quot;;</string>
     <widget class="QTableWidget" name="tableWidget_4">
      <property name="geometry">
       <rect>
-       <x>400</x>
-       <y>220</y>
-       <width>311</width>
-       <height>141</height>
+       <x>380</x>
+       <y>210</y>
+       <width>362</width>
+       <height>151</height>
       </rect>
      </property>
      <property name="frameShape">
@@ -2959,9 +2963,6 @@ font: 11pt &quot;微軟正黑體&quot;;</string>
       <enum>Qt::ScrollBarAlwaysOff</enum>
      </property>
      <property name="autoScroll">
-      <bool>true</bool>
-     </property>
-     <property name="alternatingRowColors">
       <bool>true</bool>
      </property>
      <property name="gridStyle">

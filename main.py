@@ -311,16 +311,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.setColumnWidth(0, 110)  # tw3 total width: 221
         self.tw3.setColumnWidth(1, 100)
         self.tw3.setColumnWidth(2, avg_column_width)
-        self.tableWidget_3.setColumnWidth(0, 100)
+        self.tableWidget_3.setColumnWidth(0, 90)
         self.tableWidget_3.setColumnWidth(1, 100)
         self.tableWidget_3.setColumnWidth(2, avg_column_width)
         new_width = (self.tw3.columnWidth(0) + self.tw3.columnWidth(1) + self.tw3.columnWidth(2)+20)
-
         self.tableWidget_3.setFixedWidth(new_width)
-
-        self.tableWidget_4.setRowCount(1)
-        self.tableWidget_4.setColumnWidth(0, 160)
-        self.tableWidget_4.setColumnWidth(1, 80)
 
         """
         1. 美化 tableWidget_4 的標題列 (Column Header)
@@ -873,7 +868,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         2. current 排程顯示在第 1 列 (`start ~ end` 和 製程狀態)。
         3. future 排程顯示在後續列 (`start ~ end` 和 還剩幾分鐘開始)。
         4. 若 current 為空，則 future 從第 1 列開始顯示。
-        5. **使用索引方式讀取 `entry`，確保相容性。**
+        5. **確保所有 Cell 物件存在，避免 NoneType 錯誤**
         """
         # 取得排程資料
         past, current, future = scrapy_schedule()
@@ -881,9 +876,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # 清空 tableWidget_4（保留格式）
         self.tableWidget_4.clearContents()
 
-        # 設定行數
-        total_rows = max(len(current), len(future))
-        self.tableWidget_4.setRowCount(total_rows if total_rows > 0 else 1)
+        # **設定行數，避免 row, column 超出範圍**
+        total_rows = max(len(current), len(future), 1)
+        self.tableWidget_4.setRowCount(total_rows)
+        self.tableWidget_4.setColumnCount(2)  # 確保有 2 欄
 
         # 設定標題列 (Header)
         self.tableWidget_4.setHorizontalHeaderLabels(["EAF 排程時間", "狀態"])
@@ -896,7 +892,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         # 目前時間
         now = pd.Timestamp.now()
-
         row_index = 0  # 開始填入資料的列索引
 
         # 1️⃣ **顯示 current 排程**
@@ -904,20 +899,29 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             for entry in current:
                 start_time = entry[0].strftime("%H:%M:%S")  # 開始時間
                 end_time = entry[1].strftime("%H:%M:%S")  # 結束時間
-                process_status = entry[2]  # 爐別（A爐 / B爐）
+                process_status = entry[3]  # 爐別（A爐 / B爐）
 
-                # 設定背景色 (淡黃色，標記 current)
-                bg_color = QBrush(QColor(255, 245, 204))
+                # 設定背景色 (淡粉紅色，標記 current)
+                bg_color = QBrush(QColor(255, 225, 210))
 
-                # 插入資料
-                self.tableWidget_4.setItem(row_index, 0, QTableWidgetItem(f"{start_time} ~ {end_time}"))
-                self.tableWidget_4.setItem(row_index, 1, QTableWidgetItem(process_status))
-
+                # **確保 Item 存在**
+                item1 = self.tableWidget_4.item(row_index, 0)
+                if item1 is None:
+                    item1 = QtWidgets.QTableWidgetItem()
+                    self.tableWidget_4.setItem(row_index, 0, item1)
+                item1.setText(f"{start_time} ~ {end_time}")
                 # 設定格式（背景色 & 置中對齊）
-                for col in range(2):
-                    item = self.tableWidget_4.item(row_index, col)
-                    item.setTextAlignment(4)  # Qt.AlignCenter
-                    item.setBackground(bg_color)
+                item1.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                item1.setBackground(bg_color)
+
+                item2 = self.tableWidget_4.item(row_index, 1)
+                if item2 is None:
+                    item2 = QtWidgets.QTableWidgetItem()
+                    self.tableWidget_4.setItem(row_index, 1, item2)
+                item2.setText(process_status)
+                # 設定格式（背景色 & 置中對齊）
+                item2.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                item2.setBackground(bg_color)
 
                 row_index += 1  # 更新 row 索引
 
@@ -927,13 +931,20 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             end_time = entry[1].strftime("%H:%M:%S")  # 結束時間
             minutes_until_start = int((entry[0] - now).total_seconds() / 60)  # 計算距離開始時間（分鐘）
 
-            self.tableWidget_4.setItem(row_index, 0, QTableWidgetItem(f"{start_time} ~ {end_time}"))
-            self.tableWidget_4.setItem(row_index, 1, QTableWidgetItem(f"尚有 {minutes_until_start} 分鐘"))
+            # **確保 Item 存在**
+            item1 = self.tableWidget_4.item(row_index, 0)
+            if item1 is None:
+                item1 = QtWidgets.QTableWidgetItem()
+                self.tableWidget_4.setItem(row_index, 0, item1)
+            item1.setText(f"{start_time} ~ {end_time}")
+            item1.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
-            # 設定格式（置中對齊）
-            for col in range(2):
-                item = self.tableWidget_4.item(row_index, col)
-                item.setTextAlignment(4)  # Qt.AlignCenter
+            item2 = self.tableWidget_4.item(row_index, 1)
+            if item2 is None:
+                item2 = QtWidgets.QTableWidgetItem()
+                self.tableWidget_4.setItem(row_index, 1, item2)
+            item2.setText(f"尚有 {minutes_until_start} 分鐘")
+            item2.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
             row_index += 1  # 更新 row 索引
 
@@ -1122,9 +1133,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         :param current_p: 即時用電量。pd.Series
         :return:
         """
-        # brush.setStyle(QtCore.Qt.BrushStyle.SolidPattern)   # 設定顏色的分佈方式
-        # self.treeWidget.headerItem().setForeground(0,brush) # 設置表頭項目的字體顏色
-        # self.tw1.topLevelItem(0).setTextAlignment(0, 1 | 4)
         w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
         self.tw1.topLevelItem(0).setText(1, pre_check(w2_total))
         self.tw1.topLevelItem(0).child(0).setText(1, pre_check(current_p['2H180':'1H350'].sum()))
@@ -1185,8 +1193,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(3).child(4).child(3).setText(1, pre_check(current_p['2KB29']))
         self.tw1.topLevelItem(3).child(5).setText(1, pre_check(current_p['W5']))
         self.tw1.topLevelItem(4).setText(1, pre_check(current_p['WA']))
-        #other=w2_total+w3_total+w4_total+w5_total+current_p['WA']
-        #self.label_17.setText(str(other))
 
         self.tw2.topLevelItem(0).setText(1, pre_check(current_p['9H140':'9KB33'].sum(), 0))
         self.tw2.topLevelItem(1).setText(1, pre_check(current_p['AH120'], 0))
@@ -1197,16 +1203,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         ng_to_power = self.unit_prices.loc['可轉換電力', 'current']
 
-        # tw 的總寬度 = columnWidth(0..1..2) lineWidth() frameWidth()
         self.tw3.topLevelItem(0).setText(1, pre_check(current_p['2H120':'1H420'].sum()))
         self.tw3.topLevelItem(0).child(0).setText(1, pre_check(current_p['2H120':'2H220'].sum()))
         self.tw3.topLevelItem(0).child(1).setText(1, pre_check(current_p['5H120':'5H220'].sum()))
         self.tw3.topLevelItem(0).child(2).setText(1, pre_check(current_p['1H120':'1H220'].sum()))
         self.tw3.topLevelItem(0).child(3).setText(1, pre_check(current_p['1H320':'1H420'].sum()))
-        # tw3 的TGs 及其子節點 TG1~TG4 的 NG貢獻電量、使用量，從原本顯示在最後兩個column，改為顯示在3rd 的tip
-        ng = pd.Series([current_p['TG1 NG':'TG4 NG'].sum(), current_p['TG1 NG'], current_p['TG2 NG'],
-                        current_p['TG3 NG'], current_p['TG4 NG'], ng_to_power])
-        self.update_tw3_tips_and_colors(ng)
         self.tw3.topLevelItem(1).setText(1, pre_check(current_p['4KA18':'5KB19'].sum()))
         self.tw3.topLevelItem(1).child(0).setText(1, pre_check(current_p['4KA18']))
         self.tw3.topLevelItem(1).child(1).setText(1, pre_check(current_p['5KB19']))
@@ -1214,10 +1215,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(0).setText(1, pre_check(current_p['4H120']))
         self.tw3.topLevelItem(2).child(1).setText(1, pre_check(current_p['4H220']))
 
+        # tw3 的TGs 及其子節點 TG1~TG4 的 NG貢獻電量、使用量，從原本顯示在最後兩個column，改為顯示在3rd 的tip
+        ng = pd.Series([current_p['TG1 NG':'TG4 NG'].sum(), current_p['TG1 NG'], current_p['TG2 NG'],
+                        current_p['TG3 NG'], current_p['TG4 NG'], ng_to_power])
+        self.update_tw3_tips_and_colors(ng)
 
+        # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
         tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
-        # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
         self.update_table_item(self.tableWidget_3, 0, 1, pre_check(tai_power))
         self.update_table_item(self.tableWidget_3, 1, 1, pre_check(current_p['2H120':'5KB19'].sum()))
         self.update_table_item(self.tableWidget_3, 2, 1, pre_check(current_p['sp_real_time'], b=5))
@@ -1227,7 +1232,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         """
         更新 tw3 (QTreeWidget) 中 TGs 及其子節點 TG1~TG4 的 2nd column (即時量)，
         設定美化的 Tooltip，並根據 NG 貢獻電量改變顏色。
-
         參數:
             ng (pd.Series): NG 數據, 來源外部
         """
@@ -1247,7 +1251,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # 設定 TGs 的美化 Tip 訊息
         tgs_tooltip = f"""
         <div style="background-color:#FFFFCC; padding:5px; border-radius:5px;">
-            <b>NG 使用量:</b> <span style="color:#0000FF;">{ng[0]:.2f} Nm³/hr</span><br>
+            <b>NG 流量:</b> <span style="color:#0000FF;">{ng[0]:.2f} Nm³/hr</span><br>
             <b>NG 貢獻電量:</b> <span style="color:#FF0000;">{tgs_ng_contribution:.2f} MW</span>
         </div>
         """
@@ -1269,7 +1273,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             # 設定美化的 Tip 訊息
             tooltip_text = f"""
             <div style="background-color:#F0F0F0; padding:5px; border-radius:5px;">
-                <b>NG 使用量:</b> <span style="color:#0000FF;">{ng_usage:.2f} Nm³/hr</span><br>
+                <b>NG 流量:</b> <span style="color:#0000FF;">{ng_usage:.2f} Nm³/hr</span><br>
                 <b>NG 貢獻電量:</b> <span style="color:#FF0000;">{ng_contribution:.2f} MW</span>
             </div>
             """
