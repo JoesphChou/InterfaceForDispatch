@@ -66,7 +66,7 @@ def pre_check(pending_data, b=1, c='power'):
     :param b:若數值接近 0，預設回傳'停機'的述述。
     :return: 回傳值為文字型態。
     """
-    describe = ['未生產', '停機', '資料異常','未使用','0 MW','未發電']
+    describe = ['--', '停機', '資料異常','未使用','0 MW','未發電']
     if pd.isnull(pending_data):
         return describe[2]
     if pending_data > 0.1:
@@ -87,7 +87,7 @@ def pre_check2(pending_data, b=1):
     :param pending_data:
     :return:
     """
-    describe = ['未生產', '停機', '資料異常', '未使用', '0 MW', '未發電']
+    describe = ['--', '停機', '資料異常', '未使用', '0 MW', '未發電']
     if pd.isnull(pending_data):
         return describe[2]
     if pending_data > 0.1:
@@ -97,53 +97,126 @@ def pre_check2(pending_data, b=1):
 
 def scrapy_schedule():
     """
-    爬取"製程管理資訊 2138"，從中解析出電爐的製程。
-    :return: 下一爐時間
+    爬取"製程管理資訊 2138"，解析電爐排程，並做以下處理：
+    1. 只處理 title 含有 "EAF" 的排程
+    2. 只讀取 Y 軸在 182~235 範圍內的排程
+    3. 透過 X 軸排序，確保排程順序正確
+    4. **檢查 start、end 是否跨天**
+    5. **確保後面排程的時間不會比前面排程還早**
+    6. **分類排程**
+        - `past`: 過去排程 (`end < now`)
+        - `current`: 正在生產 (`start <= now <= end`)
+        - `future`: 未來排程 (`start > now`)
+    爬取"製程管理資訊 2137"，正在生產中的電爐製程狀態，並把資訊加到current 裡面
+    :return: past, current, future 排程列表
     """
-    t_count = 0
-    f_count = 0
-    p_count = 0
-    past = list()
-    future = list()
+    past = []
+    future = []
+    current = []
+    now = pd.Timestamp.now()  # 當前時間（含日期與時間）
+    today = now.normalize()  # 取得今日日期（只保留 YYYY-MM-DD）
+
     quote_page = 'http://w3mes.dscsc.dragonsteel.com.tw/2138.aspx'
+    quote_page2 = 'http://w3mes.dscsc.dragonsteel.com.tw/2137.aspx'
+
     http = urllib3.PoolManager()
+    r = http.request('GET', quote_page)
+    r2 = http.request('GET', quote_page2)
+    soup = BeautifulSoup(r.data, 'html.parser')
+    soup2 = BeautifulSoup(r2.data, 'html.parser')
 
-    r = http.request('GET', quote_page)  # 透過HTTP 請求從"製程管理資訊 2138"獲取網頁
-    soup = BeautifulSoup(r.data, 'html.parser')  # 用BS 的html.parer 解析該網頁
-    contains = soup.find_all('area')  # 尋找內容裡所有名稱叫做area 的tag (圖像地圖區域元素)
+    contains = soup.find_all('area')  # 找出所有的 <area> tag
+    schedule_data = []  # 存儲 (x座標, start_time, end_time, title)
+
     for contain in contains:
-        if 'EAF' in contain.get('title'):  # 找出含有EAF 的title
-            coords = re.findall(r"\d+", contain.get('coords'))  # 提取出 title 的座標
-            # \d+ 是一個正則表達示，意思是"一個或多個數字(0-9)
-            if (int(coords[1]) > 182) & (int(coords[1]) < 235):  # 利用 title 左上角的y軸座標,判斷title 的內容要不要提取
-                t_count = t_count + 1
-                if '送電' in contain.get('title'):  # 已結束EAF 製程的部份(特徵為內容中有'送電'這個詞)
-                    p_count = p_count + 1
-                    pending_str = contain.get('title')  # 從contain 中獲取 title 的內容
-                    start = pd.to_datetime(pending_str[pending_str.find(':') + 2: pending_str.find(':') + 7])
-                    end = pd.to_datetime(pending_str[pending_str.find(':') + 10: pending_str.find(':') + 15])
-                    if start > end:  # 若end time 比star time早,確認是跨天,end time +1 day
-                        end = end + pd.offsets.Day(1)
-                    result = pd.Series([start, end])
-                    past.append(result)
+        title_text = contain.get('title')  # 取得 title 內容
 
-                if '時間' in contain.get('title'):  # 還未完成EAF 製程的部份 (特徵為第一個找到的'時間'這個詞)
-                    pending_str = contain.get('title')  # 從contain 中獲取 title 的內容
-                    start = pd.to_datetime(pending_str[pending_str.find(':') + 2: pending_str.find(':') + 10])
-                    end = pd.to_datetime(pending_str[pending_str.find(':') + 13: pending_str.find(':') + 21])
-                    if start > end:  # 若end time 比star time早, 確認是跨天 (end time +1 day)
-                        end = end + pd.offsets.Day(1)
-                    if start > pd.Timestamp.now():  # 用來過濾掉非未來排程的部份
-                        f_count = f_count + 1
-                        result = pd.Series([start, end])
-                        future.append(result)
-                    elif (start < pd.Timestamp.now()) and (pd.Timestamp.now() < end):  # 正在執行的排程
-                        current = pd.Series([start, end])
-                    else:
-                        t_count = t_count - 1
-    if f_count > 1:
-        future = sorted(future, key=lambda x: x[0])
-    return future
+        # **只處理包含 "EAF" 的標題**
+        if 'EAF' not in title_text:
+            continue
+
+        # 判斷是 A爐 (EAFA) 還是 B爐(EAFB)
+        furnace_type = None
+        if 'EAFA' in title_text:
+            furnace_type = 'A'
+        elif 'EAFB' in title_text:
+            furnace_type = 'B'
+        else:
+            continue    # 若無法判別爐別，跳過此排程
+
+        # 取得座標
+        coords = re.findall(r"\d+", contain.get('coords'))  # 解析座標
+        if len(coords) < 2:
+            continue  # 座標解析失敗則跳過
+
+        x_coord = int(coords[0])  # X 座標（代表時間順序）
+        y_coord = int(coords[1])  # Y 座標
+
+        # **篩選 Y 軸在 182~235 的範圍**
+        if not (182 < y_coord < 235):
+            continue  # 不符合範圍，跳過此排程
+
+        # 解析出 start 和 end 時間
+        time_pattern = re.findall(r"(\d{2}:\d{2}:\d{2})", title_text)
+        if len(time_pattern) < 2:
+            continue  # 無法解析時間則跳過
+
+        start_time = time_pattern[0]  # 取得開始時間 (未加日期)
+        end_time = time_pattern[1]    # 取得結束時間 (未加日期)
+
+        # 存入數據，稍後排序
+        schedule_data.append((x_coord, start_time, end_time, title_text, furnace_type))
+
+    # **根據 X 座標 (時間軸) 進行排序**
+    schedule_data.sort(key=lambda x: x[0])  # 按 x 座標排序
+
+    # **調整時間順序，確保排程不會比前一個早**
+    adjusted_schedule = []
+    prev_start_time = None  # 記錄前一個排程的開始時間
+
+    for x_coord, start_time, end_time, title_text, furnace_type in schedule_data:
+        # 先將時間轉換為當前日期的時間格式
+        start = pd.to_datetime(f"{today} {start_time}")
+        end = pd.to_datetime(f"{today} {end_time}")
+
+        # **若 end < start，則 end 應跨天**
+        if end < start:
+            end += pd.Timedelta(days=1)
+
+        # **檢查是否時間錯亂 (X 軸較後的排程卻比前一個排程早)**
+        if prev_start_time and start < prev_start_time:
+            # **如果新的 start 比前一個 start 還早，表示需要 +1 天**
+            start += pd.Timedelta(days=1)
+            end += pd.Timedelta(days=1)
+
+        # 更新 prev_start_time
+        prev_start_time = start
+
+        # **加入調整後的排程**
+        adjusted_schedule.append((start, end, furnace_type))
+
+    # 嘗試根據 id 找出 A爐與 B爐的製程狀態
+    a_furnace_status = soup2.find(id="lbl_eafa_period")
+    b_furnace_status = soup2.find(id="lbl_eafb_period")
+
+    # 取得文字內容
+    a_furnace_status_text = a_furnace_status.get_text(strip=True) if a_furnace_status else "未找到"
+    b_furnace_status_text = b_furnace_status.get_text(strip=True) if b_furnace_status else "未找到"
+
+    # **分類排程**
+    for start, end, furnace_type in adjusted_schedule:
+        if end < now:
+            past.append(pd.Series([start, end, furnace_type]))  # 過去的排程
+        elif start > now:
+            future.append(pd.Series([start, end, furnace_type]))  # 未來的排程
+        else:   # 判斷由A或B爐生產，並讀取相對應的製程狀態
+            if furnace_type == 'A':
+                current.append(pd.Series([start, end, furnace_type, a_furnace_status_text]))
+            elif furnace_type == 'B':
+                current.append(pd.Series([start, end, furnace_type, b_furnace_status_text]))
+            else:
+                current.append(pd.Series([start, end, furnace_type, '未知']))
+    return past, current, future
 
 class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
@@ -745,19 +818,21 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tws_update(c_values)
 
         schedule = scrapy_schedule()
-        if len(schedule) == 0:
+        schedule_future = schedule[2]
+        if len(schedule_future) == 0:
             self.tableWidget_4.setItem(0, 0, QTableWidgetItem('目前無排程'))
         else:
-            self.tableWidget_4.setRowCount(len(schedule))
+            self.tableWidget_4.setRowCount(len(schedule_future))
 
-        for x in range(len(schedule)):
-            self.tableWidget_4.setItem(x, 0, QTableWidgetItem(f'%s ~ %s' %(str(schedule[x][0].time()), str(schedule[x][1].time()))))
+        for x in range(len(schedule_future)):
+            self.tableWidget_4.setItem(x, 0, QTableWidgetItem(f'%s ~ %s' %(str(schedule_future[x][0].time()), str(schedule_future[x][1].time()))))
+            # self.tableWidget_4.setItem(x,1,QTableWidgetItem(f'尚有 %s 分鐘'%(c)))
 
     def schedule_update(self,future):
         for x in range(len(future)):
             self.tableWidget_4.setItem(x+1, 1, future[x])
 
-    @timeit
+    # @timeit
     def history_demand_of_groups(self, st, et):
         """
             查詢特定週期，各設備群組(分類)的平均值
@@ -1018,6 +1093,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         ng = pd.Series([current_p['TG1 NG':'TG4 NG'].sum(), current_p['TG1 NG'], current_p['TG2 NG'],
                         current_p['TG3 NG'], current_p['TG4 NG'], ng_to_power])
         self.update_tw3_tips_and_colors(ng)
+        self.tw3.topLevelItem(1).setText(1, pre_check(current_p['4KA18':'5KB19'].sum()))
+        self.tw3.topLevelItem(1).child(0).setText(1, pre_check(current_p['4KA18']))
+        self.tw3.topLevelItem(1).child(1).setText(1, pre_check(current_p['5KB19']))
+        self.tw3.topLevelItem(2).setText(1, pre_check(current_p['4H120':'4H220'].sum()))
+        self.tw3.topLevelItem(2).child(0).setText(1, pre_check(current_p['4H120']))
+        self.tw3.topLevelItem(2).child(1).setText(1, pre_check(current_p['4H220']))
+
 
         tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
