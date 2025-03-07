@@ -2945,8 +2945,8 @@ font: 11pt &quot;微軟正黑體&quot;;</string>
       <rect>
        <x>400</x>
        <y>220</y>
-       <width>321</width>
-       <height>151</height>
+       <width>311</width>
+       <height>141</height>
       </rect>
      </property>
      <property name="frameShape">
@@ -2959,6 +2959,9 @@ font: 11pt &quot;微軟正黑體&quot;;</string>
       <enum>Qt::ScrollBarAlwaysOff</enum>
      </property>
      <property name="autoScroll">
+      <bool>true</bool>
+     </property>
+     <property name="alternatingRowColors">
       <bool>true</bool>
      </property>
      <property name="gridStyle">

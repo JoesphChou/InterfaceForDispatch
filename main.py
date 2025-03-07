@@ -1,7 +1,7 @@
 import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtWidgets import QTableWidgetItem
-
+from PyQt6.QtGui import QColor, QBrush
 from UI import Ui_Form
 import sys, re
 import pandas as pd
@@ -323,10 +323,57 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_4.setColumnWidth(1, 80)
 
         """
-        # self.treeWidget.hideColumn(0) # 用來隱藏指定的column
-        # self.treeWidget.clear()       # clean all data
+        1. 美化 tableWidget_4 的標題列 (Column Header)
+        2. **確保 horizontal scroller 不會出現**
+        3. **確保 vertical scroller 依需要出現**
+        4. **調整 tableWidget_4 的總寬度與高度**
         """
+        # 1️⃣ **美化標題列**
+        header = self.tableWidget_4.horizontalHeader()
 
+        # 設定標題列背景顏色 (淺藍色)
+        self.tableWidget_4.setStyleSheet(
+            "QHeaderView::section { background-color: #ADD8E6; color: #333333; font-weight: bold; font-family: '微軟正黑體'; }"
+        )
+
+        # 設定標題列對齊方式 (置中)
+        header.setDefaultAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        # 2️⃣ **設定滾動條**
+        self.tableWidget_4.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)  # 垂直滾動條根據需要顯示
+        self.tableWidget_4.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # 隱藏水平滾動條
+
+        # 3️⃣ **調整欄寬**
+        col_1_width = 200  # EAF 排程時間欄位寬度
+        col_2_width = 140  # 狀態欄位寬度
+        vertical_scroller_width = 20  # 垂直滾動條寬度
+        table_border_width = 2  # 表格邊框線寬
+
+        self.tableWidget_4.setColumnWidth(0, col_1_width)
+        self.tableWidget_4.setColumnWidth(1, col_2_width)
+
+        # **確保水平滾動條不會出現，剛好填滿表格**
+        total_table_width = col_1_width + col_2_width + vertical_scroller_width + table_border_width
+        self.tableWidget_4.setMinimumWidth(total_table_width)
+        self.tableWidget_4.setMaximumWidth(total_table_width)  # 固定寬度，防止變大
+
+        # 4️⃣ **設定高度：最多顯示 4 筆排程**
+        row_height = 35  # 每行高度
+        max_rows = 4  # 最多顯示 4 行，其他的靠滾動條
+        header_height = 30  # 標題列高度
+        total_height = (row_height * max_rows) + header_height + 5  # 加 5 讓滾動條不擋住最後一行
+
+        self.tableWidget_4.setMinimumHeight(total_height)
+        self.tableWidget_4.setMaximumHeight(total_height)  # 固定高度，不會自動變大
+
+        # 5️⃣ **調整行高**
+        self.tableWidget_4.verticalHeader().setDefaultSectionSize(row_height)  # 預設行高 35px
+
+        # 6️⃣ **設定不可編輯模式**
+        self.tableWidget_4.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)  # 禁止編輯
+        self.tableWidget_4.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)  # 選取整行
+
+        # ---------------以下是針對每個treeWidget 設定文字對齊、顏色---------------
         brush2 = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # brush2 用來設定設備群子項的即時量顏色
         brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
         brush3 = QtGui.QBrush(QtGui.QColor(0, 0, 255))  # brush3 用來各一級單位即時量的顏色
@@ -799,6 +846,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         8. 使用slice (切片器) 來指定 MultiIndex 的範圍，指定各一級單位B類型(廠區用電)的計算結果，
            指定到wx 這個Series,並重新設定index
         9. 將wx 內容新增到c_values 之後。
+        10. 獲取排程資料，並顯示在 tableWidget_4。
+        11. current 排程顯示在第 1 列 (`start ~ end` 和 製程狀態)。
+        12. future 排程顯示在後續列 (`start ~ end` 和 還剩幾分鐘開始)。
+        13. 若 current 為空，則 future 從第 1 列開始顯示。
         :return:
         """
         name_list = self.tag_list['tag_name'].values.tolist()   # 1
@@ -817,20 +868,83 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         c_values = pd.concat([c_values, wx],axis=0)  # 9
         self.tws_update(c_values)
 
-        schedule = scrapy_schedule()
-        schedule_future = schedule[2]
-        if len(schedule_future) == 0:
-            self.tableWidget_4.setItem(0, 0, QTableWidgetItem('目前無排程'))
-        else:
-            self.tableWidget_4.setRowCount(len(schedule_future))
+        """
+        1. 獲取排程資料，並顯示在 tableWidget_4。
+        2. current 排程顯示在第 1 列 (`start ~ end` 和 製程狀態)。
+        3. future 排程顯示在後續列 (`start ~ end` 和 還剩幾分鐘開始)。
+        4. 若 current 為空，則 future 從第 1 列開始顯示。
+        5. **使用索引方式讀取 `entry`，確保相容性。**
+        """
+        # 取得排程資料
+        past, current, future = scrapy_schedule()
 
-        for x in range(len(schedule_future)):
-            self.tableWidget_4.setItem(x, 0, QTableWidgetItem(f'%s ~ %s' %(str(schedule_future[x][0].time()), str(schedule_future[x][1].time()))))
-            # self.tableWidget_4.setItem(x,1,QTableWidgetItem(f'尚有 %s 分鐘'%(c)))
+        # 清空 tableWidget_4（保留格式）
+        self.tableWidget_4.clearContents()
 
-    def schedule_update(self,future):
-        for x in range(len(future)):
-            self.tableWidget_4.setItem(x+1, 1, future[x])
+        # 設定行數
+        total_rows = max(len(current), len(future))
+        self.tableWidget_4.setRowCount(total_rows if total_rows > 0 else 1)
+
+        # 設定標題列 (Header)
+        self.tableWidget_4.setHorizontalHeaderLabels(["EAF 排程時間", "狀態"])
+        self.tableWidget_4.setColumnWidth(0, 180)  # 調整欄寬
+        self.tableWidget_4.setColumnWidth(1, 120)
+
+        # 確保每行行高為35px
+        for row in range(self.tableWidget_4.rowCount()):
+            self.tableWidget_4.setRowHeight(row, 35)
+
+        # 目前時間
+        now = pd.Timestamp.now()
+
+        row_index = 0  # 開始填入資料的列索引
+
+        # 1️⃣ **顯示 current 排程**
+        if current:
+            for entry in current:
+                start_time = entry[0].strftime("%H:%M:%S")  # 開始時間
+                end_time = entry[1].strftime("%H:%M:%S")  # 結束時間
+                process_status = entry[2]  # 爐別（A爐 / B爐）
+
+                # 設定背景色 (淡黃色，標記 current)
+                bg_color = QBrush(QColor(255, 245, 204))
+
+                # 插入資料
+                self.tableWidget_4.setItem(row_index, 0, QTableWidgetItem(f"{start_time} ~ {end_time}"))
+                self.tableWidget_4.setItem(row_index, 1, QTableWidgetItem(process_status))
+
+                # 設定格式（背景色 & 置中對齊）
+                for col in range(2):
+                    item = self.tableWidget_4.item(row_index, col)
+                    item.setTextAlignment(4)  # Qt.AlignCenter
+                    item.setBackground(bg_color)
+
+                row_index += 1  # 更新 row 索引
+
+        # 2️⃣ **顯示 future 排程**
+        for entry in future:
+            start_time = entry[0].strftime("%H:%M:%S")  # 開始時間
+            end_time = entry[1].strftime("%H:%M:%S")  # 結束時間
+            minutes_until_start = int((entry[0] - now).total_seconds() / 60)  # 計算距離開始時間（分鐘）
+
+            self.tableWidget_4.setItem(row_index, 0, QTableWidgetItem(f"{start_time} ~ {end_time}"))
+            self.tableWidget_4.setItem(row_index, 1, QTableWidgetItem(f"尚有 {minutes_until_start} 分鐘"))
+
+            # 設定格式（置中對齊）
+            for col in range(2):
+                item = self.tableWidget_4.item(row_index, col)
+                item.setTextAlignment(4)  # Qt.AlignCenter
+
+            row_index += 1  # 更新 row 索引
+
+        # 3️⃣ **若沒有排程，顯示 "目前無排程"**
+        if row_index == 0:
+            self.tableWidget_4.setItem(0, 0, QTableWidgetItem("目前無排程"))
+
+        # 4️⃣ **美化表格：固定行高、禁止編輯、啟用選取**
+        self.tableWidget_4.setEditTriggers(self.tableWidget_4.EditTrigger.NoEditTriggers)  # 禁止編輯
+        self.tableWidget_4.setSelectionBehavior(self.tableWidget_4.SelectionBehavior.SelectRows)  # 選取整行
+        self.tableWidget_4.verticalHeader().setDefaultSectionSize(30)  # 設定行高
 
     # @timeit
     def history_demand_of_groups(self, st, et):
