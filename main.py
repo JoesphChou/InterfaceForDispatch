@@ -265,109 +265,20 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def tws_init(self):
         """
         1. 因為treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
+
         :return:
+        """
+        # **美化 tw1, tw2, tw3**
+        self.beautify_tree_widgets()
+        self.beautify_table_widgets()
+        # **美化 tableWidget_3**
+        #self.initialize_tableWidget_3_colors()
         """
         # 美化 tw1, tw2, tw3（QTreeWidget）
         self.beautify_avg_column(self.tw1, 2)
         self.beautify_avg_column(self.tw2, 2)
         self.beautify_avg_column(self.tw3, 2)
-
-        # 初始化及美化 tableWidget_3（QTableWidget）
-        self.initialize_tableWidget_3_colors()
-        self.beautify_avg_column(self.tableWidget_3, 2)
-        self.beautify_avg_column(self.tableWidget_4, 0)
-
-        avg_column_width = 65
-        self.tw1.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
-        brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
-        brush.setStyle(QtCore.Qt.BrushStyle.SolidPattern)  # 設定顏色的分佈方式
-        self.tw1.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
-        self.tw1.headerItem().setForeground(1, brush)
-        self.tw1.headerItem().setForeground(2, brush)
-
-        #scroller width 18, frame line width 1
-        self.tw1.setColumnWidth(0, 175)  # 設定各column 的寬度
-        self.tw1.setColumnWidth(1, 90)
-        self.tw1.setColumnWidth(2, avg_column_width)
-        tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + self.tw1.columnWidth(2) + 20
-        self.tw1.setFixedWidth(tw1_width)
-
-        self.tw2.setStyleSheet("QHeaderView::section{background:rgb(85, 181, 200);}")  # 設置表頭的背景顏色
-        self.tw2.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
-        self.tw2.headerItem().setForeground(1, brush)
-        self.tw2.headerItem().setForeground(2, brush)
-        self.tw2.setColumnWidth(0, 135)     # 設定各column 的寬度
-        self.tw2.setColumnWidth(1, 90)
-        self.tw2.setColumnWidth(2, avg_column_width)
-        tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + self.tw2.columnWidth(2)
-        self.tw2.setFixedWidth(tw2_width)
-
-        self.tw3.setStyleSheet("QHeaderView::section{background:rgb(100, 170, 90);}")  # 設置表頭的背景顏色
-        brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))  # brush 用來設定顏色種類
-        brush.setStyle(QtCore.Qt.BrushStyle.SolidPattern)  # 設定顏色的分佈方式
-        self.tw3.headerItem().setForeground(0, brush)  # 設置表頭項目的字體顏色
-        self.tw3.headerItem().setForeground(1, brush)
-        self.tw3.headerItem().setForeground(2, brush)
-        self.tw3.setColumnWidth(0, 110)  # tw3 total width: 221
-        self.tw3.setColumnWidth(1, 100)
-        self.tw3.setColumnWidth(2, avg_column_width)
-        self.tableWidget_3.setColumnWidth(0, 90)
-        self.tableWidget_3.setColumnWidth(1, 100)
-        self.tableWidget_3.setColumnWidth(2, avg_column_width)
-        new_width = (self.tw3.columnWidth(0) + self.tw3.columnWidth(1) + self.tw3.columnWidth(2)+20)
-        self.tableWidget_3.setFixedWidth(new_width)
-
         """
-        1. 美化 tableWidget_4 的標題列 (Column Header)
-        2. **確保 horizontal scroller 不會出現**
-        3. **確保 vertical scroller 依需要出現**
-        4. **調整 tableWidget_4 的總寬度與高度**
-        """
-        # 1️⃣ **美化標題列**
-        header = self.tableWidget_4.horizontalHeader()
-
-        # 設定標題列背景顏色 (淺藍色)
-        self.tableWidget_4.setStyleSheet(
-            "QHeaderView::section { background-color: #ADD8E6; color: #333333; font-weight: bold; font-family: '微軟正黑體'; }"
-        )
-
-        # 設定標題列對齊方式 (置中)
-        header.setDefaultAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
-        # 2️⃣ **設定滾動條**
-        self.tableWidget_4.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)  # 垂直滾動條根據需要顯示
-        self.tableWidget_4.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # 隱藏水平滾動條
-
-        # 3️⃣ **調整欄寬**
-        col_1_width = 200  # EAF 排程時間欄位寬度
-        col_2_width = 140  # 狀態欄位寬度
-        vertical_scroller_width = 20  # 垂直滾動條寬度
-        table_border_width = 2  # 表格邊框線寬
-
-        self.tableWidget_4.setColumnWidth(0, col_1_width)
-        self.tableWidget_4.setColumnWidth(1, col_2_width)
-
-        # **確保水平滾動條不會出現，剛好填滿表格**
-        total_table_width = col_1_width + col_2_width + vertical_scroller_width + table_border_width
-        self.tableWidget_4.setMinimumWidth(total_table_width)
-        self.tableWidget_4.setMaximumWidth(total_table_width)  # 固定寬度，防止變大
-
-        # 4️⃣ **設定高度：最多顯示 4 筆排程**
-        row_height = 35  # 每行高度
-        max_rows = 4  # 最多顯示 4 行，其他的靠滾動條
-        header_height = 30  # 標題列高度
-        total_height = (row_height * max_rows) + header_height + 5  # 加 5 讓滾動條不擋住最後一行
-
-        self.tableWidget_4.setMinimumHeight(total_height)
-        self.tableWidget_4.setMaximumHeight(total_height)  # 固定高度，不會自動變大
-
-        # 5️⃣ **調整行高**
-        self.tableWidget_4.verticalHeader().setDefaultSectionSize(row_height)  # 預設行高 35px
-
-        # 6️⃣ **設定不可編輯模式**
-        self.tableWidget_4.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)  # 禁止編輯
-        self.tableWidget_4.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)  # 選取整行
-
         # ---------------以下是針對每個treeWidget 設定文字對齊、顏色---------------
         brush2 = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # brush2 用來設定設備群子項的即時量顏色
         brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
@@ -630,56 +541,101 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
         self.tw3.topLevelItem(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
 
-    def initialize_tableWidget_3_colors(self):
-        """ 設定 tableWidget_3 內特定行與欄位的背景顏色、文字顏色與對齊方式 """
+    def beautify_table_widgets(self):
+        """
+        統一美化 tableWidget_3 和 tableWidget_4 的樣式，確保 Header 及內容一致
+        """
+        # 設定 Header 樣式
+        self.tableWidget_3.setStyleSheet(
+            "QHeaderView::section { background-color: rgb(50, 50, 50); color: white; font-weight: bold; text-align: center; }"
+        )
+        self.tableWidget_4.setStyleSheet(
+            "QHeaderView::section { background-color: #ADD8E6; color: #333333; font-weight: bold; font-family: '微軟正黑體'; }"
+        )
 
-        # 定義要修改的行與顏色
-        color_mappings = {
-            0: QtGui.QColor(80, 191, 200),  # 全廠用電量（第 0 列）
-            1: QtGui.QColor(100, 170, 90),  # 中龍發電量（第 1 列）
-            2: QtGui.QColor(170, 170, 0),  # 太陽能(直供)（第 2 列）
-            3: QtGui.QColor(190, 90, 90),  # 台電供電量（第 3 列）
+        # 設定 Column 寬度
+        table_settings = {
+            "tableWidget_3": {"widget": self.tableWidget_3, "col_widths": [90, 100, 65]},
+            "tableWidget_4": {"widget": self.tableWidget_4, "col_widths": [200, 140]},
         }
 
-        header_bg_color = QtGui.QColor(50, 50, 50)  # 深灰色背景
-        header_text_color = QtGui.QColor(255, 255, 255)  # 白色文字
-        text_color = QtGui.QColor(255, 255, 255)  # 白色文字
-        font = QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold)
+        for table_name, config in table_settings.items():
+            widget = config["widget"]
+            col_widths = config["col_widths"]
 
-        # 美化表頭
-        header = self.tableWidget_3.horizontalHeader()
-        header.setStyleSheet(
-            "QHeaderView::section {"
-            "background-color: rgb(50, 50, 50);"  # 深灰色背景
-            "color: white;"  # 文字顏色
-            "font-size: 14px;"  # 字體大小
-            "font-weight: bold;"  # 加粗
-            "text-align: center;"  # 文字置中
-            "border: 1px solid rgb(80, 80, 80);"  # 邊框顏色
-            "}"
-        )
-        header.setFixedHeight(30)  # 設定表頭高度
+            for i, width in enumerate(col_widths):
+                widget.setColumnWidth(i, width)
 
-        # 遍歷需要變色的行
-        for row, bg_color in color_mappings.items():
-            for col in [0, 1]:  # 只修改第 0 欄（名稱）和第 1 欄（即時量）
-                item = self.tableWidget_3.item(row, col)
-                if item is None:
-                    item = QtWidgets.QTableWidgetItem()
-                    self.tableWidget_3.setItem(row, col, item)
+            # 設定固定高度
+            row_height = 35  # 每行高度
+            max_rows = 4  # 最多顯示 4 行，其他的靠滾動條
+            header_height = 30  # 標題列高度
+            total_height = (row_height * max_rows) + header_height + 5  # 加 5 讓滾動條不擋住最後一行
 
-                # 設定顏色
-                item.setBackground(QtGui.QBrush(bg_color))
-                item.setForeground(QtGui.QBrush(text_color))
-                item.setFont(font)
+            widget.setMinimumHeight(total_height)
+            widget.setMaximumHeight(total_height)
 
-                # 設定對齊方式
-                if col == 0:
-                    item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)  # 名稱 → 置中
-                else:
-                    item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight)  # 即時量 → 靠右
+            # 設定行高
+            widget.verticalHeader().setDefaultSectionSize(row_height)
 
-        self.tableWidget_3.viewport().update()  # 強制 UI 重新繪製
+            # 設定滾動條
+            widget.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # 隱藏水平滾動條
+
+            # 設定不可編輯模式
+            widget.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+            widget.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)  # 選取整行
+
+            # **美化 tableWidget_3 第 3 欄 (平均值)**
+            for row in range(self.tableWidget_3.rowCount()):
+                item = self.tableWidget_3.item(row, 2)
+                if item:
+                    item.setFont(QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold))
+                    item.setBackground(QtGui.QBrush(QtGui.QColor("#FFFACD")))
+                    item.setForeground(QtGui.QBrush(QtGui.QColor("#000080")))
+                    item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+
+    def beautify_tree_widgets(self):
+        """ 統一美化 tw1, tw2, tw3 的樣式，確保 Header 與內容一致 """
+
+        # 定義樣式參數
+        header_styles = {
+            "tw1": "QHeaderView::section { background-color: rgb(85, 181, 200); color: white; font-weight: bold; }",
+            "tw2": "QHeaderView::section { background-color: rgb(85, 181, 200); color: white; font-weight: bold; }",
+            "tw3": "QHeaderView::section { background-color: rgb(100, 170, 90); color: white; font-weight: bold; }"
+        }
+
+        column_widths = {
+            "tw1": [175, 90, 65],  # tw1 各欄寬度
+            "tw2": [135, 90, 65],  # tw2 各欄寬度
+            "tw3": [110, 100, 65]  # tw3 各欄寬度
+        }
+
+        tree_widgets = {"tw1": self.tw1, "tw2": self.tw2, "tw3": self.tw3}
+
+        # 設定 Header 樣式、Column 寬度
+        for name, widget in tree_widgets.items():
+            # 設定 Header 背景色
+            widget.setStyleSheet(header_styles[name])
+
+            # 設定 Header 文字顏色 (避免被 UI 重置)
+            brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))
+            brush.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
+            widget.headerItem().setForeground(0, brush)
+            widget.headerItem().setForeground(1, brush)
+            widget.headerItem().setForeground(2, brush)
+
+            # 設定 Column 寬度
+            widget.setColumnWidth(0, column_widths[name][0])
+            widget.setColumnWidth(1, column_widths[name][1])
+            widget.setColumnWidth(2, column_widths[name][2])
+
+            # **確保水平滾動條不會出現**
+            total_width = sum(column_widths[name]) + 20  # 加上 scroller 空間
+            widget.setFixedWidth(total_width)
+
+            # **美化第 3 欄 (平均值)**
+            # self.beautify_avg_column(widget, 2)
 
     def check_box2_event(self):
         #-----------調出當天的各週期平均-----------
@@ -1122,10 +1078,23 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
 
         # 方式 2：table widget 3 利用 self.update_and_style_table_item 函式，在更新內容後，重新套用樣式
-        self.update_and_style_table_item(self.tableWidget_3, 0, 2, pre_check2(tai_power))
-        self.update_and_style_table_item(self.tableWidget_3,1 ,2, pre_check2(current_p['2H120':'5KB19'].sum()))
-        self.update_and_style_table_item(self.tableWidget_3, 2, 2, pre_check2(sun_power,b=5))
-        self.update_and_style_table_item(self.tableWidget_3, 3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
+        #self.update_and_style_table_item(self.tableWidget_3, 0, 2, pre_check2(tai_power))
+        #self.update_and_style_table_item(self.tableWidget_3,1 ,2, pre_check2(current_p['2H120':'5KB19'].sum()))
+        #self.update_and_style_table_item(self.tableWidget_3, 2, 2, pre_check2(sun_power,b=5))
+        #self.update_and_style_table_item(self.tableWidget_3, 3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
+
+        item = QtWidgets.QTableWidgetItem()
+        self.tableWidget_3.setItem(0, 2, item)
+        self.tableWidget_3.item(0, 2).setText(str(pre_check2(tai_power)))
+        item = QtWidgets.QTableWidgetItem()
+        self.tableWidget_3.setItem(1, 2, item)
+        self.tableWidget_3.item(1, 2).setText(pre_check2(current_p['2H120':'5KB19'].sum()))
+        item = QtWidgets.QTableWidgetItem()
+        self.tableWidget_3.setItem(2, 2, item)
+        self.tableWidget_3.item(2, 2).setText(pre_check2(sun_power,b=5))
+        item = QtWidgets.QTableWidgetItem()
+        self.tableWidget_3.setItem(3, 2, item)
+        self.tableWidget_3.item(3, 2).setText(pre_check2(current_p['feeder 1510':'feeder 1520'].sum(),b=4))
 
     def tws_update(self, current_p):
         """
@@ -1223,6 +1192,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
         tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
+
         self.update_table_item(self.tableWidget_3, 0, 1, pre_check(tai_power))
         self.update_table_item(self.tableWidget_3, 1, 1, pre_check(current_p['2H120':'5KB19'].sum()))
         self.update_table_item(self.tableWidget_3, 2, 1, pre_check(current_p['sp_real_time'], b=5))
