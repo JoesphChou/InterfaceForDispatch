@@ -2597,7 +2597,7 @@ Runner</string>
        <font>
         <family>微軟正黑體</family>
         <pointsize>12</pointsize>
-        <bold>true</bold>
+        <bold>false</bold>
        </font>
       </property>
       <property name="textAlignment">
@@ -2609,15 +2609,6 @@ Runner</string>
          <red>80</red>
          <green>191</green>
          <blue>200</blue>
-        </color>
-       </brush>
-      </property>
-      <property name="foreground">
-       <brush brushstyle="SolidPattern">
-        <color alpha="255">
-         <red>255</red>
-         <green>255</green>
-         <blue>255</blue>
         </color>
        </brush>
       </property>
@@ -2663,7 +2654,7 @@ Runner</string>
        <font>
         <family>微軟正黑體</family>
         <pointsize>12</pointsize>
-        <bold>true</bold>
+        <bold>false</bold>
        </font>
       </property>
       <property name="textAlignment">
@@ -2675,15 +2666,6 @@ Runner</string>
          <red>100</red>
          <green>170</green>
          <blue>90</blue>
-        </color>
-       </brush>
-      </property>
-      <property name="foreground">
-       <brush brushstyle="SolidPattern">
-        <color alpha="255">
-         <red>255</red>
-         <green>255</green>
-         <blue>255</blue>
         </color>
        </brush>
       </property>
