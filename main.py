@@ -1,13 +1,12 @@
 import PIconnect as Pi
-from PyQt6 import QtCore, QtWidgets, QtGui
+from PyQt6 import QtCore, QtWidgets, QtGui, sip
 from PyQt6.QtWidgets import QTableWidgetItem
 from PyQt6.QtGui import QColor, QBrush
-from UI import Ui_Form
-import sys, re
+import sys, re, time, math, urllib3
 import pandas as pd
-import time, math
-import urllib3
 from bs4 import BeautifulSoup
+from UI import Ui_Form
+
 
 def timeit(func):
     print('接到 func', func.__name__)
@@ -223,6 +222,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def __init__(self):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
+
         self.pushButton.clicked.connect(self.query_cbl)
         self.pushButton_2.clicked.connect(self.add_list_item)
         self.pushButton_3.clicked.connect(self.remove_list_item1)
@@ -244,6 +244,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.real_time_back = "#D5F5E3"   # 即時量背景顏色 淡綠色背景
         self.average_text = "#154360"     # 平均值文字顏色 深藍色文字
         self.average_back = "#D6EAF8"     # 平均值背景顏色 淡藍色背景
+
+        # self.predict_demand()
 
         self.tw1.itemExpanded.connect(self.tw1_expanded_event)
         self.tw1.itemCollapsed.connect(self.tw1_expanded_event)
@@ -276,14 +278,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # **美化 tw1, tw2, tw3**
         self.beautify_tree_widgets()
         self.beautify_table_widgets()
-        # **美化 tableWidget_3**
-        #self.initialize_tableWidget_3_colors()
-        """
-        # 美化 tw1, tw2, tw3（QTreeWidget）
-        self.beautify_avg_column(self.tw1, 2)
-        self.beautify_avg_column(self.tw2, 2)
-        self.beautify_avg_column(self.tw3, 2)
-        """
+
         # ---------------以下是針對每個treeWidget 設定文字對齊、顏色---------------
         brush2 = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # brush2 用來設定設備群子項的即時量顏色
         brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
@@ -596,7 +591,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         """ 使用 setStyleSheet() 統一美化 tableWidget_3、4 的表頭 """
 
         # **透過 setStyleSheet() 設定表頭統一風格**
-        self.tableWidget_3.setStyleSheet("QHeaderView::section { background-color: #ffeac9; color: black; font-weight: bold; }")
+        self.tableWidget_3.setStyleSheet("QHeaderView::section { background-color: #eff9dd; color: black; font-weight: bold; }")
         self.tableWidget_4.setStyleSheet("QHeaderView::section { background-color: #5DADE2; color: black; font-weight: bold; }")
 
         # **設定 Column 寬度**
@@ -655,7 +650,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw2.setColumnHidden(2, False)
             self.tw3.setColumnHidden(2, False)
             tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + self.tw1.columnWidth(2) + 20
-            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + self.tw2.columnWidth(2)
+            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + self.tw2.columnWidth(2) + 2
             tw3_width = tw3_base_width + self.tw3.columnWidth(2)
             # ----------------------顯示平均值欄位，並增加 tablewidget3 總寬度 ----------------
             self.tableWidget_3.setColumnHidden(2, False)
@@ -670,7 +665,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.label_21.setVisible(False)
             # ----------------------平均值欄位隱藏，並增加 tree widget 總寬度 ----------------
             tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + 20
-            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1)
+            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + 2
             tw3_width = tw3_base_width
             self.tw1.setColumnHidden(2, True)
             self.tw2.setColumnHidden(2, True)
@@ -814,6 +809,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         wx.index = wx.index.get_level_values(0)
         c_values = pd.concat([c_values, wx],axis=0)  # 9
         self.tws_update(c_values)
+        self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
         """
         1. 獲取排程資料，並顯示在 tableWidget_4。
@@ -908,6 +904,42 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_4.setEditTriggers(self.tableWidget_4.EditTrigger.NoEditTriggers)  # 禁止編輯
         self.tableWidget_4.setSelectionBehavior(self.tableWidget_4.SelectionBehavior.SelectRows)  # 選取整行
         self.tableWidget_4.verticalHeader().setDefaultSectionSize(30)  # 設定行高
+
+    def predict_demand(self):
+        """
+        1. 計算預測的demand。目前預測需量的計算方式為，
+        目前週期的累計需量值 + 近180秒的平均需量 / 180 x 該剩期剩餘秒數
+        :return:
+        """
+        st = pd.Timestamp.now().floor('15T')    # 目前週期的起始時間
+        et = st + pd.offsets.Minute(15)         # 目前週期的結束時間
+
+        back_150s_from_now = pd.Timestamp.now() - pd.offsets.Second(180)    # 150秒前的時間點
+        diff_between_now_and_et = (et - pd.Timestamp.now()).total_seconds()   # 此週期剩餘時間
+
+        tags = self.tag_list.loc[0:1,'tag_name2']
+        tags.index = self.tag_list.loc[0:1,'name']
+        name_list = tags.loc[:].values.tolist()
+
+        # 查詢目前週期的累計需量值
+        query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
+
+        # 將資料型態從Object -> float，若有資料中有文字無法換的，則用NaN 缺失值取代。
+        query_result.iloc[0,:] = pd.to_numeric(query_result.iloc[0,:], errors='coerce')
+        current_accumulation = query_result.sum(axis = 1) * 4
+
+        # 查近180秒的平均需量，並計算出剩餘時間可能會增加的需量累計值
+        result = query_pi(st=back_150s_from_now, et=back_150s_from_now + pd.offsets.Second(180),
+                             tags=name_list ,extract_type = 16)
+        weight2 = 4 / 180 * diff_between_now_and_et
+
+        # 將資料型態從Object -> float，若有資料中有文字無法換的，則用NaN 缺失值取代。
+        result.iloc[0,:] = pd.to_numeric(result.iloc[0,:], errors='coerce')
+        predict = result.sum(axis=1) * weight2
+
+        # 取四捨五入
+        demand = round((current_accumulation[0] + predict[0]),2)
+        return demand
 
     # @timeit
     def history_demand_of_groups(self, st, et):

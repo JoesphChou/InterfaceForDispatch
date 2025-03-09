@@ -618,7 +618,7 @@ class Ui_Form(object):
         self.tw1.header().setDefaultSectionSize(175)
         self.tw1.header().setStretchLastSection(False)
         self.tw2 = QtWidgets.QTreeWidget(parent=self.tab_2)
-        self.tw2.setGeometry(QtCore.QRect(0, 210, 290, 191))
+        self.tw2.setGeometry(QtCore.QRect(0, 210, 293, 190))
         self.tw2.setAutoFillBackground(False)
         self.tw2.setAlternatingRowColors(True)
         self.tw2.setObjectName("tw2")
@@ -892,8 +892,8 @@ class Ui_Form(object):
         font.setPointSize(12)
         self.label_16.setFont(font)
         self.label_16.setAutoFillBackground(False)
-        self.label_16.setStyleSheet("background-color: rgb(255, 245, 204);\n"
-"color: rgb(255, 0, 0);")
+        self.label_16.setStyleSheet("background-color: rgb(214, 234, 248);\n"
+"color: rgb(21, 67, 96);")
         self.label_16.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.label_16.setObjectName("label_16")
         self.label_17 = QtWidgets.QLabel(parent=self.groupBox_2)
@@ -902,8 +902,8 @@ class Ui_Form(object):
         font.setFamily("Microsoft JhengHei UI")
         font.setPointSize(12)
         self.label_17.setFont(font)
-        self.label_17.setStyleSheet("background-color: rgb(255, 245, 204);\n"
-"color: rgb(255, 0, 0);")
+        self.label_17.setStyleSheet("background-color: rgb(214, 234, 248);\n"
+"color: rgb(21, 67, 96);")
         self.label_17.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.label_17.setObjectName("label_17")
         self.label_19 = QtWidgets.QLabel(parent=self.groupBox_2)
@@ -912,8 +912,8 @@ class Ui_Form(object):
         font.setFamily("Microsoft JhengHei UI")
         font.setPointSize(12)
         self.label_19.setFont(font)
-        self.label_19.setStyleSheet("background-color: rgb(255, 245, 204);\n"
-"color: rgb(255, 0, 0);")
+        self.label_19.setStyleSheet("background-color: rgb(214, 234, 248);\n"
+"color: rgb(21, 67, 96);")
         self.label_19.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.label_19.setObjectName("label_19")
         self.label_21 = QtWidgets.QLabel(parent=self.groupBox_2)
@@ -925,12 +925,16 @@ class Ui_Form(object):
         self.label_21.setObjectName("label_21")
         self.checkBox_2 = QtWidgets.QCheckBox(parent=self.groupBox_2)
         self.checkBox_2.setGeometry(QtCore.QRect(10, 40, 181, 20))
-        self.checkBox_2.setStyleSheet("background-color: rgb(255, 250, 205);\n"
+        self.checkBox_2.setStyleSheet("background-color: rgb(214, 234, 248);\n"
+"color: rgb(21, 67, 96);\n"
 "font: 11pt \"微軟正黑體\";")
         self.checkBox_2.setChecked(True)
         self.checkBox_2.setObjectName("checkBox_2")
         self.dateEdit_3 = QtWidgets.QDateEdit(parent=self.groupBox_2)
         self.dateEdit_3.setGeometry(QtCore.QRect(50, 68, 115, 22))
+        self.dateEdit_3.setStyleSheet("background-color: rgb(214, 234, 248);\n"
+"color: rgb(21, 67, 96);\n"
+"font: 12pt \"Microsoft JhengHei UI\";")
         self.dateEdit_3.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.dateEdit_3.setMinimumDate(QtCore.QDate(2024, 12, 14))
         self.dateEdit_3.setCurrentSection(QtWidgets.QDateTimeEdit.Section.DaySection)
@@ -959,7 +963,7 @@ class Ui_Form(object):
         self.horizontalScrollBar.raise_()
         self.checkBox.raise_()
         self.tableWidget_4 = QtWidgets.QTableWidget(parent=self.tab_2)
-        self.tableWidget_4.setGeometry(QtCore.QRect(370, 210, 362, 151))
+        self.tableWidget_4.setGeometry(QtCore.QRect(370, 260, 362, 151))
         self.tableWidget_4.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         self.tableWidget_4.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tableWidget_4.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1042,6 +1046,21 @@ class Ui_Form(object):
         self.label_22.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeading|QtCore.Qt.AlignmentFlag.AlignLeft|QtCore.Qt.AlignmentFlag.AlignVCenter)
         self.label_22.setWordWrap(True)
         self.label_22.setObjectName("label_22")
+        self.label_23 = QtWidgets.QLabel(parent=self.tab_2)
+        self.label_23.setGeometry(QtCore.QRect(570, 170, 91, 21))
+        font = QtGui.QFont()
+        font.setFamily("微軟正黑體")
+        font.setPointSize(12)
+        self.label_23.setFont(font)
+        self.label_23.setStyleSheet("color: rgb(255, 0, 0);")
+        self.label_23.setObjectName("label_23")
+        self.label_24 = QtWidgets.QLabel(parent=self.tab_2)
+        self.label_24.setGeometry(QtCore.QRect(490, 170, 81, 21))
+        font = QtGui.QFont()
+        font.setFamily("微軟正黑體")
+        font.setPointSize(12)
+        self.label_24.setFont(font)
+        self.label_24.setObjectName("label_24")
         self.tabWidget.addTab(self.tab_2, "")
 
         self.retranslateUi(Form)
@@ -1270,4 +1289,6 @@ class Ui_Form(object):
         self.tableWidget_4.setSortingEnabled(__sortingEnabled)
         self.label_22.setText(_translate("Form", "即時量為紅字代表有輔以NG發電\n"
 "滑鼠停在數值上方即可顯示進一步資訊"))
+        self.label_23.setText(_translate("Form", "100 MW"))
+        self.label_24.setText(_translate("Form", "需量預測："))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), _translate("Form", "DashBoard"))

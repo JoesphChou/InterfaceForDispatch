@@ -1960,8 +1960,8 @@ Runner</string>
       <rect>
        <x>0</x>
        <y>210</y>
-       <width>290</width>
-       <height>191</height>
+       <width>293</width>
+       <height>190</height>
       </rect>
      </property>
      <property name="autoFillBackground">
@@ -2748,8 +2748,8 @@ Runner</string>
        <bool>false</bool>
       </property>
       <property name="styleSheet">
-       <string notr="true">background-color: rgb(255, 245, 204);
-color: rgb(255, 0, 0);</string>
+       <string notr="true">background-color: rgb(214, 234, 248);
+color: rgb(21, 67, 96);</string>
       </property>
       <property name="text">
        <string>00:15</string>
@@ -2774,8 +2774,8 @@ color: rgb(255, 0, 0);</string>
        </font>
       </property>
       <property name="styleSheet">
-       <string notr="true">background-color: rgb(255, 245, 204);
-color: rgb(255, 0, 0);</string>
+       <string notr="true">background-color: rgb(214, 234, 248);
+color: rgb(21, 67, 96);</string>
       </property>
       <property name="text">
        <string>00:30</string>
@@ -2800,8 +2800,8 @@ color: rgb(255, 0, 0);</string>
        </font>
       </property>
       <property name="styleSheet">
-       <string notr="true">background-color: rgb(255, 245, 204);
-color: rgb(255, 0, 0);</string>
+       <string notr="true">background-color: rgb(214, 234, 248);
+color: rgb(21, 67, 96);</string>
       </property>
       <property name="text">
        <string>~</string>
@@ -2840,7 +2840,8 @@ color: rgb(255, 0, 0);</string>
        </rect>
       </property>
       <property name="styleSheet">
-       <string notr="true">background-color: rgb(255, 250, 205);
+       <string notr="true">background-color: rgb(214, 234, 248);
+color: rgb(21, 67, 96);
 font: 11pt &quot;微軟正黑體&quot;;</string>
       </property>
       <property name="text">
@@ -2858,6 +2859,11 @@ font: 11pt &quot;微軟正黑體&quot;;</string>
         <width>115</width>
         <height>22</height>
        </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">background-color: rgb(214, 234, 248);
+color: rgb(21, 67, 96);
+font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
       </property>
       <property name="alignment">
        <set>Qt::AlignCenter</set>
@@ -2930,7 +2936,7 @@ font: 11pt &quot;微軟正黑體&quot;;</string>
      <property name="geometry">
       <rect>
        <x>370</x>
-       <y>210</y>
+       <y>260</y>
        <width>362</width>
        <height>151</height>
       </rect>
@@ -3118,6 +3124,47 @@ font: 11pt &quot;微軟正黑體&quot;;</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_23">
+     <property name="geometry">
+      <rect>
+       <x>570</x>
+       <y>170</y>
+       <width>91</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <family>微軟正黑體</family>
+       <pointsize>12</pointsize>
+      </font>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">color: rgb(255, 0, 0);</string>
+     </property>
+     <property name="text">
+      <string>100 MW</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_24">
+     <property name="geometry">
+      <rect>
+       <x>490</x>
+       <y>170</y>
+       <width>81</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <family>微軟正黑體</family>
+       <pointsize>12</pointsize>
+      </font>
+     </property>
+     <property name="text">
+      <string>需量預測：</string>
      </property>
     </widget>
    </widget>
