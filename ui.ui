@@ -1959,13 +1959,19 @@ Runner</string>
      <property name="geometry">
       <rect>
        <x>0</x>
-       <y>210</y>
+       <y>220</y>
        <width>293</width>
-       <height>190</height>
+       <height>171</height>
       </rect>
      </property>
      <property name="autoFillBackground">
       <bool>false</bool>
+     </property>
+     <property name="verticalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOn</enum>
+     </property>
+     <property name="horizontalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
      </property>
      <property name="alternatingRowColors">
       <bool>true</bool>
@@ -2193,7 +2199,7 @@ Runner</string>
      <property name="geometry">
       <rect>
        <x>0</x>
-       <y>430</y>
+       <y>410</y>
        <width>321</width>
        <height>141</height>
       </rect>
@@ -2935,8 +2941,8 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
     <widget class="QLabel" name="label_22">
      <property name="geometry">
       <rect>
-       <x>0</x>
-       <y>570</y>
+       <x>10</x>
+       <y>550</y>
        <width>221</width>
        <height>41</height>
       </rect>
@@ -3007,9 +3013,9 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
      <property name="geometry">
       <rect>
        <x>370</x>
-       <y>210</y>
+       <y>220</y>
        <width>421</width>
-       <height>241</height>
+       <height>171</height>
       </rect>
      </property>
      <property name="autoFillBackground">

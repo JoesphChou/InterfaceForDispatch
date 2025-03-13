@@ -295,6 +295,26 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         :return:
         """
+        # **設定 column 寬度，確保文字完整顯示**
+        self.tw4.setColumnWidth(0, 220)  # **排程時間**
+        self.tw4.setColumnWidth(1, 170)  # **狀態**
+
+        # **固定 column 寬度，防止 tw4.clear() 影響**
+        self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
+        self.tw4.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Fixed)
+
+        # **美化 header（不使用深色系列）**
+        self.tw4.setStyleSheet("""
+            QHeaderView::section {
+                background-color: #D4AC0D;  /* 金黃色 */
+                font-size: 16px; /* 與內容一致 */
+                font-weight: bold;
+            }
+        """)
+
+        # **確保 tw4.clear() 不影響 header**
+        self.tw4.setHeaderLabels(["製程種類 & 排程時間", "狀態"])
+
         # **美化 tw1, tw2, tw3**
         self.beautify_tree_widgets()
         self.beautify_table_widgets()
@@ -302,7 +322,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # ---------------以下是針對每個treeWidget 設定文字對齊、顏色---------------
         brush2 = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # brush2 用來設定設備群子項的即時量顏色
         brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        brush3 = QtGui.QBrush(QtGui.QColor(0, 0, 255))  # brush3 用來各一級單位即時量的顏色
+
+        brush3 = QtGui.QBrush(QtGui.QColor(self.real_time_text))  # brush3 用來各一級單位即時量的顏色
         brush3.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
         # other -> W2
         self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -570,8 +591,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         column_widths = {
             "tw1": [175, 90, 65],
-            "tw2": [135, 90, 65],
-            "tw3": [110, 100, 65]
+            "tw2": [175, 90, 65],
+            "tw3": [175, 90, 65]
         }
 
         tree_widgets = {"tw1": self.tw1, "tw2": self.tw2, "tw3": self.tw3}
@@ -669,7 +690,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw2.setColumnHidden(2, False)
             self.tw3.setColumnHidden(2, False)
             tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + self.tw1.columnWidth(2) + 20
-            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + self.tw2.columnWidth(2) + 2
+            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + self.tw2.columnWidth(2) + 20
             tw3_width = tw3_base_width + self.tw3.columnWidth(2)
             # ----------------------顯示平均值欄位，並增加 tablewidget3 總寬度 ----------------
             self.tableWidget_3.setColumnHidden(2, False)
@@ -684,7 +705,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.label_21.setVisible(False)
             # ----------------------平均值欄位隱藏，並增加 tree widget 總寬度 ----------------
             tw1_width = self.tw1.columnWidth(0) + self.tw1.columnWidth(1) + 20
-            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + 2
+            tw2_width = self.tw2.columnWidth(0) + self.tw2.columnWidth(1) + 20
             tw3_width = tw3_base_width
             self.tw1.setColumnHidden(2, True)
             self.tw2.setColumnHidden(2, True)
@@ -835,95 +856,107 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def update_tw4_schedule(self):
         """
         更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：
-        1. **第一層** → 依據 製程種類 (EAF, LF1-1, LF1-2)
-        2. **第二層** → 分成 "生產或等待中" (current + future) 和 "過去排程" (past)
-        3. **合併 EAFA, EAFB 到 EAF**
-        4. **生產中排程 (current) 用顏色突出**
-
+        - 第一層：製程種類 (EAF, LF1-1, LF1-2)
+        - 第二層："生產或等待中" (current + future) / "過去排程" (past)
+        - 若無 "生產或等待中" 排程，仍增加此分類，但不增加子排程，並顯示 "目前無排程"
+        - 若無 "過去排程" 資料，仍增加此分類，但不增加子排程，並顯示 "無相關排程"
+        - **column 2 (狀態欄) 文字置中**
         """
-        # **獲取最新排程數據**
         past_df, current_df, future_df = scrapy_schedule()
-
-        # **清空 tw4**
         self.tw4.clear()
 
-        # **製程對應的 tw4 結構**
         process_map = {"EAF": None, "LF1-1": None, "LF1-2": None}
 
-        # **處理每個製程 (EAF, LF1-1, LF1-2)**
         for process_name in process_map.keys():
-            # **創建第一層節點 (製程種類)**
             process_parent = QtWidgets.QTreeWidgetItem(self.tw4)
             process_parent.setText(0, process_name)
             self.tw4.addTopLevelItem(process_parent)
 
-            # **創建第二層節點 (生產或等待中)**
-            active_parent = QtWidgets.QTreeWidgetItem(process_parent)
-            active_parent.setText(0, "生產或等待中")
-            process_parent.addChild(active_parent)
-
-            # **創建第二層節點 (已結束)**
-            past_parent = QtWidgets.QTreeWidgetItem(process_parent)
-            past_parent.setText(0, "過去排程")
-            process_parent.addChild(past_parent)
-            self.tw4.collapseItem(past_parent)  # **預設不展開 past**
-
-            # **處理 current (生產中) & future (等待中)**
+            # **過濾當前製程的排程**
             active_schedules = pd.concat([
                 current_df.assign(類別="current"),
                 future_df.assign(類別="future")
             ], ignore_index=True).sort_values(by="開始時間")
+            active_schedules = active_schedules[
+                (active_schedules["製程"] == process_name) |
+                ((process_name == "EAF") & active_schedules["製程"].isin(["EAFA", "EAFB"]))
+                ]
 
-            for _, row in active_schedules.iterrows():
-                start_time = row["開始時間"].strftime("%H:%M:%S")
-                end_time = row["結束時間"].strftime("%H:%M:%S")
-                category = row["類別"]  # current 或 future
-                status = str(row["製程狀態"]) if "製程狀態" in row and pd.notna(row["製程狀態"]) else "N/A"
+            past_schedules = past_df[
+                (past_df["製程"] == process_name) |
+                ((process_name == "EAF") & past_df["製程"].isin(["EAFA", "EAFB"]))
+                ].sort_values(by="開始時間")
 
-                # **處理 EAFA / EAFB → 合併為 EAF**
-                if row["製程"] == "EAFA":
-                    process_display = "EAF"
-                    status += " (A爐)"
-                elif row["製程"] == "EAFB":
-                    process_display = "EAF"
-                    status += " (B爐)"
-                else:
-                    process_display = row["製程"]  # LF1-1, LF1-2 直接顯示
+            # **處理 "生產或等待中"**
+            active_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            active_parent.setText(0, "生產或等待中")
+            process_parent.addChild(active_parent)
 
-                # **確保該排程屬於目前處理的製程**
-                if process_display != process_name:
-                    continue
+            if not active_schedules.empty:
+                for _, row in active_schedules.iterrows():
+                    start_time = row["開始時間"].strftime("%H:%M:%S")
+                    end_time = row["結束時間"].strftime("%H:%M:%S")
+                    category = row["類別"]
+                    status = str(row["製程狀態"]) if "製程狀態" in row and pd.notna(row["製程狀態"]) else "N/A"
 
-                # **新增子節點**
-                item = QtWidgets.QTreeWidgetItem(active_parent)
-                item.setText(0, f"{start_time} ~ {end_time}")  # **Column (1): 排程時間**
+                    if row["製程"] == "EAFA":
+                        process_display = "EAF"
+                        status += " (A爐)"
+                    elif row["製程"] == "EAFB":
+                        process_display = "EAF"
+                        status += " (B爐)"
+                    else:
+                        process_display = row["製程"]
 
-                # **Column (2)**
-                if category == "current":
-                    item.setText(1, status)  # **生產中 → 顯示製程狀態**
-                    item.setBackground(0, QtGui.QBrush(QtGui.QColor("#FCF8BC")))  # **淡黃色背景**
-                    item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
-                elif category == "future":
-                    minutes_until_start = int((row["開始時間"] - pd.Timestamp.now()).total_seconds() / 60)
-                    item.setText(1, f"{minutes_until_start} 分鐘後開始生產")  # **等待中 → 顯示時間**
+                    if process_display != process_name:
+                        continue
 
-                active_parent.addChild(item)
+                    item = QtWidgets.QTreeWidgetItem(active_parent)
+                    item.setText(0, f"{start_time} ~ {end_time}")
+                    item.setText(1, status)
 
-            # **處理 past (過去排程)**
-            past_schedules = past_df[past_df["製程"] == process_name].sort_values(by="開始時間")
-            for _, row in past_schedules.iterrows():
-                start_time = row["開始時間"].strftime("%H:%M:%S")
-                end_time = row["結束時間"].strftime("%H:%M:%S")
+                    # **狀態欄 (column 2) 文字置中**
+                    item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
 
-                item = QtWidgets.QTreeWidgetItem(past_parent)
-                item.setText(0, f"{start_time} ~ {end_time}")  # **Column (1): 排程時間**
-                item.setText(1, "已完成")  # **Column (2): 狀態固定為 "已完成"**
+                    if category == "current":
+                        item.setBackground(0, QtGui.QBrush(QtGui.QColor("#FCF8BC")))  # **淡黃色背景**
+                        item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
+                    elif category == "future":
+                        minutes = int((row["開始時間"] - pd.Timestamp.now()).total_seconds() / 60)
+                        item.setText(1, f"{minutes} 分鐘後開始生產")
+                        item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **未來排程置中**
 
-                past_parent.addChild(item)
+                    active_parent.addChild(item)
 
-        # **展開所有節點**
-        self.tw4.expandAll()
-        #self.beautify_tw4()
+            else:
+                # **若無生產或等待中排程，在 column 2 顯示 "目前無排程"，並置中**
+                active_parent.setText(1, "目前無排程")
+                active_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
+
+            # **處理 "過去排程"**
+            past_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            past_parent.setText(0, "過去排程")
+            process_parent.addChild(past_parent)
+
+            if not past_schedules.empty:
+                for _, row in past_schedules.iterrows():
+                    start_time = row["開始時間"].strftime("%H:%M:%S")
+                    end_time = row["結束時間"].strftime("%H:%M:%S")
+
+                    item = QtWidgets.QTreeWidgetItem(past_parent)
+                    item.setText(0, f"{start_time} ~ {end_time}")
+                    item.setText(1, "已完成")
+                    item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **過去排程置中**
+
+                    past_parent.addChild(item)
+
+            else:
+                # **若無過去排程，在 column 2 顯示 "無相關排程"，並置中**
+                past_parent.setText(1, "無相關排程")
+                past_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        # **確保所有節點展開**
+        self.tw4.expandAll()  # ✅ 確保所有製程展開
 
     def predict_demand(self):
         """
