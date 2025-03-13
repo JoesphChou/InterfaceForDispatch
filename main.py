@@ -1,7 +1,5 @@
 import PIconnect as Pi
-from PyQt6 import QtCore, QtWidgets, QtGui, sip
-from PyQt6.QtWidgets import QTableWidgetItem
-from PyQt6.QtGui import QColor, QBrush
+from PyQt6 import QtCore, QtWidgets, QtGui
 import sys, re, time, math, urllib3
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -96,126 +94,148 @@ def pre_check2(pending_data, b=1):
 
 def scrapy_schedule():
     """
-    爬取"製程管理資訊 2138"，解析電爐排程，並做以下處理：
-    1. 只處理 title 含有 "EAF" 的排程
-    2. 只讀取 Y 軸在 182~235 範圍內的排程
-    3. 透過 X 軸排序，確保排程順序正確
-    4. **檢查 start、end 是否跨天**
-    5. **確保後面排程的時間不會比前面排程還早**
-    6. **分類排程**
-        - `past`: 過去排程 (`end < now`)
-        - `current`: 正在生產 (`start <= now <= end`)
-        - `future`: 未來排程 (`start > now`)
-    爬取"製程管理資訊 2137"，正在生產中的電爐製程狀態，並把資訊加到current 裡面
-    :return: past, current, future 排程列表
+    解析 2138 和 2137 頁面，獲取不同製程 (EAF, LF1-1) 的排程
+    - **確保 EAF & LF1-1 各自獨立去重複，不影響彼此**
+    - **確保 LF1-1, LF1-2 past & future 不會消失**
+    - **確保 2137 預計完成時間解析正常**
+    解析 2138 和 2137 頁面，獲取不同製程 (EAF, LF1-1, LF1-2) 的排程，並去除重複排程 (透過爐號)
     """
-    past = []
-    future = []
-    current = []
-    now = pd.Timestamp.now()  # 當前時間（含日期與時間）
-    today = now.normalize()  # 取得今日日期（只保留 YYYY-MM-DD）
+    now = pd.Timestamp.now()
+    today = now.normalize()
+    today_str = today.strftime("%Y-%m-%d")  # 確保 'YYYY-MM-DD' 格式
 
+    # **各製程獨立判斷重複**
+    seen_furnace_ids = {
+        "past": {"EAFA": set(), "EAFB": set(), "LF1-1": set(), "LF1-2": set()},
+        "future": {"EAFA": set(), "EAFB": set(), "LF1-1": set(), "LF1-2": set()},
+        "current": {"EAFA": set(), "EAFB": set(), "LF1-1": set(), "LF1-2": set()}
+    }
+
+    past_records, future_records, current_records = [], [], []
+
+    ### **🔹 解析 2138 頁面 (排程)**
     quote_page = 'http://w3mes.dscsc.dragonsteel.com.tw/2138.aspx'
-    quote_page2 = 'http://w3mes.dscsc.dragonsteel.com.tw/2137.aspx'
-
     http = urllib3.PoolManager()
     r = http.request('GET', quote_page)
-    r2 = http.request('GET', quote_page2)
     soup = BeautifulSoup(r.data, 'html.parser')
-    soup2 = BeautifulSoup(r2.data, 'html.parser')
 
-    contains = soup.find_all('area')  # 找出所有的 <area> tag
-    schedule_data = []  # 存儲 (x座標, start_time, end_time, title)
+    contains = soup.find_all('area')
+    schedule_data = []
+
+    # **不同製程的時間匹配模式**
+    time_patterns = {
+        "EAFA": r"EAFA時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})",
+        "EAFB": r"EAFB時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})",
+        "LF1-1": r"LF1-1時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})",
+        "LF1-2": r"LF1-2時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})"
+    }
 
     for contain in contains:
-        title_text = contain.get('title')  # 取得 title 內容
+        title_text = contain.get('title')
 
-        # **只處理包含 "EAF" 的標題**
-        if 'EAF' not in title_text:
-            continue
+        # **取得爐號**
+        furnace_match = re.search(r"爐號[＝>:\s]*([A-Za-z0-9]+)", title_text)
+        furnace_id = furnace_match.group(1) if furnace_match else "未知"
 
-        # 判斷是 A爐 (EAFA) 還是 B爐(EAFB)
-        furnace_type = None
-        if 'EAFA' in title_text:
-            furnace_type = 'A'
-        elif 'EAFB' in title_text:
-            furnace_type = 'B'
-        else:
-            continue    # 若無法判別爐別，跳過此排程
-
-        # 取得座標
-        coords = re.findall(r"\d+", contain.get('coords'))  # 解析座標
+        # **解析座標**
+        coords = re.findall(r"\d+", contain.get('coords'))
         if len(coords) < 2:
-            continue  # 座標解析失敗則跳過
+            continue
+        x_coord = int(coords[0])  # X 軸代表時間
+        y_coord = int(coords[1])  # Y 軸代表排程分類
 
-        x_coord = int(coords[0])  # X 座標（代表時間順序）
-        y_coord = int(coords[1])  # Y 座標
+        # **根據 Y 座標範圍判斷製程類型**
+        if 179 <= y_coord <= 197:
+            process_type = "EAFA"
+        elif 217 <= y_coord <= 235:
+            process_type = "EAFB"
+        elif 250 <= y_coord <= 268:
+            process_type = "LF1-1"
+        elif 286 <= y_coord <= 304:
+            process_type = "LF1-2"
+        else:
+            continue  # 若不在任何範圍內則跳過
 
-        # **篩選 Y 軸在 182~235 的範圍**
-        if not (182 < y_coord < 235):
-            continue  # 不符合範圍，跳過此排程
+        # **檢查 title 是否包含對應製程名稱**
+        if process_type not in title_text:
+            continue  # **如果 title 不包含該製程名稱，則跳過解析**
 
-        # 解析出 start 和 end 時間
-        time_pattern = re.findall(r"(\d{2}:\d{2}:\d{2})", title_text)
-        if len(time_pattern) < 2:
-            continue  # 無法解析時間則跳過
+        # **解析開始與結束時間**
+        time_match = re.search(time_patterns[process_type], title_text)
+        if not time_match:
+            # print(f"⚠️ 無法解析 {process_type} 時間: {title_text}")
+            continue  # 如果匹配失敗，跳過該排程
 
-        start_time = time_pattern[0]  # 取得開始時間 (未加日期)
-        end_time = time_pattern[1]    # 取得結束時間 (未加日期)
+        start_time = time_match.group(1)
+        end_time = time_match.group(2)
 
-        # 存入數據，稍後排序
-        schedule_data.append((x_coord, start_time, end_time, title_text, furnace_type))
-
-    # **根據 X 座標 (時間軸) 進行排序**
-    schedule_data.sort(key=lambda x: x[0])  # 按 x 座標排序
-
-    # **調整時間順序，確保排程不會比前一個早**
-    adjusted_schedule = []
-    prev_start_time = None  # 記錄前一個排程的開始時間
-
-    for x_coord, start_time, end_time, title_text, furnace_type in schedule_data:
-        # 先將時間轉換為當前日期的時間格式
+        # **轉換時間格式**
         start = pd.to_datetime(f"{today} {start_time}")
         end = pd.to_datetime(f"{today} {end_time}")
 
-        # **若 end < start，則 end 應跨天**
-        if end < start:
-            end += pd.Timedelta(days=1)
+        # **存入數據，稍後進行 X 軸排序**
+        schedule_data.append((x_coord, start, end, furnace_id, process_type))
 
-        # **檢查是否時間錯亂 (X 軸較後的排程卻比前一個排程早)**
-        if prev_start_time and start < prev_start_time:
-            # **如果新的 start 比前一個 start 還早，表示需要 +1 天**
-            start += pd.Timedelta(days=1)
-            end += pd.Timedelta(days=1)
+    # **根據 X 軸進行排序**
+    schedule_data.sort(key=lambda x: (x[4], x[0]))  # 先按 process_type 再按 X 座標 排序
 
-        # 更新 prev_start_time
-        prev_start_time = start
+    # **去除重複排程 (X 座標過於接近 & 起始時間相同)**
+    filtered_schedule = []
+    for i in range(len(schedule_data)):
+        if i > 0:
+            prev_x, prev_start, prev_end, prev_furnace, prev_process = filtered_schedule[-1]
+            curr_x, curr_start, curr_end, curr_furnace, curr_process = schedule_data[i]
 
-        # **加入調整後的排程**
-        adjusted_schedule.append((start, end, furnace_type))
+            # **只有當製程相同時，才檢查 X 座標 & 起始時間是否過於接近**
+            if (
+                curr_process == prev_process  # **相同製程**
+                and abs(curr_x - prev_x) <= 3  # **X 座標過於接近**
+                and curr_start == prev_start  # **起始時間相同**
+            ):
+                # print(f"⚠️ 重複排程移除: {curr_process} {curr_start} ~ {curr_end} (X={curr_x})")
+                continue  # **跳過這筆排程，不加入 filtered_schedule**
 
-    # 嘗試根據 id 找出 A爐與 B爐的製程狀態
-    a_furnace_status = soup2.find(id="lbl_eafa_period")
-    b_furnace_status = soup2.find(id="lbl_eafb_period")
+        filtered_schedule.append(schedule_data[i])
 
-    # 取得文字內容
-    a_furnace_status_text = a_furnace_status.get_text(strip=True) if a_furnace_status else "未找到"
-    b_furnace_status_text = b_furnace_status.get_text(strip=True) if b_furnace_status else "未找到"
+    ### **🔹 解析 2137 頁面 (獲取製程狀態)**
+    quote_page_2137 = 'http://w3mes.dscsc.dragonsteel.com.tw/2137.aspx'
+    r_2137 = http.request('GET', quote_page_2137)
+    soup_2137 = BeautifulSoup(r_2137.data, 'html.parser')
 
-    # **分類排程**
-    for start, end, furnace_type in adjusted_schedule:
+    # **解析製程狀態**
+    def get_status(soup, element_id):
+        status_element = soup.find("span", {"id": element_id})
+        return status_element.text.strip() if status_element else "未知"
+
+    process_status_mapping = {
+        "EAFA": get_status(soup_2137, "lbl_eafa_period"),
+        "EAFB": get_status(soup_2137, "lbl_eafb_period"),
+        "LF1-1": get_status(soup_2137, "lbl_lf11_period"),
+        "LF1-2": get_status(soup_2137, "lbl_lf12_period"),
+    }
+
+    # **分類 past / current / future**
+    for x_coord, start, end, furnace_id, process_type in filtered_schedule:
         if end < now:
-            past.append(pd.Series([start, end, furnace_type]))  # 過去的排程
+            if furnace_id not in seen_furnace_ids["past"][process_type]:
+                past_records.append([start, end, furnace_id, process_type])
+                seen_furnace_ids["past"][process_type].add(furnace_id)
         elif start > now:
-            future.append(pd.Series([start, end, furnace_type]))  # 未來的排程
-        else:   # 判斷由A或B爐生產，並讀取相對應的製程狀態
-            if furnace_type == 'A':
-                current.append(pd.Series([start, end, furnace_type, a_furnace_status_text]))
-            elif furnace_type == 'B':
-                current.append(pd.Series([start, end, furnace_type, b_furnace_status_text]))
-            else:
-                current.append(pd.Series([start, end, furnace_type, '未知']))
-    return past, current, future
+            if furnace_id not in seen_furnace_ids["future"][process_type]:
+                future_records.append([start, end, furnace_id, process_type])
+                seen_furnace_ids["future"][process_type].add(furnace_id)
+        else:
+            if furnace_id not in seen_furnace_ids["current"][process_type]:
+                process_status = process_status_mapping.get(process_type, "未知")
+                current_records.append([start, end, furnace_id, process_type, process_status])  # **確保 製程狀態 存在**
+                seen_furnace_ids["current"][process_type].add(furnace_id)
+
+    ### **🔹 轉換為 DataFrame**
+    past_df = pd.DataFrame(past_records, columns=["開始時間", "結束時間", "爐號", "製程"])
+    current_df = pd.DataFrame(current_records, columns=["開始時間", "結束時間", "爐號", "製程", "製程狀態"])
+    future_df = pd.DataFrame(future_records, columns=["開始時間", "結束時間", "爐號", "製程"])
+
+    return past_df, current_df, future_df
 
 class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
@@ -588,11 +608,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.itemCollapsed.connect(self.tw3_expanded_event)
 
     def beautify_table_widgets(self):
-        """ 使用 setStyleSheet() 統一美化 tableWidget_3、4 的表頭 """
+        """ 使用 setStyleSheet() 統一美化 tableWidget_3 的表頭 """
 
         # **透過 setStyleSheet() 設定表頭統一風格**
         self.tableWidget_3.setStyleSheet("QHeaderView::section { background-color: #eff9dd; color: black; font-weight: bold; }")
-        self.tableWidget_4.setStyleSheet("QHeaderView::section { background-color: #5DADE2; color: black; font-weight: bold; }")
 
         # **設定 Column 寬度**
         column_widths = [90, 100, 65]  # 各欄位的固定寬度
@@ -811,99 +830,100 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tws_update(c_values)
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
+        self.update_tw4_schedule()
+
+    def update_tw4_schedule(self):
         """
-        1. 獲取排程資料，並顯示在 tableWidget_4。
-        2. current 排程顯示在第 1 列 (`start ~ end` 和 製程狀態)。
-        3. future 排程顯示在後續列 (`start ~ end` 和 還剩幾分鐘開始)。
-        4. 若 current 為空，則 future 從第 1 列開始顯示。
-        5. **確保所有 Cell 物件存在，避免 NoneType 錯誤**
+        更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：
+        1. **第一層** → 依據 製程種類 (EAF, LF1-1, LF1-2)
+        2. **第二層** → 分成 "生產或等待中" (current + future) 和 "過去排程" (past)
+        3. **合併 EAFA, EAFB 到 EAF**
+        4. **生產中排程 (current) 用顏色突出**
+
         """
-        # 取得排程資料
-        past, current, future = scrapy_schedule()
+        # **獲取最新排程數據**
+        past_df, current_df, future_df = scrapy_schedule()
 
-        # 清空 tableWidget_4（保留格式）
-        self.tableWidget_4.clearContents()
+        # **清空 tw4**
+        self.tw4.clear()
 
-        # **設定行數，避免 row, column 超出範圍**
-        total_rows = max(len(current), len(future), 1)
-        self.tableWidget_4.setRowCount(total_rows)
-        self.tableWidget_4.setColumnCount(2)  # 確保有 2 欄
+        # **製程對應的 tw4 結構**
+        process_map = {"EAF": None, "LF1-1": None, "LF1-2": None}
 
-        # 設定標題列 (Header)
-        self.tableWidget_4.setHorizontalHeaderLabels(["EAF 排程時間", "狀態"])
-        self.tableWidget_4.setColumnWidth(0, 180)  # 調整欄寬
-        self.tableWidget_4.setColumnWidth(1, 120)
+        # **處理每個製程 (EAF, LF1-1, LF1-2)**
+        for process_name in process_map.keys():
+            # **創建第一層節點 (製程種類)**
+            process_parent = QtWidgets.QTreeWidgetItem(self.tw4)
+            process_parent.setText(0, process_name)
+            self.tw4.addTopLevelItem(process_parent)
 
-        # 確保每行行高為35px
-        for row in range(self.tableWidget_4.rowCount()):
-            self.tableWidget_4.setRowHeight(row, 35)
+            # **創建第二層節點 (生產或等待中)**
+            active_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            active_parent.setText(0, "生產或等待中")
+            process_parent.addChild(active_parent)
 
-        # 目前時間
-        now = pd.Timestamp.now()
-        row_index = 0  # 開始填入資料的列索引
+            # **創建第二層節點 (已結束)**
+            past_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            past_parent.setText(0, "過去排程")
+            process_parent.addChild(past_parent)
+            self.tw4.collapseItem(past_parent)  # **預設不展開 past**
 
-        # 1️⃣ **顯示 current 排程**
-        if current:
-            for entry in current:
-                start_time = entry[0].strftime("%H:%M:%S")  # 開始時間
-                end_time = entry[1].strftime("%H:%M:%S")  # 結束時間
-                process_status = entry[3]  # 爐別（A爐 / B爐）
+            # **處理 current (生產中) & future (等待中)**
+            active_schedules = pd.concat([
+                current_df.assign(類別="current"),
+                future_df.assign(類別="future")
+            ], ignore_index=True).sort_values(by="開始時間")
 
-                # 設定背景色 (淡粉紅色，標記 current)
-                bg_color = QBrush(QColor(255, 225, 210))
+            for _, row in active_schedules.iterrows():
+                start_time = row["開始時間"].strftime("%H:%M:%S")
+                end_time = row["結束時間"].strftime("%H:%M:%S")
+                category = row["類別"]  # current 或 future
+                status = str(row["製程狀態"]) if "製程狀態" in row and pd.notna(row["製程狀態"]) else "N/A"
 
-                # **確保 Item 存在**
-                item1 = self.tableWidget_4.item(row_index, 0)
-                if item1 is None:
-                    item1 = QtWidgets.QTableWidgetItem()
-                    self.tableWidget_4.setItem(row_index, 0, item1)
-                item1.setText(f"{start_time} ~ {end_time}")
-                # 設定格式（背景色 & 置中對齊）
-                item1.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                item1.setBackground(bg_color)
+                # **處理 EAFA / EAFB → 合併為 EAF**
+                if row["製程"] == "EAFA":
+                    process_display = "EAF"
+                    status += " (A爐)"
+                elif row["製程"] == "EAFB":
+                    process_display = "EAF"
+                    status += " (B爐)"
+                else:
+                    process_display = row["製程"]  # LF1-1, LF1-2 直接顯示
 
-                item2 = self.tableWidget_4.item(row_index, 1)
-                if item2 is None:
-                    item2 = QtWidgets.QTableWidgetItem()
-                    self.tableWidget_4.setItem(row_index, 1, item2)
-                item2.setText(process_status)
-                # 設定格式（背景色 & 置中對齊）
-                item2.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                item2.setBackground(bg_color)
+                # **確保該排程屬於目前處理的製程**
+                if process_display != process_name:
+                    continue
 
-                row_index += 1  # 更新 row 索引
+                # **新增子節點**
+                item = QtWidgets.QTreeWidgetItem(active_parent)
+                item.setText(0, f"{start_time} ~ {end_time}")  # **Column (1): 排程時間**
 
-        # 2️⃣ **顯示 future 排程**
-        for entry in future:
-            start_time = entry[0].strftime("%H:%M:%S")  # 開始時間
-            end_time = entry[1].strftime("%H:%M:%S")  # 結束時間
-            minutes_until_start = int((entry[0] - now).total_seconds() / 60)  # 計算距離開始時間（分鐘）
+                # **Column (2)**
+                if category == "current":
+                    item.setText(1, status)  # **生產中 → 顯示製程狀態**
+                    item.setBackground(0, QtGui.QBrush(QtGui.QColor("#FCF8BC")))  # **淡黃色背景**
+                    item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
+                elif category == "future":
+                    minutes_until_start = int((row["開始時間"] - pd.Timestamp.now()).total_seconds() / 60)
+                    item.setText(1, f"{minutes_until_start} 分鐘後開始生產")  # **等待中 → 顯示時間**
 
-            # **確保 Item 存在**
-            item1 = self.tableWidget_4.item(row_index, 0)
-            if item1 is None:
-                item1 = QtWidgets.QTableWidgetItem()
-                self.tableWidget_4.setItem(row_index, 0, item1)
-            item1.setText(f"{start_time} ~ {end_time}")
-            item1.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                active_parent.addChild(item)
 
-            item2 = self.tableWidget_4.item(row_index, 1)
-            if item2 is None:
-                item2 = QtWidgets.QTableWidgetItem()
-                self.tableWidget_4.setItem(row_index, 1, item2)
-            item2.setText(f"尚有 {minutes_until_start} 分鐘")
-            item2.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            # **處理 past (過去排程)**
+            past_schedules = past_df[past_df["製程"] == process_name].sort_values(by="開始時間")
+            for _, row in past_schedules.iterrows():
+                start_time = row["開始時間"].strftime("%H:%M:%S")
+                end_time = row["結束時間"].strftime("%H:%M:%S")
 
-            row_index += 1  # 更新 row 索引
+                item = QtWidgets.QTreeWidgetItem(past_parent)
+                item.setText(0, f"{start_time} ~ {end_time}")  # **Column (1): 排程時間**
+                item.setText(1, "已完成")  # **Column (2): 狀態固定為 "已完成"**
 
-        # 3️⃣ **若沒有排程，顯示 "目前無排程"**
-        if row_index == 0:
-            self.tableWidget_4.setItem(0, 0, QTableWidgetItem("目前無排程"))
+                past_parent.addChild(item)
 
-        # 4️⃣ **美化表格：固定行高、禁止編輯、啟用選取**
-        self.tableWidget_4.setEditTriggers(self.tableWidget_4.EditTrigger.NoEditTriggers)  # 禁止編輯
-        self.tableWidget_4.setSelectionBehavior(self.tableWidget_4.SelectionBehavior.SelectRows)  # 選取整行
-        self.tableWidget_4.verticalHeader().setDefaultSectionSize(30)  # 設定行高
+        # **展開所有節點**
+        self.tw4.expandAll()
+        #self.beautify_tw4()
 
     def predict_demand(self):
         """
