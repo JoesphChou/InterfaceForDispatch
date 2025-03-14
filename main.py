@@ -310,268 +310,53 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.beautify_tree_widgets()
         self.beautify_table_widgets()
 
-        # ---------------以下是針對每個treeWidget 設定文字對齊、顏色---------------
-        brush2 = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # brush2 用來設定設備群子項的即時量顏色
-        brush2.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
+        # 定義顏色
+        brush_sub = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # 用於第 2 層及以上的即時量數值
+        brush_sub.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
 
-        brush3 = QtGui.QBrush(QtGui.QColor(self.real_time_text))  # brush3 用來各一級單位即時量的顏色
-        brush3.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
-        # other -> W2
-        self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).setForeground(1, brush3)
-        # other -> W2 -> 鼓風機
-        self.tw1.topLevelItem(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.tw1.topLevelItem(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).child(0).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).child(0).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).child(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(0).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(0).child(0).child(1).setForeground(1, brush2)
-        self.tw1.topLevelItem(0).child(0).child(2).setForeground(1, brush2)
-        # other -> W2 -> #1 燒結風車
-        self.tw1.topLevelItem(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        # other -> W2 -> #2 燒結風車
-        self.tw1.topLevelItem(0).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.tw1.topLevelItem(0).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(2).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).child(2).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).child(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(2).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(0).child(2).child(1).setForeground(1, brush2)
-        # other -> W2 -> Roof Fan and runner
-        self.tw1.topLevelItem(0).child(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.tw1.topLevelItem(0).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(3).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).child(3).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(0).child(3).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(3).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(3).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(3).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(3).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(0).child(3).child(1).setForeground(1, brush2)
+        brush_top = QtGui.QBrush(QtGui.QColor(self.real_time_text))  # 用於 tw1 的頂層數值
+        brush_top.setStyle(QtCore.Qt.BrushStyle.SolidPattern)
 
-        # other -> W2 -> 其它
-        self.tw1.topLevelItem(0).child(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(0).child(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        # 遍歷 tw1, tw2, tw3，並統一初始化子項目
+        for tree in [self.tw1, self.tw2, self.tw3]:
+            for i in range(tree.topLevelItemCount()):
+                # tw1 需要額外設定頂層的文字顏色，tw2 和 tw3 則不需要
+                self.init_tree_item(tree.topLevelItem(i), level=0,
+                               level0_color=(brush_top if tree == self.tw1 else None),
+                               level_sub_color=brush_sub)
 
-        # other -> W3
-        self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).setForeground(1, brush3)
-        # other -> W3 -> EAF 集塵
-        self.tw1.topLevelItem(1).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        # other -> W3 -> 轉爐除塵
-        self.tw1.topLevelItem(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(1).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(1).child(1).child(1).setForeground(1, brush2)
-        self.tw1.topLevelItem(1).child(1).child(2).setForeground(1, brush2)
-        self.tw1.topLevelItem(1).child(1).child(3).setForeground(1, brush2)
-        self.tw1.topLevelItem(1).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(1).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        # other -> W4
-        self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(2).setForeground(1, brush3)
-        # other -> W4 -> 型鋼,廠區
-        self.tw1.topLevelItem(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+    def init_tree_item(self, item, level, level0_color=None, level_sub_color=None):
+        """
+        遞迴初始化 TreeWidgetItem 的對齊方式與文字顏色。
 
-        # other -> W5
-        self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).setForeground(1, brush3)
-        # other -> W5 -> o2 #1
-        self.tw1.topLevelItem(3).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(0).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(0).child(1).setForeground(1, brush2)
+        設定方式：
+          - 頂層 (level == 0)：
+              - 第 0 欄置中，第 1、2 欄置右
+              - tw1 頂層的即時量 (第 1 欄) 設定為 self.real_time_text
+          - 次層 (level == 1)：
+              - 第 0 欄置左，第 1、2 欄置右
+          - 更深層 (level ≥2)：
+              - 第 0 欄置中，第 1、2 欄置右，且即時量 (第 1 欄) 設定為 灰色
+        """
 
-        # other -> W5 -> o2 #2
-        self.tw1.topLevelItem(3).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(1).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(1).child(1).setForeground(1, brush2)
-        # other -> W5 -> o2 #3
-        self.tw1.topLevelItem(3).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(2).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(2).child(1).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(2).child(2).setForeground(1, brush2)
-        # other -> W5 -> 空壓機群
-        self.tw1.topLevelItem(3).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(4).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(5).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(6).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(7).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(5).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(6).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(7).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(5).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(6).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(7).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(3).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(3).child(1).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(3).child(2).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(3).child(3).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(3).child(4).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(3).child(5).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(3).child(6).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(3).child(7).setForeground(1, brush2)
-        # other -> W5 -> IDF
-        self.tw1.topLevelItem(3).child(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(4).child(0).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(4).child(1).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(4).child(2).setForeground(1, brush2)
-        self.tw1.topLevelItem(3).child(4).child(3).setForeground(1, brush2)
-        # other -> W5 -> 廠區用電
-        self.tw1.topLevelItem(3).child(5).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(3).child(5).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        # other
-        self.tw1.topLevelItem(4).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw1.topLevelItem(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw1.topLevelItem(4).setForeground(1, brush3)
+        # 設定欄位對齊方式
+        align0 = QtCore.Qt.AlignmentFlag.AlignCenter if level != 1 else QtCore.Qt.AlignmentFlag.AlignLeft
+        align1 = QtCore.Qt.AlignmentFlag.AlignRight
+        align2 = QtCore.Qt.AlignmentFlag.AlignRight
 
-        # 常調度負載
-        self.tw2.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw2.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw2.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw2.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw2.topLevelItem(4).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw2.topLevelItem(5).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw2.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(4).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(5).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(4).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw2.topLevelItem(5).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        item.setTextAlignment(0, align0)
+        item.setTextAlignment(1, align1)
+        item.setTextAlignment(2, align2)
 
-        # 發電 #1
-        self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw3.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        # 設定顏色
+        if level == 0 and level0_color is not None:
+            item.setForeground(1, level0_color)  # 頂層即時量顏色 (僅 tw1)
+        elif level >= 2 and level_sub_color is not None:
+            item.setForeground(1, level_sub_color)  # 內層即時量顏色
 
-        # TGs,tg1~4 的第3~5 column
-        self.tw3.topLevelItem(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(0).child(3).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-
-        # TRTs、CDQs
-        self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw3.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(1).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(1).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(1).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(1).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(1).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(1).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.tw3.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).child(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).child(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).child(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).child(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).child(0).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
-        self.tw3.topLevelItem(2).child(1).setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+        # 遞迴處理子節點
+        for i in range(item.childCount()):
+            self.init_tree_item(item.child(i), level + 1, level0_color, level_sub_color)
 
     def beautify_tree_widgets(self):
         """ 美化 tw1, tw2, tw3 的即時量與平均值欄位，並區分不同表頭顏色 """
@@ -1402,118 +1187,65 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def tw3_expanded_event(self):
         """
-        1. 用來同步TGs 發電量、NG貢獻電量、NG使用量的項目展開、收縮
-        2. 所有項目在expanded 或 collapsed 時，變更文字顯示的方式
-        :return:
+        處理 tw3 展開與收縮事件：
+          - 當某個 top-level 項目展開時，將其第一欄文字對齊方式改為左對齊，
+            並將其第二欄文字前景色設為透明（隱藏文字）。
+          - 當收縮時，第一欄置中，第二欄恢復為黑色。
         """
-        b_transparent = QtGui.QBrush(QtGui.QColor(0,0,0,0))
-        b_solid  = QtGui.QBrush(QtGui.QColor(0,0,0, 255))
-        # TGs
-        if self.tw3.topLevelItem(0).isExpanded():
-            self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw3.topLevelItem(0).setForeground(1, b_transparent)
-        else:
-            self.tw3.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw3.topLevelItem(0).setForeground(1, b_solid)
-        # TRTs
-        if self.tw3.topLevelItem(1).isExpanded():
-            self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw3.topLevelItem(1).setForeground(1, b_transparent)
-        else:
-            self.tw3.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw3.topLevelItem(1).setForeground(1, b_solid)
-        # CDQs
-        if self.tw3.topLevelItem(2).isExpanded():
-            self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw3.topLevelItem(2).setForeground(1, b_transparent)
-        else:
-            self.tw3.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw3.topLevelItem(2).setForeground(1, b_solid)
+        b_transparent = QtGui.QBrush(QtGui.QColor(0, 0, 0, 0))
+        b_solid = QtGui.QBrush(QtGui.QColor(0, 0, 0, 255))
+
+        # 遍歷 tw3 的所有 top-level 項目 (例如：TGs, TRTs, CDQs)
+        for i in range(self.tw3.topLevelItemCount()):
+            item = self.tw3.topLevelItem(i)
+            if item.isExpanded():
+                item.setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+                item.setForeground(1, b_transparent)
+            else:
+                item.setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+                item.setForeground(1, b_solid)
 
     def tw1_expanded_event(self):
         """
-        For the event of tw1 about being expanded or collapsed
-        :return:
+        處理 tw1 展開與收縮事件，根據各層項目是否展開，設定文字對齊方式及前景色：
+          - 當 top-level 項目展開時，第一欄與第二欄皆置左，
+            否則第一欄置中，第二欄置右。
+          - 對於特定子項目，若展開則將其文字設為透明，不展開則恢復為不透明（黑色）。
         """
-        b_transparent = QtGui.QBrush(QtGui.QColor(0,0,0,0))
-        b_solid  = QtGui.QBrush(QtGui.QColor(0,0,0, 255))
+        b_transparent = QtGui.QBrush(QtGui.QColor(0, 0, 0, 0))
+        b_solid = QtGui.QBrush(QtGui.QColor(0, 0, 0, 255))
 
-        # w2
-        if self.tw1.topLevelItem(0).isExpanded():
-            self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(0).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(0).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # w2 --> 鼓風機群
-        if self.tw1.topLevelItem(0).child(0).isExpanded():
-            self.tw1.topLevelItem(0).child(0).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(0).child(0).setForeground(1, b_solid)
-        # w2 --> #2 燒結風車群
-        if self.tw1.topLevelItem(0).child(2).isExpanded():
-            self.tw1.topLevelItem(0).child(2).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(0).child(2).setForeground(1, b_solid)
-        # w2 --> #2 屋頂風扇&runner 群
-        if self.tw1.topLevelItem(0).child(3).isExpanded():
-            self.tw1.topLevelItem(0).child(3).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(0).child(3).setForeground(1, b_solid)
+        def update_alignment(item):
+            if item.isExpanded():
+                item.setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
+                item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
+            else:
+                item.setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
+                item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
 
-        # w3
-        if self.tw1.topLevelItem(1).isExpanded():
-            self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(1).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(1).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        def update_child_foreground(parent, child_index):
+            child = parent.child(child_index)
+            if child.isExpanded():
+                child.setForeground(1, b_transparent)
+            else:
+                child.setForeground(1, b_solid)
 
-        # w3 --> 轉爐除塵
-        if self.tw1.topLevelItem(1).child(1).isExpanded():
-            self.tw1.topLevelItem(1).child(1).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(1).child(1).setForeground(1, b_solid)
-        # w4
-        if self.tw1.topLevelItem(2).isExpanded():
-            self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(2).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(2).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-        # w5
-        if self.tw1.topLevelItem(3).isExpanded():
-            self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignLeft)
-            self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.tw1.topLevelItem(3).setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.tw1.topLevelItem(3).setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+        # 建立 top-level 項目與其需更新的子項目索引對應關係
+        update_children = {
+            0: [0, 2, 3],  # w2: 依序更新「鼓風機群」、「#2 燒結風車群」與「#2 屋頂風扇&runner 群」
+            1: [1],  # w3: 更新「轉爐除塵」
+            # 項目 2 (w4) 僅更新對齊，不需處理子項
+            3: [0, 1, 2, 3, 4]  # w5: 分別更新 O2#1、O2#2、O2#3、空壓機群 與 IDF 群
+        }
 
-        # w5 --> O2#1
-        if self.tw1.topLevelItem(3).child(0).isExpanded():
-            self.tw1.topLevelItem(3).child(0).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(0).setForeground(1, b_solid)
-        # w5 --> O2#2
-        if self.tw1.topLevelItem(3).child(1).isExpanded():
-            self.tw1.topLevelItem(3).child(1).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(1).setForeground(1, b_solid)
-        # w5 --> O2#3
-        if self.tw1.topLevelItem(3).child(2).isExpanded():
-            self.tw1.topLevelItem(3).child(2).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(2).setForeground(1, b_solid)
-        # w5 --> 空壓機群
-        if self.tw1.topLevelItem(3).child(3).isExpanded():
-            self.tw1.topLevelItem(3).child(3).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(3).setForeground(1, b_solid)
-        # w5 --> IDF 群
-        if self.tw1.topLevelItem(3).child(4).isExpanded():
-            self.tw1.topLevelItem(3).child(4).setForeground(1, b_transparent)
-        else:
-            self.tw1.topLevelItem(3).child(4).setForeground(1, b_solid)
+        # 遍歷所有 top-level 項目，更新對齊方式及子項前景色
+        for i in range(self.tw1.topLevelItemCount()):
+            top_item = self.tw1.topLevelItem(i)
+            update_alignment(top_item)
+            if i in update_children:
+                for child_idx in update_children[i]:
+                    if top_item.childCount() > child_idx:
+                        update_child_foreground(top_item, child_idx)
 
     def handle_selection_changed(self):
         """
