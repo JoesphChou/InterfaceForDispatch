@@ -2542,6 +2542,9 @@ Runner</string>
      <property name="autoScroll">
       <bool>true</bool>
      </property>
+     <property name="selectionMode">
+      <enum>QAbstractItemView::NoSelection</enum>
+     </property>
      <property name="gridStyle">
       <enum>Qt::SolidLine</enum>
      </property>
@@ -2832,7 +2835,7 @@ color: rgb(21, 67, 96);</string>
        </font>
       </property>
       <property name="text">
-       <string>顯示
+       <string>比對
 區間</string>
       </property>
      </widget>
@@ -3014,12 +3017,15 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
       <rect>
        <x>370</x>
        <y>220</y>
-       <width>421</width>
+       <width>411</width>
        <height>171</height>
       </rect>
      </property>
      <property name="autoFillBackground">
       <bool>false</bool>
+     </property>
+     <property name="verticalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOn</enum>
      </property>
      <property name="alternatingRowColors">
       <bool>true</bool>

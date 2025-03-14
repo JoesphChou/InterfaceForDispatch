@@ -808,6 +808,7 @@ class Ui_Form(object):
         self.tableWidget_3.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tableWidget_3.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tableWidget_3.setAutoScroll(True)
+        self.tableWidget_3.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self.tableWidget_3.setGridStyle(QtCore.Qt.PenStyle.SolidLine)
         self.tableWidget_3.setObjectName("tableWidget_3")
         self.tableWidget_3.setColumnCount(3)
@@ -991,8 +992,9 @@ class Ui_Form(object):
         self.label_24.setFont(font)
         self.label_24.setObjectName("label_24")
         self.tw4 = QtWidgets.QTreeWidget(parent=self.tab_2)
-        self.tw4.setGeometry(QtCore.QRect(370, 220, 421, 171))
+        self.tw4.setGeometry(QtCore.QRect(370, 220, 411, 171))
         self.tw4.setAutoFillBackground(False)
+        self.tw4.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.tw4.setAlternatingRowColors(True)
         self.tw4.setObjectName("tw4")
         self.tw4.headerItem().setTextAlignment(0, QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -1256,7 +1258,7 @@ class Ui_Form(object):
         self.label_16.setText(_translate("Form", "00:15"))
         self.label_17.setText(_translate("Form", "00:30"))
         self.label_19.setText(_translate("Form", "~"))
-        self.label_21.setText(_translate("Form", "顯示\n"
+        self.label_21.setText(_translate("Form", "比對\n"
 "區間"))
         self.checkBox_2.setText(_translate("Form", "比對歷史紀錄(平均值)"))
         self.checkBox.setText(_translate("Form", "負載以迴路編號表示"))

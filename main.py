@@ -2,6 +2,7 @@ import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
 import sys, re, time, math, urllib3
 import pandas as pd
+from PyQt6.QtGui import QLinearGradient
 from bs4 import BeautifulSoup
 from UI import Ui_Form
 
@@ -264,6 +265,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.real_time_back = "#D5F5E3"   # 即時量背景顏色 淡綠色背景
         self.average_text = "#154360"     # 平均值文字顏色 深藍色文字
         self.average_back = "#D6EAF8"     # 平均值背景顏色 淡藍色背景
+        #self.real_time_text = "#145A32"  # 即時量文字顏色 深綠色文字
+        #self.real_time_back = "#D5F5E3"  # 即時量背景顏色 淡綠色背景
+        #self.average_text = "#154360"  # 平均值文字顏色 深藍色文字
+        #self.average_back = "#D6EAF8"  # 平均值背景顏色 淡藍色背景
 
         # self.predict_demand()
 
@@ -276,12 +281,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.query_cbl()      # 查詢特定條件的 基準用電容量(CBL)
         self.query_demand()   # 查詢某一天每一週期的Demand
         self.tws_init()
-        self.dashboard_value()
-
-        # 使用QThread 的多執行緒，與自動更新選項動作綁定，執行自動更新current value
-        self.thread_to_update = QtCore.QThread()
-        self.thread_to_update.run = self.continuously_update_current_value
-        self.thread_to_update.start()
 
         self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
         # ------- 關於比對歷史紀錄相關功能的監聽事件、初始狀況及執行設定等 ---------
@@ -289,33 +288,25 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.dateEdit_3.dateChanged.connect(self.date_edit3_user_change)
         self.checkBox_2.setChecked(False)
 
+        # 使用QThread 的多執行緒，與自動更新選項動作綁定，執行自動更新current value
+        self.thread_1 = QtCore.QThread()
+        self.thread_1.run = self.continuously_update_current_value
+        self.thread_1.start()
+        # 使用QThread 的多執行緒，與自動更新選項動作綁定，執行自動更新製程排程
+        self.thread_2 = QtCore.QThread()
+        self.thread_2.run = self.continuously_scrapy_and_update
+        self.thread_2.start()
+
+
+
     def tws_init(self):
         """
-        1. 因為treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
+        1. 初始化所有treeWidget, tableWidget
+        2. 因為treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
 
         :return:
         """
-        # **設定 column 寬度，確保文字完整顯示**
-        self.tw4.setColumnWidth(0, 220)  # **排程時間**
-        self.tw4.setColumnWidth(1, 170)  # **狀態**
-
-        # **固定 column 寬度，防止 tw4.clear() 影響**
-        self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
-        self.tw4.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Fixed)
-
-        # **美化 header（不使用深色系列）**
-        self.tw4.setStyleSheet("""
-            QHeaderView::section {
-                background-color: #D4AC0D;  /* 金黃色 */
-                font-size: 16px; /* 與內容一致 */
-                font-weight: bold;
-            }
-        """)
-
-        # **確保 tw4.clear() 不影響 header**
-        self.tw4.setHeaderLabels(["製程種類 & 排程時間", "狀態"])
-
-        # **美化 tw1, tw2, tw3**
+        # **美化 tw1, tw2, tw3, tw4, tableWidge_3**
         self.beautify_tree_widgets()
         self.beautify_table_widgets()
 
@@ -584,10 +575,25 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def beautify_tree_widgets(self):
         """ 美化 tw1, tw2, tw3 的即時量與平均值欄位，並區分不同表頭顏色 """
-        """ 使用 setStyleSheet() 來統一美化 tw1, tw2, tw3 的表頭 """
-        self.tw1.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
-        self.tw2.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
-        self.tw3.setStyleSheet("QHeaderView::section { background-color: #c8c688; color: black; font-weight: bold; }")
+        """ 使用 setStyleSheet() 來統一美化 tw1, tw2, tw3,t w4 的表頭 """
+        #self.tw1.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
+        #self.tw2.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
+        #self.tw3.setStyleSheet("QHeaderView::section { background-color: #f79646; color: black; font-weight: bold; }")
+        #self.tw4.setStyleSheet("""
+        #    QHeaderView::section {
+        #        background-color: #D4AC0D;  /* 金黃色 */
+        #        font-size: 16px; /* 與內容一致 */
+        #        font-weight: bold;
+        #    }
+        #""")
+        self.tw1.setStyleSheet(
+            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
+        self.tw2.setStyleSheet(
+            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
+        self.tw3.setStyleSheet(
+            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}")
+        self.tw4.setStyleSheet(
+            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #fad7a1, stop:1 #e96d71); color: white; font-weight: bold;}")
 
         column_widths = {
             "tw1": [175, 90, 65],
@@ -603,8 +609,18 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             widget.setColumnWidth(1, column_widths[name][1])
             widget.setColumnWidth(2, column_widths[name][2])
 
+        # **設定 tw4 column 寬度，確保文字完整顯示**
+        self.tw4.setColumnWidth(0, 220)  # **排程時間**
+        self.tw4.setColumnWidth(1, 170)  # **狀態**
 
-        # **美化即時量 (column 2)**
+        # **固定 tw4 column 寬度，防止 tw4.clear() 影響**
+        self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
+        self.tw4.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Fixed)
+
+        # **確保 tw4.clear() 不影響 header**
+        self.tw4.setHeaderLabels(["製程種類 & 排程時間", "狀態"])
+
+        # **美化tw1,tw2,tw3 即時量 (column 2)**
         for widget in tree_widgets.values():
             for row in range(widget.topLevelItemCount()):
                 item = widget.topLevelItem(row)
@@ -632,19 +648,37 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         """ 使用 setStyleSheet() 統一美化 tableWidget_3 的表頭 """
 
         # **透過 setStyleSheet() 設定表頭統一風格**
-        self.tableWidget_3.setStyleSheet("QHeaderView::section { background-color: #eff9dd; color: black; font-weight: bold; }")
+        #self.tableWidget_3.setStyleSheet("QHeaderView::section { background-color: #eff9dd; color: black; font-weight: bold; }")
+        self.tableWidget_3.setStyleSheet(
+            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #FF5D5D, stop:1 #FFB648); color: white; font-weight: bold;}")
+
 
         # **設定 Column 寬度**
         column_widths = [90, 100, 65]  # 各欄位的固定寬度
         for i, width in enumerate(column_widths):
             self.tableWidget_3.setColumnWidth(i, width)
 
-        # 設定總類加總 (column 1) 的背景顏色
+        # 設定總類加總 (全廠用電量) 的配色
+        #item = self.tableWidget_3.item(0, 0)
+        #item.setBackground(QtGui.QBrush(QtGui.QColor("#c89aa8")))
         item = self.tableWidget_3.item(0, 0)
-        item.setBackground(QtGui.QBrush(QtGui.QColor("#c89aa8")))
-        item = self.tableWidget_3.item(1, 0)
-        item.setBackground(QtGui.QBrush(QtGui.QColor("#c8c688")))
+        gradient = QLinearGradient(0,0,1,1)      # 設定比例
+        gradient.setCoordinateMode(QLinearGradient.CoordinateMode.ObjectBoundingMode)     # 讓漸層根據 item 大小調整
+        gradient.setColorAt(0, QtGui.QColor("#52e5e7"))
+        gradient.setColorAt(1, QtGui.QColor("#130cb7"))
+        brush = QtGui.QBrush(gradient)
+        item.setBackground(brush)       # 設定漸層背景 (與tw1,2 header 相同的漸層配色)
+        item.setForeground((QtGui.QBrush(QtGui.QColor('white'))))   # 設定文字顏色為白色
 
+        # 設定總類加總 (中龍發電量) 的配色
+        #item = self.tableWidget_3.item(1, 0)
+        #item.setBackground(QtGui.QBrush(QtGui.QColor("#c8c688")))
+        item = self.tableWidget_3.item(1, 0)
+        gradient.setColorAt(0, QtGui.QColor("#0e6499"))
+        gradient.setColorAt(1, QtGui.QColor("#9fdeab"))
+        brush = QtGui.QBrush(gradient)
+        item.setBackground(brush)       # 設定漸層背景 (與tw3 header 相同的漸層配色)
+        item.setForeground((QtGui.QBrush(QtGui.QColor('white'))))   # 設定文字顏色為白色
 
         # **設定欄位樣式，使其與 tw1, tw2, tw3 保持一致**
         for row in range(self.tableWidget_3.rowCount()):
@@ -851,7 +885,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tws_update(c_values)
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
-        self.update_tw4_schedule()
+        # self.update_tw4_schedule()
 
     def update_tw4_schedule(self):
         """
@@ -1042,14 +1076,19 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
 
         else:
-            # ------ 初始帶入或選擇非未來日期時，查詢完資料後，顯示第一個週期的資料
+            # ------選擇當天日期時，查詢完資料後，顯示前一個週期的資料，其它日期則顯示第一個週期的資料
             sd = pd.Timestamp(self.dateEdit_3.date().toString())
             ed = sd + pd.offsets.Day(1)
             self.history_demand_of_groups(st=sd, et=ed)
-            self.label_16.setText('00:00')
-            self.label_17.setText('00:15')
-            self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
-            self.horizontalScrollBar.setValue(0)
+            if pd.Timestamp(self.dateEdit_3.date().toString()).normalize() == pd.Timestamp.today().normalize():
+                sp = pd.Timestamp.now().floor('15T')
+                self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T') - 1)
+            else:
+                self.label_16.setText('00:00')
+                self.label_17.setText('00:15')
+                self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
+                self.horizontalScrollBar.setValue(0)
+
 
     def confirm_value(self):
         """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
@@ -1351,6 +1390,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         while True:
             self.dashboard_value()
             time.sleep(11)
+
+    def continuously_scrapy_and_update(self):
+        """
+        用來每隔30秒，自動更新爬製程排程相關資訊
+        :return:
+        """
+        while True:
+            self.update_tw4_schedule()
+            time.sleep(30)
 
     def tw3_expanded_event(self):
         """
