@@ -297,8 +297,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_2.run = self.continuously_scrapy_and_update
         self.thread_2.start()
 
-
-
     def tws_init(self):
         """
         1. 初始化所有treeWidget, tableWidget
@@ -874,21 +872,42 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
                 self.horizontalScrollBar.setValue(0)
 
-
     def confirm_value(self):
         """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
-        st = pd.Timestamp(self.dateEdit_3.date().toString()) + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
+        now = pd.Timestamp.now()
+        current_date = pd.Timestamp(self.dateEdit_3.date().toString())
+        # 依據水平捲軸的值計算所選的區間
+        st = current_date + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
         et = st + pd.offsets.Minute(15)
 
-        if et > pd.Timestamp.now():     # 欲查詢的時間段，屬於未來時間時
-            # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值,
-            et = pd.Timestamp.now().floor('15T')
-            self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
+        # 如果查詢日期為今天，檢查是否需要刷新歷史資料
+        if current_date.normalize() == now.normalize():
+            # 過濾出符合時間格式的欄位，取得目前已查詢的最晚時間欄位
+
+            time_columns = [col for col in self.history_datas_of_groups.columns if re.match(r'^\d{2}:\d{2}$', str(col))]
+            # 過濾掉全部為 NaN 的欄位
+            valid_time_columns = [t for t in time_columns if self.history_datas_of_groups[t].dropna().size > 0]
+            if valid_time_columns:
+                last_completed_time_str = max(valid_time_columns,
+                                              key=lambda t: pd.Timestamp(f"{current_date.date()} {t}"))
+                max_time = pd.Timestamp(f"{current_date.date()} {last_completed_time_str}")
+
+            # 如果目前系統時間已超過這個時間（表示有新完成的區間）
+            if now > max_time:
+                # 重新查詢整天的歷史資料更新到最新狀態
+                self.history_demand_of_groups(st=current_date, et=current_date + pd.offsets.Day(1))
+
+        # 如果選取的區間 et 超過目前時間，則調整至最後完成的區間
+        if et > now:
+            et = now.floor('15T')
+            # 重新計算對應的水平捲軸值
+            self.horizontalScrollBar.setValue(((et - current_date) // pd.Timedelta('15T')) - 1)
             st = et - pd.offsets.Minute(15)
 
         self.label_16.setText(st.strftime('%H:%M'))
         self.label_17.setText(et.strftime('%H:%M'))
-        self.update_history_to_tws(self.history_datas_of_groups.loc[:,st.strftime('%H:%M')])
+        # 更新畫面顯示歷史資料（以 st 的時間作為 column key）
+        self.update_history_to_tws(self.history_datas_of_groups.loc[:, st.strftime('%H:%M')])
 
     def update_history_to_tws(self, current_p):
         """
