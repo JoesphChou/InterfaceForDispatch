@@ -886,7 +886,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
             time_columns = [col for col in self.history_datas_of_groups.columns if re.match(r'^\d{2}:\d{2}$', str(col))]
             # 過濾掉全部為 NaN 的欄位
-            valid_time_columns = [t for t in time_columns if self.history_datas_of_groups[t].dropna().size > 0]
+            valid_time_columns = [t for t in time_columns if self.history_datas_of_groups[t].dropna().size > 5]
             if valid_time_columns:
                 last_completed_time_str = max(valid_time_columns,
                                               key=lambda t: pd.Timestamp(f"{current_date.date()} {t}"))
