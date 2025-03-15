@@ -893,7 +893,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 max_time = pd.Timestamp(f"{current_date.date()} {last_completed_time_str}")
 
             # 如果目前系統時間已超過這個時間（表示有新完成的區間）
-            if now > max_time:
+            #if now > max_time:
+            if et > max_time:
                 # 重新查詢整天的歷史資料更新到最新狀態
                 self.history_demand_of_groups(st=current_date, et=current_date + pd.offsets.Day(1))
 
