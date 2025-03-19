@@ -180,6 +180,30 @@ def scrapy_schedule():
     # **根據 X 軸進行排序**
     schedule_data.sort(key=lambda x: (x[4], x[0]))  # 先按 process_type 再按 X 座標 排序
 
+    # 加入檢查排程時間錯亂及跨天的邏輯
+    for i in range(len(schedule_data)):
+        curr_x, curr_start, curr_end, curr_furnace, curr_process = schedule_data[i]
+
+        # 如果排程的結束時間比開始時間早，表示跨天，結束時間需加一天
+        if curr_end < curr_start:
+            curr_end += pd.Timedelta(days=1)
+
+        # 如果目前系統時間在00:00~06:00, 且距離排程開始生產的時間，相差絕對值如果超過10小時以上，則判斷為前一天已生產完的排程
+        if pd.Timestamp.now() < (pd.Timestamp.today().normalize() + pd.offsets.Hour(6)):
+            if (abs(pd.Timestamp.now() - curr_start)) > pd.Timedelta(hours=10):
+                curr_start -= pd.Timedelta(days=1)
+                curr_end -= pd.Timedelta(days=1)
+
+        # 如果同一製程有前一筆排程，且當前開始時間比前一排程開始時間還早，則跨天，需加一天
+        if i > 0:
+            prev_x, prev_start, prev_end, prev_furnace, prev_process = schedule_data[i - 1]
+            if curr_process == prev_process and curr_start < prev_start:
+                curr_start += pd.Timedelta(days=1)
+                curr_end += pd.Timedelta(days=1)
+
+        # 更新 schedule_data 中的資料
+        schedule_data[i] = (curr_x, curr_start, curr_end, curr_furnace, curr_process)
+
     # **去除重複排程 (X 座標過於接近 & 起始時間相同)**
     filtered_schedule = []
     for i in range(len(schedule_data)):
