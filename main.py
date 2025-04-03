@@ -5,6 +5,9 @@ import pandas as pd
 from PyQt6.QtGui import QLinearGradient
 from bs4 import BeautifulSoup
 from UI import Ui_Form
+from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2
+from typing import Union
+from datetime import datetime
 
 
 def timeit(func):
@@ -18,7 +21,7 @@ def timeit(func):
         return result
     return wrapper
 
-def query_pi(st, et, tags, extract_type, time_offset = 0):
+def query_pi(st, et, tags, extract_type, interval='15m', time_offset = 0):
     """
         1. 從 PI 取出的 timestamp 時區改成 GMT+8   123
         2. 用 PI.PIServer().search 找出tag 對應的PIPoint，回傳的結果是list 型態。
@@ -35,21 +38,26 @@ def query_pi(st, et, tags, extract_type, time_offset = 0):
     :param extract_type: 預設為 16。16 -> PI.PIConsts.SummaryType.RANGE
                                    8 -> PI.PIConsts.SummaryType.MAXIMUM
                                    4 -> PI.PIConstsSummaryType.MINIMUM
+                                   2 -> PI.PIConstsSummaryType.AVERAGE
     :param time_offset: 預設為 0。 用來近似 與 OSAKI 時間用的參數(秒數)
     :return: 將結果以 DataFrame 格式回傳。 shape(資料數量, tag數量)
     """
     st = st - pd.offsets.Second(time_offset)
     et = et - pd.offsets.Second(time_offset)
     Pi.PIConfig.DEFAULT_TIMEZONE = 'Asia/Taipei'        #1
-    # summarytype = [16,8,4]
+
+    # 不同的extract_type， data 的column 名稱會不一樣
+    summarytype = { 16: 'RANGE', 8: 'MAXIMUM', 4: 'MINIMUM', 2: 'AVERAGE'}
+
     with Pi.PIServer() as server:
         points = list()
         for tag_name in tags:
             points.append(server.search(tag_name)[0])   #2
         buffer = list()
         for x in range(len(points)):
-            data = points[x].summaries(st, et, '15m', extract_type)                  # 3
-            data['RANGE'] = pd.to_numeric(data['RANGE'], errors='coerce')            # 4
+            data = points[x].summaries(st, et, interval, extract_type)               # 3
+            data[summarytype[extract_type]] = pd.to_numeric(data[summarytype[extract_type]], errors='coerce')  # 4
+            #data['RANGE'] = pd.to_numeric(data['RANGE'], errors='coerce')            # 4
             buffer.append(data)
         raw_data = pd.concat([s for s in buffer], axis=1)                            # 5
         raw_data.set_index(raw_data.index.tz_localize(None)
@@ -180,47 +188,44 @@ def scrapy_schedule():
     # **根據 X 軸進行排序**
     schedule_data.sort(key=lambda x: (x[4], x[0]))  # 先按 process_type 再按 X 座標 排序
 
-    # 加入檢查排程時間錯亂及跨天的邏輯
+    # **去除重複排程 (相同的爐號id)**
+    filtered_schedule = []
     for i in range(len(schedule_data)):
-        curr_x, curr_start, curr_end, curr_furnace, curr_process = schedule_data[i]
+        if i > 0:
+            curr_x, curr_start, curr_end, curr_furnace, curr_process = schedule_data[i]
+            # **讀取已相同製程已存在的爐號id**
+            furnace_list = [e[3] for e in filtered_schedule if e[4]==curr_process]
+            # **如果目前處理的爐號id 己存在，則不加入 filtered_schedule
+            if curr_furnace in furnace_list:
+                print(f"⚠️ 重複排程移除: {curr_process} {curr_start} ~ {curr_end} (X={curr_x})")
+                continue  # **跳過這筆排程，不加入 filtered_schedule**
+
+        filtered_schedule.append(schedule_data[i])
+
+    # 加入檢查排程時間錯亂及跨天的邏輯
+    for i in range(len(filtered_schedule)):
+        curr_x, curr_start, curr_end, curr_furnace, curr_process = filtered_schedule[i]
 
         # 如果排程的結束時間比開始時間早，表示跨天，結束時間需加一天
         if curr_end < curr_start:
             curr_end += pd.Timedelta(days=1)
 
-        # 如果目前系統時間在00:00~06:00, 且距離排程開始生產的時間，相差絕對值如果超過10小時以上，則判斷為前一天已生產完的排程
-        if pd.Timestamp.now() < (pd.Timestamp.today().normalize() + pd.offsets.Hour(6)):
+        # 如果目前系統時間在00:00~08:00, 且距離排程開始生產的時間，如果超過10小時以上，則判斷為前一天已生產完的排程
+        if pd.Timestamp.now() < (pd.Timestamp.today().normalize() + pd.offsets.Hour(8)):
+            print(abs(pd.Timestamp.now() - curr_start))
             if (abs(pd.Timestamp.now() - curr_start)) > pd.Timedelta(hours=10):
                 curr_start -= pd.Timedelta(days=1)
                 curr_end -= pd.Timedelta(days=1)
 
         # 如果同一製程有前一筆排程，且當前開始時間比前一排程開始時間還早，則跨天，需加一天
         if i > 0:
-            prev_x, prev_start, prev_end, prev_furnace, prev_process = schedule_data[i - 1]
+            prev_x, prev_start, prev_end, prev_furnace, prev_process = filtered_schedule[i - 1]
             if curr_process == prev_process and curr_start < prev_start:
                 curr_start += pd.Timedelta(days=1)
                 curr_end += pd.Timedelta(days=1)
 
         # 更新 schedule_data 中的資料
-        schedule_data[i] = (curr_x, curr_start, curr_end, curr_furnace, curr_process)
-
-    # **去除重複排程 (X 座標過於接近 & 起始時間相同)**
-    filtered_schedule = []
-    for i in range(len(schedule_data)):
-        if i > 0:
-            prev_x, prev_start, prev_end, prev_furnace, prev_process = filtered_schedule[-1]
-            curr_x, curr_start, curr_end, curr_furnace, curr_process = schedule_data[i]
-
-            # **只有當製程相同時，才檢查 X 座標 & 起始時間是否過於接近**
-            if (
-                curr_process == prev_process  # **相同製程**
-                and abs(curr_x - prev_x) <= 3  # **X 座標過於接近**
-                and curr_start == prev_start  # **起始時間相同**
-            ):
-                # print(f"⚠️ 重複排程移除: {curr_process} {curr_start} ~ {curr_end} (X={curr_x})")
-                continue  # **跳過這筆排程，不加入 filtered_schedule**
-
-        filtered_schedule.append(schedule_data[i])
+        filtered_schedule[i] = (curr_x, curr_start, curr_end, curr_furnace, curr_process)
 
     ### **🔹 解析 2137 頁面 (獲取製程狀態)**
     quote_page_2137 = 'http://w3mes.dscsc.dragonsteel.com.tw/2137.aspx'
@@ -274,6 +279,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.pushButton_4.clicked.connect(self.query_demand)
         self.dateEdit.setDate(QtCore.QDate().currentDate())
         self.dateEdit_2.setDate(QtCore.QDate().currentDate())
+        self.dateTimeEdit.setDate(QtCore.QDate().currentDate())
+        self.dateTimeEdit_2.setDate(QtCore.QDate().currentDate())
         self.spinBox.setValue(5)
         self.spinBox_2.setValue(4)
         self.listWidget.doubleClicked.connect(self.remove_list_item1)
@@ -282,19 +289,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_2.itemSelectionChanged.connect(self.handle_selection_changed)
         self.tag_list = pd.read_excel('.\parameter.xlsx', sheet_name=0)
         self.special_dates = pd.read_excel('.\parameter.xlsx', sheet_name=1)
-        self.unit_prices = pd.read_excel('.\parameter.xlsx', sheet_name=2, index_col=0, skiprows=[4, 12, 16])
+        self.unit_prices = pd.read_excel('.\parameter.xlsx', sheet_name=2, index_col=0)
+        self.time_of_use = pd.read_excel('.\parameter.xlsx', sheet_name=3)
         self.define_cbl_date(pd.Timestamp.now().date())   # 初始化時，便立即找出預設的cbl參考日，並更新在list widget 裡
         # ---------------統一設定即時值、平均值的背景及文字顏色----------------------
         self.real_time_text = "#145A32"   # 即時量文字顏色 深綠色文字
         self.real_time_back = "#D5F5E3"   # 即時量背景顏色 淡綠色背景
         self.average_text = "#154360"     # 平均值文字顏色 深藍色文字
         self.average_back = "#D6EAF8"     # 平均值背景顏色 淡藍色背景
-        #self.real_time_text = "#145A32"  # 即時量文字顏色 深綠色文字
-        #self.real_time_back = "#D5F5E3"  # 即時量背景顏色 淡綠色背景
-        #self.average_text = "#154360"  # 平均值文字顏色 深藍色文字
-        #self.average_back = "#D6EAF8"  # 平均值背景顏色 淡藍色背景
-
-        # self.predict_demand()
 
         self.tw1.itemExpanded.connect(self.tw1_expanded_event)
         self.tw1.itemCollapsed.connect(self.tw1_expanded_event)
@@ -320,6 +322,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_2 = QtCore.QThread()
         self.thread_2.run = self.continuously_scrapy_and_update
         self.thread_2.start()
+        self.benefit_appraisal()
 
     def tws_init(self):
         """
@@ -1108,7 +1111,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw2.topLevelItem(4).setText(1, pre_check(current_p['1H360'], 0))
         self.tw2.topLevelItem(5).setText(1, pre_check(current_p['1H450'], 0))
 
-        ng_to_power = self.unit_prices.loc['可轉換電力', 'current']
+        ng_to_power = get_ng_generation_cost_v2(self.unit_prices).get("convertible_power")
+        #ng_to_power = self.unit_prices.loc['可轉換電力', 'current']
 
         self.tw3.topLevelItem(0).setText(1, pre_check(current_p['2H120':'1H420'].sum()))
         self.tw3.topLevelItem(0).child(0).setText(1, pre_check(current_p['2H120':'2H220'].sum()))
@@ -1560,6 +1564,115 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def show_box(self, content):
         mbox = QtWidgets.QMessageBox(self)
         mbox.warning(self, '警告', content)
+
+    @timeit
+    def benefit_appraisal(self):
+        # ** 時間上的解析度設定 **
+        t_resolution = 10
+        t_resolution_str = f'{t_resolution}s'
+        coefficient = t_resolution * 1000 / 3600 # 1000: MWH->KWH  3600: hour->second
+        special_date = self.special_dates['台電離峰日'].tolist()
+
+        st = pd.Timestamp(self.dateTimeEdit.dateTime().toString())
+        et = st + pd.offsets.Hour(7)
+        if et > pd.Timestamp.now(): # ** 如果超過目前的時間，則取下取整到指定的單位)
+            et = pd.Timestamp.now().floor('10S')
+        today = pd.Timestamp.today().normalize()
+
+        # ** 從PI 系統讀取的TAG 範圍 **
+        target_names = ['feeder 1510','feeder 1520', '2H120', '2H220', '5H120', '5H220',
+                        '1H120', '1H220', '1H320', '1H420', '4H120', '4H220', '4KA18',
+                        '5KB19', 'TG1 NG', 'TG2 NG', 'TG3 NG', 'TG4 NG',]
+        filter_list = self.tag_list[self.tag_list['name'].isin(target_names)]['tag_name']
+
+        # ** 執行查詢PI 系統的函式，並將結果的columns 套上相對應的名稱
+        raw_result = query_pi(st=st, et=et, tags=filter_list ,extract_type = 2, interval=t_resolution_str)
+        raw_result.columns = target_names
+
+        # ** 開始計算相關效益 **
+        cost_benefit = pd.DataFrame(raw_result.loc[:, 'feeder 1510':'feeder 1520'].sum(axis=1), columns=['即時TPC'])
+        cost_benefit['中龍發電量'] = raw_result.loc[:, '2H120':'5KB19'].sum(axis=1)
+        cost_benefit['全廠用電量'] = cost_benefit['即時TPC'] + cost_benefit['中龍發電量']
+        cost_benefit['NG 總用量'] = raw_result.loc[:, 'TG1 NG':'TG4 NG'].sum(axis=1)
+
+        # ** 根據原始TPC 是否處於逆送電，計算各種效益 **
+        par1 = {}
+        par2 = {}
+        for ind in cost_benefit.index:
+            # ** 根據 index 的時間，讀取適用各種日期版本的的單價 **
+            """
+            if par1:
+                # ** 如果與該筆的日期符合上一筆的版本日期範圍，則不需再調用函式重新查表 **
+                #ng_ver = (par1.get('ng_ver_start') <= ind) and ((ind < par1.get('ng_ver_end') if all(par1.get('ng_ver_end')) else True))
+                print(par1.get('ng_price_ver_start'))
+                if par1.get('ng_price_ver_start') <= ind:
+                    if ind < par1.get('ng_price_ver_end'):
+                        ng_ver = True
+                heat_ver = (par1.get('heat_ver_start') <= ind) and (True if ind < par1.get('heat_ver_start') else False)
+                if not(ng_ver and heat_ver):
+                    par1 = get_ng_generation_cost_v2(self.unit_prices, ind)
+            else:
+                par1 = get_ng_generation_cost_v2(self.unit_prices, ind)
+
+            if par2:
+                purchase_ver = (par2.get('purchase_ver_start') <= ind) and (ind < par2.get('purchase_ver_start'))
+                sale_ver = (par2.get('sale_ver_start') <= ind) and (ind < par2.get('sale_ver_start'))
+                if not(purchase_ver and sale_ver):
+                    par2 = get_ng_generation_cost_v2(self.unit_prices, ind)
+            else:
+                par2 = get_current_rate_type_v6(self.time_of_use, special_date, self.unit_prices, ind)
+            """
+            par1 = get_ng_generation_cost_v2(self.unit_prices, ind)
+            par2 = get_current_rate_type_v6(self.time_of_use, special_date, self.unit_prices, ind)
+            cost_benefit.loc[ind, 'NG 購入成本'] = cost_benefit.loc[ind, 'NG 總用量'] * par1.get('ng_price') / 3600 * t_resolution
+            cost_benefit.loc[ind, 'NG 增加的發電度數'] = (cost_benefit.loc[ind, 'NG 總用量'] * par1.get('convertible_power')
+                                            / 3600 * t_resolution)
+            cost_benefit.loc[ind, 'NG 增加的發電量'] = cost_benefit.loc[ind, 'NG 增加的發電度數'] / 1000 * 3600 / t_resolution
+            cost_benefit.loc[ind, 'TG 增加的維運成本'] = cost_benefit.loc[ind, 'NG 增加的發電度數'] * par1.get('tg_maintain_cost')
+            cost_benefit.loc[ind, '增加的碳費'] = cost_benefit.loc[ind, 'NG 增加的發電度數'] * par1.get('carbon_cost')
+            cost_benefit.loc[ind, '原始TPC'] = cost_benefit.loc[ind, '即時TPC'] + cost_benefit.loc[ind, 'NG 增加的發電量']
+
+            if cost_benefit.loc[ind, 'NG 總用量'] != 0:
+                cost_benefit.loc[ind,'時段'] = par2.get('rate_label')
+
+                # ** 還原後TPC 處於逆送電時 **
+                if cost_benefit.loc[ind, '原始TPC'] <= 0:
+                    """ 
+                        增加的售電收入 = NG 增加的發電量 * 躉售電售
+                        降低的購電費用 = 0
+                        NG 售電效益 = NG 增加的發電量 * (躉售電價 - NG發電成本)
+                        NG 發電自用效益 = 0
+                    """
+                    cost_benefit.loc[ind, '增加的售電收入'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par2.get('sale_price') * coefficient
+                    cost_benefit.loc[ind, '降低的購電費用'] = 0
+                    cost_benefit.loc[ind, 'NG 售電效益'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * (par2.get('sale_price') - par1.get('ng_cost')) * coefficient
+                    cost_benefit.loc[ind, 'NG 發電自用效益'] = 0
+                # ** 還原後TPC 處於購電時 **
+                else:
+                    # ** NG 發電量 > 還原後的TPC **
+                    if cost_benefit.loc[ind, 'NG 增加的發電量'] > cost_benefit.loc[ind, '原始TPC']:
+                        """ 
+                            增加的售電收入 = (NG 增加的發電量- 原TPC) * 躉售電售
+                            降低的購電費用 = 原TPC * 時段購電價
+                            NG 售電效益 = (NG 增加的發電量 - 原TPC) * (躉售電價 - NG發電成本)
+                            NG 發電自用效益 = 原TPC * (時段購電成本 - NG發電成本)
+                        """
+                        cost_benefit.loc[ind, '增加的售電收入'] = (cost_benefit.loc[ind, 'NG 增加的發電量'] - cost_benefit.loc[ind, '原始TPC']) * par2.get('sale_price') * coefficient
+                        cost_benefit.loc[ind, '降低的購電費用'] = cost_benefit.loc[ind, '原始TPC'] * par2.get('unit_price') * coefficient
+                        cost_benefit.loc[ind, 'NG 售電效益'] = (cost_benefit.loc[ind, 'NG 增加的發電量'] - cost_benefit.loc[ind, '原始TPC']) * (par2.get('sale_price') - par1.get('ng_cost')) * coefficient
+                        cost_benefit.loc[ind, 'NG 發電自用效益'] = cost_benefit.loc[ind, '原始TPC'] * (par2.get('unit_price') - par1.get('ng_cost')) * coefficient
+                    # ** NG 發電量 <= 還原後的TPC
+                    else:
+                        """ 
+                            增加的售電收入 = 0
+                            降低的購電費用 = NG 增加的發電量 * 時段購電價
+                            NG 售電效益 = 0
+                            NG 發電自用效益 = NG 增加的發電量 * (時段購電成本 - NG發電成本)
+                        """
+                        cost_benefit.loc[ind, '增加的售電收入'] = 0
+                        cost_benefit.loc[ind, '降低的購電費用'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par2.get('unit_price') * coefficient
+                        cost_benefit.loc[ind, 'NG 售電效益'] = 0
+                        cost_benefit.loc[ind, 'NG 發電自用效益'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * (par2.get('unit_price') - par1.get('ng_cost')) * coefficient
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
