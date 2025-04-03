@@ -1109,7 +1109,7 @@ class Ui_Form(object):
         self.tabWidget.addTab(self.tab_3, "")
 
         self.retranslateUi(Form)
-        self.tabWidget.setCurrentIndex(2)
+        self.tabWidget.setCurrentIndex(1)
         self.radioButton_2.clicked['bool'].connect(self.dateEdit_2.setEnabled) # type: ignore
         self.radioButton_2.clicked['bool'].connect(self.pushButton_3.setEnabled) # type: ignore
         self.radioButton.clicked['bool'].connect(self.pushButton_2.setDisabled) # type: ignore
@@ -1120,7 +1120,7 @@ class Ui_Form(object):
 
     def retranslateUi(self, Form):
         _translate = QtCore.QCoreApplication.translate
-        Form.setWindowTitle(_translate("Form", "查詢需量和CBL 的小工具"))
+        Form.setWindowTitle(_translate("Form", "輔助工具"))
         item = self.tableWidget_2.horizontalHeaderItem(0)
         item.setText(_translate("Form", "超始時間"))
         item = self.tableWidget_2.horizontalHeaderItem(1)
@@ -1155,8 +1155,8 @@ class Ui_Form(object):
         self.label_7.setText(_translate("Form", "<html><head/><body><p>項目個數：</p></body></html>"))
         self.label_8.setText(_translate("Form", "<html><head/><body><p><br/></p></body></html>"))
         self.groupBox.setTitle(_translate("Form", "基準用電容量計算 (CBL)"))
-        self.label_11.setText(_translate("Form", "<html><head/><body><p align=\"center\">起始時間(HR)</p></body></html>"))
-        self.timeEdit.setDisplayFormat(_translate("Form", "hh"))
+        self.label_11.setText(_translate("Form", "<html><head/><body><p align=\"center\">起始時間</p></body></html>"))
+        self.timeEdit.setDisplayFormat(_translate("Form", "hh:mm"))
         self.label_12.setText(_translate("Form", "<html><head/><body><p align=\"center\"><span style=\" font-size:12pt;\">時間長度(HR)</span></p></body></html>"))
         self.label_3.setText(_translate("Form", "<html><head/><body><p><span style=\" color:#0000ff;\">16:00:00</span></p></body></html>"))
         self.label_4.setText(_translate("Form", "<html><head/><body><p><span style=\" color:#0000ff;\">20:00:00</span></p></body></html>"))
@@ -1345,4 +1345,4 @@ class Ui_Form(object):
         item = self.tableWidget_4.horizontalHeaderItem(0)
         item.setText(_translate("Form", "效益計算"))
         self.pushButton_5.setText(_translate("Form", "開始計算"))
-        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), _translate("Form", "Page"))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), _translate("Form", "NG 效益計算 (未完成)"))

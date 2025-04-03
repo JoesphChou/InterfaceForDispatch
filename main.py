@@ -322,7 +322,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_2 = QtCore.QThread()
         self.thread_2.run = self.continuously_scrapy_and_update
         self.thread_2.start()
-        self.benefit_appraisal()
+        #self.benefit_appraisal()
 
     def tws_init(self):
         """
@@ -733,6 +733,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
             # **處理 "生產或等待中"**
             active_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            active_parent.setFont(0, QtGui.QFont("微軟正黑體", 10))
             active_parent.setText(0, "生產或等待中")
             process_parent.addChild(active_parent)
 
@@ -756,6 +757,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                         continue
 
                     item = QtWidgets.QTreeWidgetItem(active_parent)
+                    item.setFont(0, QtGui.QFont("微軟正黑體", 10))
+                    item.setFont(1, QtGui.QFont("微軟正黑體", 10))
                     item.setText(0, f"{start_time} ~ {end_time}")
                     item.setText(1, status)
 
@@ -767,18 +770,20 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                         item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
                     elif category == "future":
                         minutes = int((row["開始時間"] - pd.Timestamp.now()).total_seconds() / 60)
-                        item.setText(1, f"{minutes} 分鐘後開始生產")
+                        item.setText(1, f"預計{minutes} 分鐘後開始生產")
                         item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **未來排程置中**
 
                     active_parent.addChild(item)
 
             else:
                 # **若無生產或等待中排程，在 column 2 顯示 "目前無排程"，並置中**
+                active_parent.setFont(1, QtGui.QFont("微軟正黑體", 10))
                 active_parent.setText(1, "目前無排程")
                 active_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
 
             # **處理 "過去排程"**
             past_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            past_parent.setFont(0, QtGui.QFont("微軟正黑體", 10))
             past_parent.setText(0, "過去排程")
             process_parent.addChild(past_parent)
 
@@ -788,6 +793,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                     end_time = row["結束時間"].strftime("%H:%M:%S")
 
                     item = QtWidgets.QTreeWidgetItem(past_parent)
+                    item.setFont(0, QtGui.QFont("微軟正黑體", 10))
+                    item.setFont(1, QtGui.QFont("微軟正黑體", 10))
                     item.setText(0, f"{start_time} ~ {end_time}")
                     item.setText(1, "已完成")
                     item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **過去排程置中**
@@ -796,6 +803,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
             else:
                 # **若無過去排程，在 column 2 顯示 "無相關排程"，並置中**
+                past_parent.setFont(1, QtGui.QFont("微軟正黑體", 10))
                 past_parent.setText(1, "無相關排程")
                 past_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
 
@@ -811,7 +819,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         st = pd.Timestamp.now().floor('15T')    # 目前週期的起始時間
         et = st + pd.offsets.Minute(15)         # 目前週期的結束時間
 
-        back_150s_from_now = pd.Timestamp.now() - pd.offsets.Second(180)    # 150秒前的時間點
+        back_150s_from_now = pd.Timestamp.now() - pd.offsets.Second(300)    # 300秒前的時間點 (180->300)
         diff_between_now_and_et = (et - pd.Timestamp.now()).total_seconds()   # 此週期剩餘時間
 
         tags = self.tag_list.loc[0:1,'tag_name2']

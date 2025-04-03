@@ -16,7 +16,7 @@
    </font>
   </property>
   <property name="windowTitle">
-   <string>查詢需量和CBL 的小工具</string>
+   <string>輔助工具</string>
   </property>
   <property name="layoutDirection">
    <enum>Qt::LeftToRight</enum>
@@ -42,7 +42,7 @@
     </font>
    </property>
    <property name="currentIndex">
-    <number>2</number>
+    <number>0</number>
    </property>
    <widget class="QWidget" name="tab_1">
     <property name="enabled">
@@ -421,7 +421,7 @@
        </font>
       </property>
       <property name="text">
-       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;起始時間(HR)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;起始時間&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
      </widget>
      <widget class="QTimeEdit" name="timeEdit">
@@ -451,7 +451,7 @@
        <enum>QDateTimeEdit::HourSection</enum>
       </property>
       <property name="displayFormat">
-       <string>hh</string>
+       <string>hh:mm</string>
       </property>
       <property name="time">
        <time>
@@ -3195,7 +3195,7 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
    </widget>
    <widget class="QWidget" name="tab_3">
     <attribute name="title">
-     <string>Page</string>
+     <string>NG 效益計算 (未完成)</string>
     </attribute>
     <widget class="QDateTimeEdit" name="dateTimeEdit">
      <property name="geometry">
