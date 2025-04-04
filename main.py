@@ -6,18 +6,16 @@ from PyQt6.QtGui import QLinearGradient
 from bs4 import BeautifulSoup
 from UI import Ui_Form
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2
-from typing import Union
-from datetime import datetime
+from functools import wraps
 
 
 def timeit(func):
-    print('接到 func', func.__name__)
+    @wraps(func)
     def wrapper(*args, **kwargs):
-        print('幫忙代入 args', args)
-        print('幫忙代入 kwargs', kwargs)
-        s = time.time()
+        start = time.perf_counter()
         result = func(*args, **kwargs)
-        print(func.__name__, 'total time', time.time()-s)
+        end = time.perf_counter()
+        print(f"{func.__name__} 執行時間：{end - start:.4f} 秒")
         return result
     return wrapper
 
@@ -277,10 +275,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.pushButton_2.clicked.connect(self.add_list_item)
         self.pushButton_3.clicked.connect(self.remove_list_item1)
         self.pushButton_4.clicked.connect(self.query_demand)
-        self.dateEdit.setDate(QtCore.QDate().currentDate())
-        self.dateEdit_2.setDate(QtCore.QDate().currentDate())
-        self.dateTimeEdit.setDate(QtCore.QDate().currentDate())
-        self.dateTimeEdit_2.setDate(QtCore.QDate().currentDate())
+        self.pushButton_5.clicked.connect(self.benefit_appraisal)
+
         self.spinBox.setValue(5)
         self.spinBox_2.setValue(4)
         self.listWidget.doubleClicked.connect(self.remove_list_item1)
@@ -322,7 +318,35 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_2 = QtCore.QThread()
         self.thread_2.run = self.continuously_scrapy_and_update
         self.thread_2.start()
-        #self.benefit_appraisal()
+
+        self.initialize_cost_benefit_widgets()
+        # self.benefit_appraisal()
+
+    def initialize_cost_benefit_widgets(self):
+        # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
+        current_datetime = QtCore.QDateTime.currentDateTime()
+        rounded_current_datetime = current_datetime.addSecs(
+            -current_datetime.time().minute() * 60 - current_datetime.time().second())
+
+        # 設定結束時間為目前整點時間
+        self.dateTimeEdit_2.setDateTime(rounded_current_datetime)
+
+        # 設定起始時間為結束時間的前兩小時
+        start_datetime = rounded_current_datetime.addSecs(-7200)  # 前兩小時
+        self.dateTimeEdit.setDateTime(start_datetime)
+
+        # 起始和結束的日期/時間有變更時，執行時間長度的計算和更新顯示
+        self.dateTimeEdit.dateTimeChanged.connect(self.update_duration_label)
+        self.dateTimeEdit_2.dateTimeChanged.connect(self.update_duration_label)
+        self.update_duration_label()
+
+        # tableWidget_4 和 tableWidget_5 不顯示垂直表頭
+        self.tableWidget_4.verticalHeader().setVisible(False)
+        self.tableWidget_5.verticalHeader().setVisible(False)
+        self.tableWidget_4.horizontalHeader().setVisible(False)
+        self.tableWidget_5.horizontalHeader().setVisible(False)
+
+        self.update_benefit_tables(initialize_only=True)
 
     def tws_init(self):
         """
@@ -469,8 +493,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tableWidget_3.setColumnWidth(i, width)
 
         # 設定總類加總 (全廠用電量) 的配色
-        #item = self.tableWidget_3.item(0, 0)
-        #item.setBackground(QtGui.QBrush(QtGui.QColor("#c89aa8")))
         item = self.tableWidget_3.item(0, 0)
         gradient = QLinearGradient(0,0,1,1)      # 設定比例
         gradient.setCoordinateMode(QLinearGradient.CoordinateMode.ObjectBoundingMode)     # 讓漸層根據 item 大小調整
@@ -481,14 +503,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         item.setForeground((QtGui.QBrush(QtGui.QColor('white'))))   # 設定文字顏色為白色
 
         # 設定總類加總 (中龍發電量) 的配色
-        #item = self.tableWidget_3.item(1, 0)
-        #item.setBackground(QtGui.QBrush(QtGui.QColor("#c8c688")))
         item = self.tableWidget_3.item(1, 0)
         gradient.setColorAt(0, QtGui.QColor("#0e6499"))
         gradient.setColorAt(1, QtGui.QColor("#9fdeab"))
         brush = QtGui.QBrush(gradient)
         item.setBackground(brush)       # 設定漸層背景 (與tw3 header 相同的漸層配色)
         item.setForeground((QtGui.QBrush(QtGui.QColor('white'))))   # 設定文字顏色為白色
+
+        self.tableWidget_3.setItem(2, 0, self.make_item('太陽能', bold=False, bg_color='#f6ffc6',font_size=12))
+        self.tableWidget_3.setItem(3, 0, self.make_item('台電供電量', bold=False, font_size=12))
 
         # **設定欄位樣式，使其與 tw1, tw2, tw3 保持一致**
         for row in range(self.tableWidget_3.rowCount()):
@@ -1573,8 +1596,35 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         mbox = QtWidgets.QMessageBox(self)
         mbox.warning(self, '警告', content)
 
+    def update_duration_label(self):
+        start_dt = self.dateTimeEdit.dateTime().toPyDateTime()
+        end_dt = self.dateTimeEdit_2.dateTime().toPyDateTime()
+
+        diff_secs = (end_dt - start_dt).total_seconds()
+        if diff_secs < 0:
+            self.label_26.setText("時間錯誤")
+            return
+
+        hours, remainder = divmod(diff_secs, 3600)
+        minutes = remainder // 60
+        self.label_26.setText(f"{int(hours):02d}時{int(minutes):02d}分")
+
     @timeit
-    def benefit_appraisal(self):
+    def benefit_appraisal(self, *_):
+
+        # **限制時間長度小於一定時間，而且不可以是負數的時間**
+        if "錯誤" in self.label_26.text():
+            self.show_box('起始時間必須比結束時間早！')
+            return
+        label = self.label_26.text().replace("時", ":").replace("分", "")
+        try:
+            h, m = map(int, label.split(":"))
+            if h > 36:
+                self.show_box('查詢時間不可大於36小時！')
+                return
+        except:
+            return
+
         # ** 時間上的解析度設定 **
         t_resolution = 10
         t_resolution_str = f'{t_resolution}s'
@@ -1582,7 +1632,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         special_date = self.special_dates['台電離峰日'].tolist()
 
         st = pd.Timestamp(self.dateTimeEdit.dateTime().toString())
-        et = st + pd.offsets.Hour(7)
+        et = pd.Timestamp(self.dateTimeEdit_2.dateTime().toString())
         if et > pd.Timestamp.now(): # ** 如果超過目前的時間，則取下取整到指定的單位)
             et = pd.Timestamp.now().floor('10S')
         today = pd.Timestamp.today().normalize()
@@ -1647,40 +1697,274 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 if cost_benefit.loc[ind, '原始TPC'] <= 0:
                     """ 
                         增加的售電收入 = NG 增加的發電量 * 躉售電售
+                        增加售電的NG購入成本 = NG 增加的發電量 * NG發電成本
+                        增加售電的TG 維運成本 = NG 增加的發電量 * TG 維運成本
+                        增加售電的碳費 = NG 增加的發電量 * 碳費                        
                         降低的購電費用 = 0
-                        NG 售電效益 = NG 增加的發電量 * (躉售電價 - NG發電成本)
-                        NG 發電自用效益 = 0
+                        降低購電的NG購入成本 = 0
+                        降低購電的TG 維運成本 = 0
+                        降低購電的碳費 = 0     
                     """
                     cost_benefit.loc[ind, '增加的售電收入'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par2.get('sale_price') * coefficient
+                    cost_benefit.loc[ind, '增加售電的NG購入成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('ng_cost') * coefficient
+                    cost_benefit.loc[ind, '增加售電的TG維運成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('tg_cost') * coefficient
+                    cost_benefit.loc[ind, '增加售電的碳費'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('carbon_cost') * coefficient
                     cost_benefit.loc[ind, '降低的購電費用'] = 0
-                    cost_benefit.loc[ind, 'NG 售電效益'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * (par2.get('sale_price') - par1.get('ng_cost')) * coefficient
-                    cost_benefit.loc[ind, 'NG 發電自用效益'] = 0
+                    cost_benefit.loc[ind, '降低購電的NG購入成本'] = 0
+                    cost_benefit.loc[ind, '降低購電的TG維運成本'] = 0
+                    cost_benefit.loc[ind, '降低購電的碳費'] = 0
                 # ** 還原後TPC 處於購電時 **
                 else:
                     # ** NG 發電量 > 還原後的TPC **
                     if cost_benefit.loc[ind, 'NG 增加的發電量'] > cost_benefit.loc[ind, '原始TPC']:
                         """ 
                             增加的售電收入 = (NG 增加的發電量- 原TPC) * 躉售電售
+                            增加售電的NG購入成本 = (NG 增加的發電量- 原TPC) * NG發電成本
+                            增加售電的TG 維運成本 = (NG 增加的發電量- 原TPC) * TG 維運成本
+                            增加售電的碳費 = (NG 增加的發電量- 原TPC) * 碳費                            
                             降低的購電費用 = 原TPC * 時段購電價
-                            NG 售電效益 = (NG 增加的發電量 - 原TPC) * (躉售電價 - NG發電成本)
-                            NG 發電自用效益 = 原TPC * (時段購電成本 - NG發電成本)
+                            降低購電的NG購入成本 = 原TPC * NG發電成本
+                            降低購電的TG 維運成本 = 原TPC * TG 維運成本
+                            降低購電的碳費 = 原TPC * 碳費
                         """
                         cost_benefit.loc[ind, '增加的售電收入'] = (cost_benefit.loc[ind, 'NG 增加的發電量'] - cost_benefit.loc[ind, '原始TPC']) * par2.get('sale_price') * coefficient
+                        cost_benefit.loc[ind, '增加售電的NG購入成本'] = (cost_benefit.loc[ind, 'NG 增加的發電量'] - cost_benefit.loc[ind, '原始TPC']) * par1.get('ng_cost') * coefficient
+                        cost_benefit.loc[ind, '增加售電的TG維運成本'] = (cost_benefit.loc[ind, 'NG 增加的發電量'] - cost_benefit.loc[ind, '原始TPC']) * par1.get('tg_maintain_cost') * coefficient
+                        cost_benefit.loc[ind, '增加售電的碳費'] = (cost_benefit.loc[ind, 'NG 增加的發電量'] - cost_benefit.loc[ind, '原始TPC']) * par1.get('carbon_cost') * coefficient
+
                         cost_benefit.loc[ind, '降低的購電費用'] = cost_benefit.loc[ind, '原始TPC'] * par2.get('unit_price') * coefficient
-                        cost_benefit.loc[ind, 'NG 售電效益'] = (cost_benefit.loc[ind, 'NG 增加的發電量'] - cost_benefit.loc[ind, '原始TPC']) * (par2.get('sale_price') - par1.get('ng_cost')) * coefficient
-                        cost_benefit.loc[ind, 'NG 發電自用效益'] = cost_benefit.loc[ind, '原始TPC'] * (par2.get('unit_price') - par1.get('ng_cost')) * coefficient
+                        cost_benefit.loc[ind, '降低購電的NG購入成本'] = cost_benefit.loc[ind, '原始TPC'] * par1.get('ng_cost') * coefficient
+                        cost_benefit.loc[ind, '降低購電的TG維運成本'] = cost_benefit.loc[ind, '原始TPC'] * par1.get('tg_maintain_cost') * coefficient
+                        cost_benefit.loc[ind, '降低購電的碳費'] = cost_benefit.loc[ind, '原始TPC'] * par1.get('carbon_cost') * coefficient
+
                     # ** NG 發電量 <= 還原後的TPC
                     else:
                         """ 
                             增加的售電收入 = 0
+                            增加售電的NG購入成本 = 0
+                            增加售電的TG 維運成本 = 0
+                            增加售電的碳費 = 0
                             降低的購電費用 = NG 增加的發電量 * 時段購電價
-                            NG 售電效益 = 0
-                            NG 發電自用效益 = NG 增加的發電量 * (時段購電成本 - NG發電成本)
+                            降低購電的NG購入成本 = NG 增加的發電量 * NG發電成本
+                            降低購電的TG 維運成本 = NG 增加的發電量 * TG 維運成本
+                            降低購電的碳費 = NG 增加的發電量 * 碳費
                         """
                         cost_benefit.loc[ind, '增加的售電收入'] = 0
+                        cost_benefit.loc[ind, '增加售電的NG購入成本'] = 0
+                        cost_benefit.loc[ind, '增加售電的TG維運成本'] = 0
+                        cost_benefit.loc[ind, '增加售電的碳費'] = 0
                         cost_benefit.loc[ind, '降低的購電費用'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par2.get('unit_price') * coefficient
-                        cost_benefit.loc[ind, 'NG 售電效益'] = 0
-                        cost_benefit.loc[ind, 'NG 發電自用效益'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * (par2.get('unit_price') - par1.get('ng_cost')) * coefficient
+                        cost_benefit.loc[ind, '降低購電的NG購入成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('ng_cost') * coefficient
+                        cost_benefit.loc[ind, '降低購電的TG維運成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('tg_maintain_cost') * coefficient
+                        cost_benefit.loc[ind, '降低購電的碳費'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('carbon_cost') * coefficient
+
+        self.update_benefit_tables(cost_benefit, t_resolution)
+
+    def update_benefit_tables(self, cost_benefit=None, t_resolution=None, initialize_only=False):
+        def color_config(name):
+            return {
+                '減少外購電金額': ('#F79646', '#FCD5B4', 'white', 'blue'),
+                '增加外售電金額': ('#93C47D', '#D8E4BC', 'white', 'blue'),
+                'NG 購入成本': ('#a297c1', '#ddd0ec', 'white', 'red'),
+                'TG 維運成本': ('#a297c1', '#ddd0ec', 'white', 'red'),
+                '總效益': ('#FFFFFF', '#FFFFFF', 'black', None)
+            }.get(name, ('#FFFFFF', '#FFFFFF', 'black', 'black'))
+
+        # 加深格線色
+        self.tableWidget_4.setStyleSheet("QTableWidget { gridline-color: #666666; }")
+        self.tableWidget_5.setStyleSheet("QTableWidget { gridline-color: #666666; }")
+
+        # 表頭與欄寬初始設定
+        self.tableWidget_4.setRowCount(5)
+        self.tableWidget_4.setColumnCount(2)
+        self.tableWidget_4.verticalHeader().setVisible(False)
+        self.tableWidget_4.horizontalHeader().setVisible(False)
+        self.tableWidget_4.setColumnWidth(0, 120)
+        self.tableWidget_4.setColumnWidth(1, 120)
+        self.tableWidget_4.verticalHeader().setDefaultSectionSize(28)
+
+        self.tableWidget_5.setRowCount(10)
+        self.tableWidget_5.setColumnCount(9)
+        self.tableWidget_5.verticalHeader().setVisible(False)
+        self.tableWidget_5.horizontalHeader().setVisible(False)
+
+        for col in range(9):
+            if col == 0:
+                self.tableWidget_5.setColumnWidth(col, 80)
+            elif col in [2, 3, 4, 6, 7, 8]:
+                self.tableWidget_5.setColumnWidth(col, 90)
+            else:
+                self.tableWidget_5.setColumnWidth(col, 60)
+        self.tableWidget_5.verticalHeader().setDefaultSectionSize(28)
+
+        # 表頭設計
+        header_row1 = ["時段", "減少外購電", "", "", "", "增加外售電", "", "", ""]
+        for col, text in enumerate(header_row1):
+            bg = "#F79646" if 1 <= col <= 4 else "#93C47D" if 5 <= col <= 8 else "#FFFFFF"
+            fg = "white" if col in range(1, 9) else "black"
+            self.tableWidget_5.setItem(0, col, self.make_item(text, bold=True, bg_color=bg, fg_color=fg))
+
+        header_row2 = ["時段", "時數", "金額", "成本", "效益", "時數", "金額", "成本", "效益"]
+        for col, text in enumerate(header_row2):
+            bg_map = {
+                1: '#FCD5B4', 2: '#FCD5B4', 3: '#ddd0ec',
+                5: '#D8E4BC', 6: '#D8E4BC', 7: '#ddd0ec'
+            }
+            bg = bg_map.get(col, '#FFFFFF')
+            self.tableWidget_5.setItem(1, col, self.make_item(text, bold=True, bg_color=bg))
+
+        self.tableWidget_5.setSpan(0, 1, 1, 4)
+        self.tableWidget_5.setSpan(0, 5, 1, 4)
+        self.tableWidget_5.setSpan(0, 0, 2, 1)
+
+        if initialize_only:
+            self.tableWidget_4.setRowCount(5)
+            self.tableWidget_4.setColumnCount(2)
+            items = ['減少外購電金額', '增加外售電金額', 'NG 購入成本', 'TG 維運成本', '總效益']
+            for row, name in enumerate(items):
+                bg_name, bg_value, fg_name, fg_value = color_config(name)
+                self.tableWidget_4.setItem(row, 0,
+                                           self.make_item(name, fg_color=fg_name, bg_color=bg_name, align='center',
+                                                          font_size=11))
+                self.tableWidget_4.setItem(row, 1, self.make_item("$0", fg_color=fg_value or 'black', bg_color=bg_value,
+                                                                  align='right', font_size=11))
+
+            self.tableWidget_4.setStyleSheet("QTableWidget { background-color: #FFFFFF; gridline-color: #666666; }")
+            self.tableWidget_5.setStyleSheet("QTableWidget { background-color: #FFFFFF; gridline-color: #666666; }")
+            self.auto_resize(self.tableWidget_4)
+            self.auto_resize(self.tableWidget_5)
+            return
+
+        # ===== 資料填入 tableWidget_4 =====
+        summary_data = [
+            ('減少外購電金額', cost_benefit['降低的購電費用'].sum()),
+            ('增加外售電金額', cost_benefit['增加的售電收入'].sum()),
+            ('NG 購入成本', cost_benefit['降低購電的NG購入成本'].sum() + cost_benefit['增加售電的NG購入成本'].sum()),
+            ('TG 維運成本', cost_benefit['降低購電的TG維運成本'].sum() + cost_benefit['增加售電的TG維運成本'].sum()),
+        ]
+        total_benefit = summary_data[0][1] + summary_data[1][1] - summary_data[2][1] - summary_data[3][1]
+        summary_data.append(('總效益', total_benefit))
+
+        for row, (name, value) in enumerate(summary_data):
+            bg_name, bg_value, fg_name, fg_value = color_config(name)
+            if name == '總效益':
+                fg_value = 'blue' if value >= 0 else 'red'
+            self.tableWidget_4.setItem(row, 0, self.make_item(name, fg_color=fg_name, bg_color=bg_name, align='center',
+                                                              font_size=11))
+            self.tableWidget_4.setItem(row, 1, self.make_item(f"${value:,.0f}", fg_color=fg_value, bg_color=bg_value,
+                                                              align='right', font_size=11))
+
+        # ===== 表格 5 資料填入（每個時段） =====
+        periods = ['夏尖峰', '夏半尖峰', '夏離峰', '夏週六半', '非夏半尖峰', '非夏離峰', '非夏週六半']
+        for i, period in enumerate(periods):
+            row = i + 2
+            pd_data = cost_benefit[cost_benefit['時段'] == period]
+
+            r_data = pd_data[pd_data['降低的購電費用'] > 0]
+            rh = len(r_data) * t_resolution / 3600
+            ra = r_data['降低的購電費用'].sum()
+            rc = r_data['降低購電的NG購入成本'].sum() + r_data['降低購電的TG維運成本'].sum()
+            rb = ra - rc
+
+            i_data = pd_data[pd_data['增加的售電收入'] > 0]
+            ih = len(i_data) * t_resolution / 3600
+            ia = i_data['增加的售電收入'].sum()
+            ic = i_data['增加售電的NG購入成本'].sum() + i_data['增加售電的TG維運成本'].sum()
+            ib = ia - ic
+
+            self.tableWidget_5.setItem(row, 0, self.make_item(period, bg_color='#FFFFFF'))
+            self.tableWidget_5.setItem(row, 1, self.make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"))
+            self.tableWidget_5.setItem(row, 2, self.make_item(f"${ra:,.0f}", fg_color='blue', align='right',
+                                                              bg_color="#FCD5B4"))
+            self.tableWidget_5.setItem(row, 3,
+                                       self.make_item(f"${rc:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
+            self.tableWidget_5.setItem(row, 4, self.make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red',
+                                                              align='right', bg_color="#FFFFFF"))
+
+            self.tableWidget_5.setItem(row, 5, self.make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"))
+            self.tableWidget_5.setItem(row, 6, self.make_item(f"${ia:,.0f}", fg_color='blue', align='right',
+                                                              bg_color="#D8E4BC"))
+            self.tableWidget_5.setItem(row, 7,
+                                       self.make_item(f"${ic:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
+            self.tableWidget_5.setItem(row, 8, self.make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red',
+                                                              align='right', bg_color="#FFFFFF"))
+
+        # ===== 小計列 =====
+        row = len(periods) + 2
+        reduce_all = cost_benefit[cost_benefit['降低的購電費用'] > 0]
+        increase_all = cost_benefit[cost_benefit['增加的售電收入'] > 0]
+
+        rh = len(reduce_all) * t_resolution / 3600
+        ra = reduce_all['降低的購電費用'].sum()
+        rc = reduce_all['降低購電的NG購入成本'].sum() + reduce_all['降低購電的TG維運成本'].sum()
+        rb = ra - rc
+
+        ih = len(increase_all) * t_resolution / 3600
+        ia = increase_all['增加的售電收入'].sum()
+        ic = increase_all['增加售電的NG購入成本'].sum() + increase_all['增加售電的TG維運成本'].sum()
+        ib = ia - ic
+
+        subtotal = [
+            self.make_item("小計", bold=True),
+            self.make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"),
+            self.make_item(f"${ra:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#FCD5B4"),
+            self.make_item(f"${rc:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
+            self.make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red', align='right', bold=True,
+                           bg_color="#FFFFFF"),
+            self.make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"),
+            self.make_item(f"${ia:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#D8E4BC"),
+            self.make_item(f"${ic:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
+            self.make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red', align='right', bold=True,
+                           bg_color="#FFFFFF")
+        ]
+        for col, item in enumerate(subtotal):
+            self.tableWidget_5.setItem(row, col, item)
+
+        self.auto_resize(self.tableWidget_4)
+        self.auto_resize(self.tableWidget_5)
+
+    def auto_resize(self, table: QtWidgets.QTableWidget, min_height: int = 60):
+        """
+        自動根據欄寬與 row 數調整 tableWidget 大小
+        若為空表格，則高度設為 min_height
+        """
+        frame = table.frameWidth()
+
+        # 水平 & 垂直 scrollbar 高度
+        scroll_w = table.verticalScrollBar().sizeHint().width() if table.verticalScrollBar().isVisible() else 0
+        scroll_h = table.horizontalScrollBar().sizeHint().height() if table.horizontalScrollBar().isVisible() else 0
+
+        # 寬度：總欄寬 + 邊框 + scrollbar
+        total_w = sum(table.columnWidth(c) for c in range(table.columnCount())) + 2 * frame + scroll_w
+        table.setFixedWidth(total_w)
+
+        # 高度：根據是否有 row 調整
+        if table.rowCount() == 0:
+            table.setFixedHeight(min_height)
+        else:
+            total_h = table.verticalHeader().length() + table.horizontalHeader().height() + 2 * frame + scroll_h
+            table.setFixedHeight(total_h)
+
+    def make_item(self, text, bold=False, fg_color=None, bg_color=None, align='center', font_size=10):
+        item = QtWidgets.QTableWidgetItem(text)
+        alignment = {
+            'left': QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
+            'center': QtCore.Qt.AlignmentFlag.AlignCenter,
+            'right': QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
+        }.get(align, QtCore.Qt.AlignmentFlag.AlignCenter)
+        item.setTextAlignment(alignment)
+
+        font = item.font()
+        font.setPointSize(font_size)
+        font.setBold(bold)
+        item.setFont(font)
+
+        if fg_color:
+            item.setForeground(QtGui.QBrush(QtGui.QColor(fg_color)))
+        if bg_color:
+            item.setBackground(QtGui.QBrush(QtGui.QColor(bg_color)))
+
+        return item
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)

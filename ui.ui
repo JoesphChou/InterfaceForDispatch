@@ -42,7 +42,7 @@
     </font>
    </property>
    <property name="currentIndex">
-    <number>0</number>
+    <number>2</number>
    </property>
    <widget class="QWidget" name="tab_1">
     <property name="enabled">
@@ -3200,11 +3200,34 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
     <widget class="QDateTimeEdit" name="dateTimeEdit">
      <property name="geometry">
       <rect>
-       <x>40</x>
-       <y>30</y>
-       <width>194</width>
+       <x>120</x>
+       <y>20</y>
+       <width>161</width>
        <height>22</height>
       </rect>
+     </property>
+     <property name="maximumDateTime">
+      <datetime>
+       <hour>23</hour>
+       <minute>59</minute>
+       <second>59</second>
+       <year>2030</year>
+       <month>12</month>
+       <day>31</day>
+      </datetime>
+     </property>
+     <property name="minimumDateTime">
+      <datetime>
+       <hour>0</hour>
+       <minute>0</minute>
+       <second>0</second>
+       <year>2014</year>
+       <month>9</month>
+       <day>14</day>
+      </datetime>
+     </property>
+     <property name="displayFormat">
+      <string>yyyy/MM/dd hh:mm</string>
      </property>
      <property name="calendarPopup">
       <bool>true</bool>
@@ -3216,11 +3239,34 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
     <widget class="QDateTimeEdit" name="dateTimeEdit_2">
      <property name="geometry">
       <rect>
-       <x>40</x>
+       <x>120</x>
        <y>60</y>
-       <width>194</width>
+       <width>161</width>
        <height>22</height>
       </rect>
+     </property>
+     <property name="maximumDateTime">
+      <datetime>
+       <hour>23</hour>
+       <minute>59</minute>
+       <second>59</second>
+       <year>2030</year>
+       <month>12</month>
+       <day>31</day>
+      </datetime>
+     </property>
+     <property name="minimumDateTime">
+      <datetime>
+       <hour>0</hour>
+       <minute>0</minute>
+       <second>0</second>
+       <year>2014</year>
+       <month>9</month>
+       <day>14</day>
+      </datetime>
+     </property>
+     <property name="displayFormat">
+      <string>yyyy/MM/dd hh:mm</string>
      </property>
      <property name="calendarPopup">
       <bool>true</bool>
@@ -3242,7 +3288,7 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
       </font>
      </property>
      <property name="text">
-      <string>時間長度：</string>
+      <string>時間長度</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_26">
@@ -3270,53 +3316,31 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
     <widget class="QTableWidget" name="tableWidget_4">
      <property name="geometry">
       <rect>
-       <x>260</x>
-       <y>30</y>
-       <width>261</width>
-       <height>151</height>
+       <x>350</x>
+       <y>10</y>
+       <width>242</width>
+       <height>142</height>
       </rect>
      </property>
-     <row>
-      <property name="text">
-       <string>減少外購電的金額</string>
-      </property>
-     </row>
-     <row>
-      <property name="text">
-       <string>增加外售電的金額</string>
-      </property>
-     </row>
-     <row>
-      <property name="text">
-       <string>NG 購入成本</string>
-      </property>
-     </row>
-     <row>
-      <property name="text">
-       <string>總效益</string>
-      </property>
-     </row>
-     <column>
-      <property name="text">
-       <string>效益計算</string>
-      </property>
-     </column>
+     <property name="horizontalScrollBarPolicy">
+      <enum>Qt::ScrollBarAsNeeded</enum>
+     </property>
     </widget>
     <widget class="QTableWidget" name="tableWidget_5">
      <property name="geometry">
       <rect>
-       <x>30</x>
-       <y>200</y>
-       <width>491</width>
-       <height>191</height>
+       <x>40</x>
+       <y>170</y>
+       <width>742</width>
+       <height>282</height>
       </rect>
      </property>
     </widget>
     <widget class="QPushButton" name="pushButton_5">
      <property name="geometry">
       <rect>
-       <x>40</x>
-       <y>140</y>
+       <x>230</x>
+       <y>100</y>
        <width>81</width>
        <height>31</height>
       </rect>
@@ -3330,6 +3354,44 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
      </property>
      <property name="text">
       <string>開始計算</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_27">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>20</y>
+       <width>71</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <family>微軟正黑體</family>
+       <pointsize>12</pointsize>
+      </font>
+     </property>
+     <property name="text">
+      <string>起始時間</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_28">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>60</y>
+       <width>71</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <family>微軟正黑體</family>
+       <pointsize>12</pointsize>
+      </font>
+     </property>
+     <property name="text">
+      <string>結束時間</string>
      </property>
     </widget>
    </widget>
