@@ -5,8 +5,13 @@ import pandas as pd
 from PyQt6.QtGui import QLinearGradient
 from bs4 import BeautifulSoup
 from UI import Ui_Form
-from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2
+from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from functools import wraps
+from make_item import make_item
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 
 
 def timeit(func):
@@ -195,7 +200,7 @@ def scrapy_schedule():
             furnace_list = [e[3] for e in filtered_schedule if e[4]==curr_process]
             # **如果目前處理的爐號id 己存在，則不加入 filtered_schedule
             if curr_furnace in furnace_list:
-                print(f"⚠️ 重複排程移除: {curr_process} {curr_start} ~ {curr_end} (X={curr_x})")
+                #print(f"⚠️ 重複排程移除: {curr_process} {curr_start} ~ {curr_end} (X={curr_x})")
                 continue  # **跳過這筆排程，不加入 filtered_schedule**
 
         filtered_schedule.append(schedule_data[i])
@@ -210,10 +215,13 @@ def scrapy_schedule():
 
         # 如果目前系統時間在00:00~08:00, 且距離排程開始生產的時間，如果超過10小時以上，則判斷為前一天已生產完的排程
         if pd.Timestamp.now() < (pd.Timestamp.today().normalize() + pd.offsets.Hour(8)):
-            print(abs(pd.Timestamp.now() - curr_start))
             if (abs(pd.Timestamp.now() - curr_start)) > pd.Timedelta(hours=10):
                 curr_start -= pd.Timedelta(days=1)
                 curr_end -= pd.Timedelta(days=1)
+        elif i == 0:    # 如果前面都沒有排程，遇到第一筆資料的日期超過現在10小時，則判斷為跨日的排程。
+            if abs(pd.Timestamp.now() - curr_start) > pd.Timedelta(hours=10):
+                curr_start += pd.Timedelta(days=1)
+                curr_end += pd.Timedelta(days=1)
 
         # 如果同一製程有前一筆排程，且當前開始時間比前一排程開始時間還早，則跨天，需加一天
         if i > 0:
@@ -265,8 +273,61 @@ def scrapy_schedule():
 
     return past_df, current_df, future_df
 
-class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
+class TrendChartCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=6, height=3, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.ax = fig.add_subplot(111)
+        super().__init__(fig)
+        self.setParent(parent)
+        self.plot_sample()
 
+    def plot_from_dataframe(self, df):
+        self.ax.clear()
+
+        # 確保資料欄存在
+        if not {'原始TPC', '即時TPC'}.issubset(df.columns):
+            self.ax.set_title("資料格式錯誤：缺少 '原始TPC' 或 '即時TPC'")
+            self.draw()
+            return
+
+        #x = range(len(df))
+        #x = df.index.strftime('%H:%M:%S')
+        x = df.index
+        y1 = df['原始TPC']
+        y2 = df['即時TPC']
+
+        # 繪製兩條線
+        self.ax.plot(x, y1, label='台電供電量(未補NG)', color='#ff0000', linewidth=1)
+        self.ax.plot(x, y2, label='台電供電量(有補NG)', color='#0000ff', linewidth=1,linestyle='-.')
+
+        # 區間填色（依照效益正負）
+        #self.ax.fill_between(x, y1, y2, where=(y2 > y1), interpolate=True, color='#B7D7F4', alpha=0.7, label='正效益')
+        #self.ax.fill_between(x, y1, y2, where=(y2 < y1), interpolate=True, color='#F4CCCC', alpha=0.7, label='負效益')
+
+        locator = mdates.AutoDateLocator()
+        formatter = mdates.ConciseDateFormatter(locator)
+        self.ax.xaxis.set_major_locator(locator)
+        self.ax.xaxis.set_major_formatter(formatter)
+
+        self.ax.set_title("台電供電量(未補NG) vs 台電供電量(有補NG)")
+        self.ax.set_xlabel("時間")
+        self.ax.set_ylabel("電量 (kW)")
+        self.ax.grid(True)
+        self.ax.legend()
+        self.figure.autofmt_xdate()
+        self.draw()
+
+    def plot_sample(self):
+        self.ax.clear()
+        self.ax.plot([0, 1, 2, 3], [10, 20, 15, 25], label='樣本趨勢', marker='o')
+        self.ax.set_title("趨勢圖（測試）")
+        self.ax.set_xlabel("時間點")
+        self.ax.set_ylabel("金額")
+        self.ax.grid(True)
+        self.ax.legend()
+        self.draw()
+
+class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def __init__(self):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
@@ -276,6 +337,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.pushButton_3.clicked.connect(self.remove_list_item1)
         self.pushButton_4.clicked.connect(self.query_demand)
         self.pushButton_5.clicked.connect(self.benefit_appraisal)
+        self.dateEdit.setDate(QtCore.QDate().currentDate())
+        self.dateEdit_2.setDate(QtCore.QDate().currentDate())
 
         self.spinBox.setValue(5)
         self.spinBox_2.setValue(4)
@@ -320,7 +383,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_2.start()
 
         self.initialize_cost_benefit_widgets()
-        # self.benefit_appraisal()
+        # 建立趨勢圖元件並加入版面配置
+        plt.rcParams['font.family'] = 'Microsoft JhengHei'  # 微軟正黑體
+        plt.rcParams['axes.unicode_minus'] = False  # 支援負號正確顯示
+        self.trend_chart = TrendChartCanvas(self)
+        self.verticalLayout.addWidget(self.trend_chart)
 
     def initialize_cost_benefit_widgets(self):
         # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
@@ -510,8 +577,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         item.setBackground(brush)       # 設定漸層背景 (與tw3 header 相同的漸層配色)
         item.setForeground((QtGui.QBrush(QtGui.QColor('white'))))   # 設定文字顏色為白色
 
-        self.tableWidget_3.setItem(2, 0, self.make_item('太陽能', bold=False, bg_color='#f6ffc6',font_size=12))
-        self.tableWidget_3.setItem(3, 0, self.make_item('台電供電量', bold=False, font_size=12))
+        self.tableWidget_3.setItem(2, 0, make_item('太陽能', bold=False, bg_color='#f6ffc6',font_size=12))
+        self.tableWidget_3.setItem(3, 0, make_item('台電供電量', bold=False, font_size=12))
 
         # **設定欄位樣式，使其與 tw1, tw2, tw3 保持一致**
         for row in range(self.tableWidget_3.rowCount()):
@@ -1339,6 +1406,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 sum_of_selection.append(a[i].text())
         b = pd.Series(sum_of_selection, dtype=float)
         self.label_6.setText(str(b.mean()))
+        self.label_6.setStyleSheet("color:green; font-size:12pt;")
         self.label_8.setText(str(len(b)))
 
     def query_demand(self):
@@ -1626,7 +1694,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             return
 
         # ** 時間上的解析度設定 **
-        t_resolution = 10
+        t_resolution = 20
         t_resolution_str = f'{t_resolution}s'
         coefficient = t_resolution * 1000 / 3600 # 1000: MWH->KWH  3600: hour->second
         special_date = self.special_dates['台電離峰日'].tolist()
@@ -1634,8 +1702,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         st = pd.Timestamp(self.dateTimeEdit.dateTime().toString())
         et = pd.Timestamp(self.dateTimeEdit_2.dateTime().toString())
         if et > pd.Timestamp.now(): # ** 如果超過目前的時間，則取下取整到指定的單位)
-            et = pd.Timestamp.now().floor('10S')
-        today = pd.Timestamp.today().normalize()
+            et = pd.Timestamp.now().floor(t_resolution_str)
 
         # ** 從PI 系統讀取的TAG 範圍 **
         target_names = ['feeder 1510','feeder 1520', '2H120', '2H220', '5H120', '5H220',
@@ -1654,8 +1721,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         cost_benefit['NG 總用量'] = raw_result.loc[:, 'TG1 NG':'TG4 NG'].sum(axis=1)
 
         # ** 根據原始TPC 是否處於逆送電，計算各種效益 **
-        par1 = {}
-        par2 = {}
+        # par1 = {}
+        # par2 = {}
+        # ** 用來記錄查詢區間，有用到那些版本的參數 **
+        self.version_used = {} # 清空舊資料
+        self.purchase_versions_by_period = {}
+        self.sale_versions_by_period = {}
+        self.version_info ={}
+
         for ind in cost_benefit.index:
             # ** 根據 index 的時間，讀取適用各種日期版本的的單價 **
             """
@@ -1682,6 +1755,54 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             """
             par1 = get_ng_generation_cost_v2(self.unit_prices, ind)
             par2 = get_current_rate_type_v6(self.time_of_use, special_date, self.unit_prices, ind)
+
+            period = par2.get("rate_label", "")
+            if period:
+                # 儲存「每個時段」的購電與售電單價版本
+                if period not in self.purchase_versions_by_period:
+                    self.purchase_versions_by_period[
+                        period] = f"${par2['unit_price']:.2f}（{par2['purchase_range_text']}）"
+                if period not in self.sale_versions_by_period:
+                    self.sale_versions_by_period[period] = f"${par2['sale_price']:.2f}（{par2['sale_range_text']}）"
+
+            # 🔹 電價版本
+            #ver_purchase = par2.get("purchase_range_text")
+            #ver_sale = par2.get("sale_range_text")
+            #if ver_purchase:
+            #    self.version_used["購電單價"] = f"{ver_purchase}（{par2.get('unit_price', 0):.2f} 元/kWh）"
+            #if ver_sale:
+            #    self.version_used["售電單價"] = f"{ver_sale}（{par2.get('sale_price', 0):.2f} 元/kWh）"
+
+            # 🔹 NG 成本版本區間（交集）
+            ng_cost_range = par1.get("ng_cost_range_text", "")
+            if ng_cost_range:
+                self.version_used["NG 成本"] = f"{ng_cost_range}（{par1.get('ng_cost', 0):.4f} 元/kWh）"
+
+            # 🔹 其它 NG 參數
+            if par1.get("ng_price_range_text"):
+                self.version_used["NG 牌價"] = f"{par1['ng_price_range_text']}（{par1.get('ng_price', 0):.2f} 元/NM³）"
+            if par1.get("heat_range_text"):
+                self.version_used["熱值"] = f"{par1['heat_range_text']}（{par1.get('ng_heat', 0):.2f} kcal/NM³）"
+            if par1.get("tg_range_text"):
+                self.version_used[
+                    "TG 維運成本"] = f"{par1['tg_range_text']}（{par1.get('tg_maintain_cost', 0):.4f} 元/kWh）"
+            if par1.get("car_range_text"):
+                self.version_used["碳費"] = f"{par1['car_range_text']}（{par1.get('carbon_cost', 0):.4f} 元/kWh）"
+            if par1.get("steam_power"):
+                f"{par1['car_range_text']}（{par1.get('carbon_cost', 0):.4f} 元/kWh）"
+
+            # ** 用來提供tableWidget_6 欄位的tool_tip 訊息
+            self.version_info[ind] = {
+                "unit_price":{
+                    "value": par2.get("unit_price"),
+                    "version": par2.get("purchase_range_text")
+                },
+                "sale_price":{
+                    "value": par2.get("sale_price"),
+                    "version": par2.get("sale_range_text")
+                }
+            }
+
             cost_benefit.loc[ind, 'NG 購入成本'] = cost_benefit.loc[ind, 'NG 總用量'] * par1.get('ng_price') / 3600 * t_resolution
             cost_benefit.loc[ind, 'NG 增加的發電度數'] = (cost_benefit.loc[ind, 'NG 總用量'] * par1.get('convertible_power')
                                             / 3600 * t_resolution)
@@ -1689,10 +1810,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             cost_benefit.loc[ind, 'TG 增加的維運成本'] = cost_benefit.loc[ind, 'NG 增加的發電度數'] * par1.get('tg_maintain_cost')
             cost_benefit.loc[ind, '增加的碳費'] = cost_benefit.loc[ind, 'NG 增加的發電度數'] * par1.get('carbon_cost')
             cost_benefit.loc[ind, '原始TPC'] = cost_benefit.loc[ind, '即時TPC'] + cost_benefit.loc[ind, 'NG 增加的發電量']
-
+            cost_benefit.loc[ind, '時段'] = par2.get('rate_label')
             if cost_benefit.loc[ind, 'NG 總用量'] != 0:
-                cost_benefit.loc[ind,'時段'] = par2.get('rate_label')
-
                 # ** 還原後TPC 處於逆送電時 **
                 if cost_benefit.loc[ind, '原始TPC'] <= 0:
                     """ 
@@ -1707,7 +1826,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                     """
                     cost_benefit.loc[ind, '增加的售電收入'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par2.get('sale_price') * coefficient
                     cost_benefit.loc[ind, '增加售電的NG購入成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('ng_cost') * coefficient
-                    cost_benefit.loc[ind, '增加售電的TG維運成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('tg_cost') * coefficient
+                    cost_benefit.loc[ind, '增加售電的TG維運成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('tg_maintain_cost') * coefficient
                     cost_benefit.loc[ind, '增加售電的碳費'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('carbon_cost') * coefficient
                     cost_benefit.loc[ind, '降低的購電費用'] = 0
                     cost_benefit.loc[ind, '降低購電的NG購入成本'] = 0
@@ -1758,9 +1877,20 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                         cost_benefit.loc[ind, '降低購電的TG維運成本'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('tg_maintain_cost') * coefficient
                         cost_benefit.loc[ind, '降低購電的碳費'] = cost_benefit.loc[ind, 'NG 增加的發電量'] * par1.get('carbon_cost') * coefficient
 
-        self.update_benefit_tables(cost_benefit, t_resolution)
+            else:
+                cost_benefit.loc[ind, '增加的售電收入'] = 0
+                cost_benefit.loc[ind, '增加售電的NG購入成本'] = 0
+                cost_benefit.loc[ind, '增加售電的TG維運成本'] = 0
+                cost_benefit.loc[ind, '增加售電的碳費'] = 0
+                cost_benefit.loc[ind, '降低的購電費用'] = 0
+                cost_benefit.loc[ind, '降低購電的NG購入成本'] = 0
+                cost_benefit.loc[ind, '降低購電的TG維運成本'] = 0
+                cost_benefit.loc[ind, '降低購電的碳費'] = 0
 
-    def update_benefit_tables(self, cost_benefit=None, t_resolution=None, initialize_only=False):
+        self.update_benefit_tables(cost_benefit, t_resolution, version_used = self.version_used)
+        self.trend_chart.plot_from_dataframe(cost_benefit)
+
+    def update_benefit_tables(self, cost_benefit=None, t_resolution=None, version_used=None, initialize_only=False):
         def color_config(name):
             return {
                 '減少外購電金額': ('#F79646', '#FCD5B4', 'white', 'blue'),
@@ -1802,7 +1932,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         for col, text in enumerate(header_row1):
             bg = "#F79646" if 1 <= col <= 4 else "#93C47D" if 5 <= col <= 8 else "#FFFFFF"
             fg = "white" if col in range(1, 9) else "black"
-            self.tableWidget_5.setItem(0, col, self.make_item(text, bold=True, bg_color=bg, fg_color=fg))
+            self.tableWidget_5.setItem(0, col, make_item(text, bold=True, bg_color=bg, fg_color=fg))
 
         header_row2 = ["時段", "時數", "金額", "成本", "效益", "時數", "金額", "成本", "效益"]
         for col, text in enumerate(header_row2):
@@ -1811,7 +1941,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 5: '#D8E4BC', 6: '#D8E4BC', 7: '#ddd0ec'
             }
             bg = bg_map.get(col, '#FFFFFF')
-            self.tableWidget_5.setItem(1, col, self.make_item(text, bold=True, bg_color=bg))
+            self.tableWidget_5.setItem(1, col, make_item(text, bold=True, bg_color=bg))
 
         self.tableWidget_5.setSpan(0, 1, 1, 4)
         self.tableWidget_5.setSpan(0, 5, 1, 4)
@@ -1824,9 +1954,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             for row, name in enumerate(items):
                 bg_name, bg_value, fg_name, fg_value = color_config(name)
                 self.tableWidget_4.setItem(row, 0,
-                                           self.make_item(name, fg_color=fg_name, bg_color=bg_name, align='center',
+                                           make_item(name, fg_color=fg_name, bg_color=bg_name, align='center',
                                                           font_size=11))
-                self.tableWidget_4.setItem(row, 1, self.make_item("$0", fg_color=fg_value or 'black', bg_color=bg_value,
+                self.tableWidget_4.setItem(row, 1, make_item("$0", fg_color=fg_value or 'black', bg_color=bg_value,
                                                                   align='right', font_size=11))
 
             self.tableWidget_4.setStyleSheet("QTableWidget { background-color: #FFFFFF; gridline-color: #666666; }")
@@ -1849,9 +1979,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             bg_name, bg_value, fg_name, fg_value = color_config(name)
             if name == '總效益':
                 fg_value = 'blue' if value >= 0 else 'red'
-            self.tableWidget_4.setItem(row, 0, self.make_item(name, fg_color=fg_name, bg_color=bg_name, align='center',
+            self.tableWidget_4.setItem(row, 0, make_item(name, fg_color=fg_name, bg_color=bg_name, align='center',
                                                               font_size=11))
-            self.tableWidget_4.setItem(row, 1, self.make_item(f"${value:,.0f}", fg_color=fg_value, bg_color=bg_value,
+            self.tableWidget_4.setItem(row, 1, make_item(f"${value:,.0f}", fg_color=fg_value, bg_color=bg_value,
                                                               align='right', font_size=11))
 
         # ===== 表格 5 資料填入（每個時段） =====
@@ -1872,22 +2002,38 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             ic = i_data['增加售電的NG購入成本'].sum() + i_data['增加售電的TG維運成本'].sum()
             ib = ia - ic
 
-            self.tableWidget_5.setItem(row, 0, self.make_item(period, bg_color='#FFFFFF'))
-            self.tableWidget_5.setItem(row, 1, self.make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"))
-            self.tableWidget_5.setItem(row, 2, self.make_item(f"${ra:,.0f}", fg_color='blue', align='right',
+            self.tableWidget_5.setItem(row, 0, make_item(period, bg_color='#FFFFFF'))
+            self.tableWidget_5.setItem(row, 1, make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"))
+            self.tableWidget_5.setItem(row, 2, make_item(f"${ra:,.0f}", fg_color='blue', align='right',
                                                               bg_color="#FCD5B4"))
             self.tableWidget_5.setItem(row, 3,
-                                       self.make_item(f"${rc:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
-            self.tableWidget_5.setItem(row, 4, self.make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red',
+                                       make_item(f"${rc:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
+            self.tableWidget_5.setItem(row, 4, make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red',
                                                               align='right', bg_color="#FFFFFF"))
 
-            self.tableWidget_5.setItem(row, 5, self.make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"))
-            self.tableWidget_5.setItem(row, 6, self.make_item(f"${ia:,.0f}", fg_color='blue', align='right',
+            self.tableWidget_5.setItem(row, 5, make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"))
+            self.tableWidget_5.setItem(row, 6, make_item(f"${ia:,.0f}", fg_color='blue', align='right',
                                                               bg_color="#D8E4BC"))
-            self.tableWidget_5.setItem(row, 7,
-                                       self.make_item(f"${ic:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
-            self.tableWidget_5.setItem(row, 8, self.make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red',
+            self.tableWidget_5.setItem(row, 7, make_item(f"${ic:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
+            self.tableWidget_5.setItem(row, 8, make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red',
                                                               align='right', bg_color="#FFFFFF"))
+
+            # 於每個時段 row 的處理區塊中（建議放在 for i, period in enumerate(periods): 裡的最末端）
+            # tool_tip 要設在「金額欄位」
+            # 設定 tooltip：抓 r_data 與 i_data 的第一筆時間，查版本資訊
+            if not r_data.empty:
+                first_r_index = r_data.index[0]
+                r_ver = self.version_info.get(first_r_index, {}).get("unit_price", "")
+                if r_ver:
+                    self.tableWidget_5.item(row, 2).setToolTip(f"購電單價：{r_ver['value']} 元/kWH\n{r_ver['version']}")
+                    #self.tableWidget_5.item(row, 2).setToolTip(f"減少外購電\n{r_ver['version']}")
+
+            if not i_data.empty:
+                first_i_index = i_data.index[0]
+                i_ver = self.version_info.get(first_i_index, {}).get("sale_price", "")
+                if i_ver:
+                    self.tableWidget_5.item(row, 6).setToolTip(f"售電單價：{i_ver['value']} 元/kWH\n{i_ver['version']}")
+                    #self.tableWidget_5.item(row, 6).setToolTip(f"增加外售電金額\n{i_ver['version']}")
 
         # ===== 小計列 =====
         row = len(periods) + 2
@@ -1905,23 +2051,64 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         ib = ia - ic
 
         subtotal = [
-            self.make_item("小計", bold=True),
-            self.make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"),
-            self.make_item(f"${ra:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#FCD5B4"),
-            self.make_item(f"${rc:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
-            self.make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red', align='right', bold=True,
+            make_item("小計", bold=True),
+            make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"),
+            make_item(f"${ra:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#FCD5B4"),
+            make_item(f"${rc:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
+            make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red', align='right', bold=True,
                            bg_color="#FFFFFF"),
-            self.make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"),
-            self.make_item(f"${ia:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#D8E4BC"),
-            self.make_item(f"${ic:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
-            self.make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red', align='right', bold=True,
+            make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"),
+            make_item(f"${ia:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#D8E4BC"),
+            make_item(f"${ic:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
+            make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red', align='right', bold=True,
                            bg_color="#FFFFFF")
         ]
         for col, item in enumerate(subtotal):
             self.tableWidget_5.setItem(row, col, item)
 
+        # ** 計算及顯示指定期間的NG 使用量
+        ng_active = cost_benefit[cost_benefit['NG 總用量'] > 0]
+        ng_duration_secs = len (ng_active) * t_resolution
+        ng_amount = cost_benefit['NG 總用量'].mean() * ng_duration_secs / 3600
+        par1 = get_ng_generation_cost_v2(self.unit_prices, cost_benefit.index[0])
+        ng_kwh = ng_amount * par1.get('convertible_power')
+        self.label_30.setText(f"{ng_amount:,.0f} Nm3\n({ng_kwh:,.0f} kWH)")
+        self.label_30.setStyleSheet("color: #004080; font-size:12pt; font_weight: bold;")
+
         self.auto_resize(self.tableWidget_4)
         self.auto_resize(self.tableWidget_5)
+
+        # ----- 顯示版本資訊到 tableWidget_6 -----
+        self.tableWidget_6.clear()
+        self.tableWidget_6.setColumnCount(2)
+        self.tableWidget_6.setRowCount(0)
+        self.tableWidget_6.setHorizontalHeaderLabels(['項目', '適用範圍與數值'])
+        self.tableWidget_6.verticalHeader().setVisible(False)
+        self.tableWidget_6.horizontalHeader().setVisible(True)
+        self.tableWidget_6.setStyleSheet("QTableWidget { gridline-color: #666666; font-size: 9pt; }")
+        self.tableWidget_6.horizontalHeader().setStyleSheet("QHeaderView::section { font-size: 9pt; }")
+
+        if version_used:
+            for name, value in version_used.items():
+                row = self.tableWidget_6.rowCount()
+                self.tableWidget_6.insertRow(row)
+                self.tableWidget_6.setItem(row, 0, make_item(name, align='center', font_size=8))
+                self.tableWidget_6.setItem(row, 1, make_item(value, align='left', font_size=8))
+
+        # 自動調整寬高
+        self.tableWidget_6.resizeColumnsToContents()
+        self.tableWidget_6.resizeRowsToContents()
+
+        frame = self.tableWidget_6.frameWidth()
+        scroll_w = self.tableWidget_6.verticalScrollBar().sizeHint().width() if self.tableWidget_6.verticalScrollBar().isVisible() else 0
+        total_width = sum(
+            [self.tableWidget_6.columnWidth(i) for i in range(self.tableWidget_6.columnCount())]) + 2 * frame + scroll_w
+        self.tableWidget_6.setFixedWidth(total_width)
+
+        scroll_h = self.tableWidget_6.horizontalScrollBar().sizeHint().height() if self.tableWidget_6.horizontalScrollBar().isVisible() else 0
+        total_height = self.tableWidget_6.verticalHeader().length() + self.tableWidget_6.horizontalHeader().height() + 2 * frame + scroll_h
+        self.tableWidget_6.setFixedHeight(total_height)
+
 
     def auto_resize(self, table: QtWidgets.QTableWidget, min_height: int = 60):
         """
@@ -1944,27 +2131,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         else:
             total_h = table.verticalHeader().length() + table.horizontalHeader().height() + 2 * frame + scroll_h
             table.setFixedHeight(total_h)
-
-    def make_item(self, text, bold=False, fg_color=None, bg_color=None, align='center', font_size=10):
-        item = QtWidgets.QTableWidgetItem(text)
-        alignment = {
-            'left': QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
-            'center': QtCore.Qt.AlignmentFlag.AlignCenter,
-            'right': QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
-        }.get(align, QtCore.Qt.AlignmentFlag.AlignCenter)
-        item.setTextAlignment(alignment)
-
-        font = item.font()
-        font.setPointSize(font_size)
-        font.setBold(bold)
-        item.setFont(font)
-
-        if fg_color:
-            item.setForeground(QtGui.QBrush(QtGui.QColor(fg_color)))
-        if bg_color:
-            item.setBackground(QtGui.QBrush(QtGui.QColor(bg_color)))
-
-        return item
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)

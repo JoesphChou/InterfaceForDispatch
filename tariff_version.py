@@ -25,6 +25,16 @@ def find_tariff_version_range(columns, target_date):
             return start_date, end_date
     return None, columns[-1].date()  # target_date 太早，尚未適用任何版本
 
+def format_range(start, end):
+    if start and end:
+        return f"{start.strftime('%Y/%m/%d')} ~ {end.strftime('%Y/%m/%d')}"
+    elif start and not end:
+        return f"{start.strftime('%Y/%m/%d')} ~（目前適用）"
+    elif not start and end:
+        return f"（最早版本）~ {end.strftime('%Y/%m/%d')}"
+    else:
+        return "（無有效版本）"
+
 def get_current_rate_type_v6(
     raw_df: pd.DataFrame,
     holiday_dates: list,
@@ -232,16 +242,6 @@ def get_ng_generation_cost_v2(
                 return col, start, end
         return valid_versions[-1][0], None, valid_versions[-1][1].date() if valid_versions else (None, None, None)
 
-    def format_range(start, end):
-        if start and end:
-            return f"{start.strftime('%Y/%m/%d')} ~ {end.strftime('%Y/%m/%d')}"
-        elif start and not end:
-            return f"{start.strftime('%Y/%m/%d')} ~（目前適用）"
-        elif not start and end:
-            return f"（最早版本）~ {end.strftime('%Y/%m/%d')}"
-        else:
-            return "（無有效版本）"
-
     if target_datetime is None:
         target_datetime = datetime.now()
 
@@ -313,7 +313,14 @@ def get_ng_generation_cost_v2(
         "car_ver_start": car_ver_start,
         "car_ver_end": car_ver_end,
         "car_range_text":format_range(car_ver_start, car_ver_end),
-        "formula": f"{ng_price} / ({ng_heat} ÷ {steam_power})"
+        "formula": f"{ng_price} / ({ng_heat} ÷ {steam_power})",
+        "ng_cost_range_text": format_range(
+            max(ng_ver_start, heat_ver_start) if ng_ver_start and heat_ver_start else ng_ver_start or heat_ver_start,
+            min(ng_ver_end, heat_ver_end) if ng_ver_end and heat_ver_end else ng_ver_end or heat_ver_end
+        ),
+        "ng_cost_ver_start": max(ng_ver_start,
+                                 heat_ver_start) if ng_ver_start and heat_ver_start else ng_ver_start or heat_ver_start,
+        "ng_cost_ver_end": min(ng_ver_end, heat_ver_end) if ng_ver_end and heat_ver_end else ng_ver_end or heat_ver_end,
     }
 
 def get_ng_generation_cost(
