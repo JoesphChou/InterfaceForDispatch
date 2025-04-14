@@ -8,6 +8,7 @@ from UI import Ui_Form
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from functools import wraps
 from make_item import make_item
+from collections import defaultdict
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.dates as mdates
@@ -188,8 +189,23 @@ def scrapy_schedule():
         # **存入數據，稍後進行 X 軸排序**
         schedule_data.append((x_coord, start, end, furnace_id, process_type))
 
-    # **根據 X 軸進行排序**
-    schedule_data.sort(key=lambda x: (x[4], x[0]))  # 先按 process_type 再按 X 座標 排序
+    # 建立 sort_group 欄位：將 EAFA、EAFB 合併為 EAF，其它維持原樣
+    def get_sort_group(process_type):
+        if process_type in ["EAFA", "EAFB"]:
+            return "EAF"
+        return process_type
+
+    # 建立排序用資料
+    schedule_data_with_group = [
+        (x_coord, start, end, furnace_id, process_type, get_sort_group(process_type))
+        for (x_coord, start, end, furnace_id, process_type) in schedule_data
+    ]
+
+    # 根據 sort_group 與 x_coord 排序
+    schedule_data_with_group.sort(key=lambda x: (x[5], x[0]))
+
+    # 移除排序欄位後，回復為原本格式
+    schedule_data = [(x[0], x[1], x[2], x[3], x[4]) for x in schedule_data_with_group]
 
     # **去除重複排程 (相同的爐號id)**
     filtered_schedule = []
@@ -214,12 +230,13 @@ def scrapy_schedule():
             curr_end += pd.Timedelta(days=1)
 
         # 如果目前系統時間在00:00~08:00, 且距離排程開始生產的時間，如果超過10小時以上，則判斷為前一天已生產完的排程
-        if pd.Timestamp.now() < (pd.Timestamp.today().normalize() + pd.offsets.Hour(8)):
-            if (abs(pd.Timestamp.now() - curr_start)) > pd.Timedelta(hours=10):
+        now = pd.Timestamp.now()
+        if now < (pd.Timestamp.today().normalize() + pd.offsets.Hour(8)):
+            if (abs(now - curr_start)) > pd.Timedelta(hours=10):
                 curr_start -= pd.Timedelta(days=1)
                 curr_end -= pd.Timedelta(days=1)
         elif i == 0:    # 如果前面都沒有排程，遇到第一筆資料的日期超過現在10小時，則判斷為跨日的排程。
-            if abs(pd.Timestamp.now() - curr_start) > pd.Timedelta(hours=10):
+            if abs(now - curr_start) > pd.Timedelta(hours=10):
                 curr_start += pd.Timedelta(days=1)
                 curr_end += pd.Timedelta(days=1)
 
@@ -1765,14 +1782,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 if period not in self.sale_versions_by_period:
                     self.sale_versions_by_period[period] = f"${par2['sale_price']:.2f}（{par2['sale_range_text']}）"
 
-            # 🔹 電價版本
-            #ver_purchase = par2.get("purchase_range_text")
-            #ver_sale = par2.get("sale_range_text")
-            #if ver_purchase:
-            #    self.version_used["購電單價"] = f"{ver_purchase}（{par2.get('unit_price', 0):.2f} 元/kWh）"
-            #if ver_sale:
-            #    self.version_used["售電單價"] = f"{ver_sale}（{par2.get('sale_price', 0):.2f} 元/kWh）"
-
             # 🔹 NG 成本版本區間（交集）
             ng_cost_range = par1.get("ng_cost_range_text", "")
             if ng_cost_range:
@@ -1792,6 +1801,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 f"{par1['car_range_text']}（{par1.get('carbon_cost', 0):.4f} 元/kWh）"
 
             # ** 用來提供tableWidget_6 欄位的tool_tip 訊息
+
             self.version_info[ind] = {
                 "unit_price":{
                     "value": par2.get("unit_price"),
@@ -1947,6 +1957,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_5.setSpan(0, 5, 1, 4)
         self.tableWidget_5.setSpan(0, 0, 2, 1)
 
+        # ** 在模擬表頭的tooltip 增加說明 **
+        self.tableWidget_5.item(1, 2).setToolTip("減少外購電金額：\n對應時段的總金額")
+        self.tableWidget_5.item(1, 3).setToolTip("減少外購電成本：\nNG 購入成本 + TG 維運成本")
+        self.tableWidget_5.item(1, 4).setToolTip("減少外購電效益：\n金額 - 成本")
+        self.tableWidget_5.item(1, 6).setToolTip("增加外售電金額：\n對應時段的總金額")
+        self.tableWidget_5.item(1, 7).setToolTip("增加外售電成本：\nNG 購入成本 + TG 維運成本")
+        self.tableWidget_5.item(1, 8).setToolTip("增加外售電效益：\n金額 - 成本")
+
         if initialize_only:
             self.tableWidget_4.setRowCount(5)
             self.tableWidget_4.setColumnCount(2)
@@ -2017,23 +2035,28 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tableWidget_5.setItem(row, 7, make_item(f"${ic:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
             self.tableWidget_5.setItem(row, 8, make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red',
                                                               align='right', bg_color="#FFFFFF"))
+            # 🔹 建立購電/售電版本清單（避免重複）
+            purchase_versions = []
+            sale_versions = []
 
-            # 於每個時段 row 的處理區塊中（建議放在 for i, period in enumerate(periods): 裡的最末端）
-            # tool_tip 要設在「金額欄位」
-            # 設定 tooltip：抓 r_data 與 i_data 的第一筆時間，查版本資訊
-            if not r_data.empty:
-                first_r_index = r_data.index[0]
-                r_ver = self.version_info.get(first_r_index, {}).get("unit_price", "")
-                if r_ver:
-                    self.tableWidget_5.item(row, 2).setToolTip(f"購電單價：{r_ver['value']} 元/kWH\n{r_ver['version']}")
-                    #self.tableWidget_5.item(row, 2).setToolTip(f"減少外購電\n{r_ver['version']}")
+            for idx in r_data.index:
+                ver = self.version_info.get(idx, {}).get("unit_price")
+                if ver and ver not in purchase_versions:
+                    purchase_versions.append(ver)
 
-            if not i_data.empty:
-                first_i_index = i_data.index[0]
-                i_ver = self.version_info.get(first_i_index, {}).get("sale_price", "")
-                if i_ver:
-                    self.tableWidget_5.item(row, 6).setToolTip(f"售電單價：{i_ver['value']} 元/kWH\n{i_ver['version']}")
-                    #self.tableWidget_5.item(row, 6).setToolTip(f"增加外售電金額\n{i_ver['version']}")
+            for idx in i_data.index:
+                ver = self.version_info.get(idx, {}).get("sale_price")
+                if ver and ver not in sale_versions:
+                    sale_versions.append(ver)
+
+            # 🔹 套用 tooltip
+            if purchase_versions:
+                tooltip_html = self.build_price_tooltip(period, purchase_versions)
+                self.tableWidget_5.item(row, 2).setToolTip(tooltip_html)
+
+            if sale_versions:
+                tooltip_html = self.build_price_tooltip(period, sale_versions, is_sale=True)
+                self.tableWidget_5.item(row, 6).setToolTip(tooltip_html)
 
         # ===== 小計列 =====
         row = len(periods) + 2
@@ -2074,6 +2097,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         ng_kwh = ng_amount * par1.get('convertible_power')
         self.label_30.setText(f"{ng_amount:,.0f} Nm3\n({ng_kwh:,.0f} kWH)")
         self.label_30.setStyleSheet("color: #004080; font-size:12pt; font_weight: bold;")
+        self.label_30.setToolTip("查詢區間內 NG 總使用量（單位：Nm³）")
 
         self.auto_resize(self.tableWidget_4)
         self.auto_resize(self.tableWidget_5)
@@ -2109,6 +2133,26 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         total_height = self.tableWidget_6.verticalHeader().length() + self.tableWidget_6.horizontalHeader().height() + 2 * frame + scroll_h
         self.tableWidget_6.setFixedHeight(total_height)
 
+    def build_price_tooltip(self, period, ver_list, is_sale=False):
+        if not ver_list:
+            return ""
+
+        # 顯示的時段標題
+        if is_sale:
+            # 售電分類：離峰 / 非離峰
+            header = "離峰" if period in ['夏離峰', '非夏離峰'] else "非離峰"
+        else:
+            # 購電：直接顯示原本的時段名稱
+            header = period
+
+        lines = [header]
+        for ver in sorted(ver_list, key=lambda x: x['version']):
+            price_str = f"<span style='color:#004080;'>${ver['value']:.4f}</span>"
+            range_str = f"<span style='color:#999999;'>（適用：{ver['version']}）</span>"
+            lines.append(f"{price_str}{range_str}")
+
+        return f"<html><body><div style='white-space:pre; font-size:9pt;'>" + "<br>".join(
+            lines) + "</div></body></html>"
 
     def auto_resize(self, table: QtWidgets.QTableWidget, min_height: int = 60):
         """
