@@ -8,7 +8,7 @@ from UI import Ui_Form
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from functools import wraps
 from make_item import make_item
-from collections import defaultdict
+from typing import Tuple
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.dates as mdates
@@ -240,10 +240,13 @@ def scrapy_schedule():
                 curr_start += pd.Timedelta(days=1)
                 curr_end += pd.Timedelta(days=1)
 
-        # 如果同一製程有前一筆排程，且當前開始時間比前一排程開始時間還早，則跨天，需加一天
+        # 如果同一製程有前一筆排程，且當前開始時間比前一排程開始時間還早，則跨天，需加一天 (EAFA 和 EAFB 視為同一種製程)
+        def unify_process(p):
+            return "EAF" if p in ("EAFA", "EAFB") else p
+
         if i > 0:
             prev_x, prev_start, prev_end, prev_furnace, prev_process = filtered_schedule[i - 1]
-            if curr_process == prev_process and curr_start < prev_start:
+            if unify_process(curr_process) == unify_process(prev_process) and curr_start < prev_start:
                 curr_start += pd.Timedelta(days=1)
                 curr_end += pd.Timedelta(days=1)
 
@@ -1745,6 +1748,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.purchase_versions_by_period = {}
         self.sale_versions_by_period = {}
         self.version_info ={}
+        ng_cost_versions = []
+        ng_cost_keys = set()
 
         for ind in cost_benefit.index:
             # ** 根據 index 的時間，讀取適用各種日期版本的的單價 **
@@ -1773,6 +1778,29 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             par1 = get_ng_generation_cost_v2(self.unit_prices, ind)
             par2 = get_current_rate_type_v6(self.time_of_use, special_date, self.unit_prices, ind)
 
+            # 🔹 交集版本期間：開始為最大值，結束為最小值
+            cost_start = max(
+                par1.get("ng_price_ver_start"),
+                par1.get("heat_ver_start")
+            )
+            cost_end = min(
+                par1.get("ng_price_ver_end"),
+                par1.get("heat_ver_end")
+            ) if all([par1.get("ng_price_ver_end"), par1.get("heat_ver_end")]) else None
+
+            range_text = format_range(cost_start, cost_end)
+
+            key = (par1.get("ng_cost"), par1.get("tg_maintain_cost"), range_text)
+            if key not in ng_cost_keys:
+                ng_cost_keys.add(key)
+                ng_cost_versions.append({
+                    "value": par1.get("ng_cost"),
+                    "tg_cost": par1.get("tg_maintain_cost"),
+                    "start": cost_start.strftime("%Y/%m/%d") if cost_start else "",
+                    "end": cost_end.strftime("%Y/%m/%d") if cost_end else "（目前）"
+                })
+            self.version_used["ng_cost_versions"] = ng_cost_versions
+
             period = par2.get("rate_label", "")
             if period:
                 # 儲存「每個時段」的購電與售電單價版本
@@ -1800,14 +1828,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             if par1.get("steam_power"):
                 f"{par1['car_range_text']}（{par1.get('carbon_cost', 0):.4f} 元/kWh）"
 
-            # ** 用來提供tableWidget_6 欄位的tool_tip 訊息
-
+            # ** 用來提供tableWidget_5、6 欄位的tool_tip 訊息
             self.version_info[ind] = {
-                "unit_price":{
+                "unit_price": {
                     "value": par2.get("unit_price"),
                     "version": par2.get("purchase_range_text")
                 },
-                "sale_price":{
+                "sale_price": {
                     "value": par2.get("sale_price"),
                     "version": par2.get("sale_range_text")
                 }
@@ -1905,9 +1932,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             return {
                 '減少外購電金額': ('#F79646', '#FCD5B4', 'white', 'blue'),
                 '增加外售電金額': ('#93C47D', '#D8E4BC', 'white', 'blue'),
-                'NG 購入成本': ('#a297c1', '#ddd0ec', 'white', 'red'),
-                'TG 維運成本': ('#a297c1', '#ddd0ec', 'white', 'red'),
-                '總效益': ('#FFFFFF', '#FFFFFF', 'black', None)
+                'NG 發電成本': ('#a297c1', '#DDD0EC', 'white', 'red'),
+                'TG 維運成本': ('#a297c1', '#DDD0EC', 'white', 'red'),
+                '總效益': ('#D9D9D9', '#EAF1FA', 'black', None)
             }.get(name, ('#FFFFFF', '#FFFFFF', 'black', 'black'))
 
         # 加深格線色
@@ -1940,15 +1967,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # 表頭設計
         header_row1 = ["時段", "減少外購電", "", "", "", "增加外售電", "", "", ""]
         for col, text in enumerate(header_row1):
-            bg = "#F79646" if 1 <= col <= 4 else "#93C47D" if 5 <= col <= 8 else "#FFFFFF"
-            fg = "white" if col in range(1, 9) else "black"
+            bg = "#D9D9D9" if col == 0 else ("#F79646" if 1 <= col <= 4 else "#93C47D")
+            fg = "black" if col == 0 else "white"
             self.tableWidget_5.setItem(0, col, make_item(text, bold=True, bg_color=bg, fg_color=fg))
 
         header_row2 = ["時段", "時數", "金額", "成本", "效益", "時數", "金額", "成本", "效益"]
         for col, text in enumerate(header_row2):
             bg_map = {
-                1: '#FCD5B4', 2: '#FCD5B4', 3: '#ddd0ec',
-                5: '#D8E4BC', 6: '#D8E4BC', 7: '#ddd0ec'
+                1: '#FCD5B4', 2: '#FCD5B4', 3: '#ddd0ec', 4:'#D9D9D9',
+                5: '#D8E4BC', 6: '#D8E4BC', 7: '#ddd0ec', 8:'#D9D9D9'
             }
             bg = bg_map.get(col, '#FFFFFF')
             self.tableWidget_5.setItem(1, col, make_item(text, bold=True, bg_color=bg))
@@ -1957,18 +1984,22 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_5.setSpan(0, 5, 1, 4)
         self.tableWidget_5.setSpan(0, 0, 2, 1)
 
+        # 🧩 NG 發電成本與 TG 維運成本版本資料（多版本）
+        if not initialize_only and version_used and "ng_cost_versions" in version_used:
+            cost_tip = self.build_cost_tooltip(version_used["ng_cost_versions"])
+            self.tableWidget_5.item(1, 3).setToolTip(cost_tip)
+            self.tableWidget_5.item(1, 7).setToolTip(cost_tip)
+
         # ** 在模擬表頭的tooltip 增加說明 **
         self.tableWidget_5.item(1, 2).setToolTip("減少外購電金額：\n對應時段的總金額")
-        self.tableWidget_5.item(1, 3).setToolTip("減少外購電成本：\nNG 購入成本 + TG 維運成本")
         self.tableWidget_5.item(1, 4).setToolTip("減少外購電效益：\n金額 - 成本")
         self.tableWidget_5.item(1, 6).setToolTip("增加外售電金額：\n對應時段的總金額")
-        self.tableWidget_5.item(1, 7).setToolTip("增加外售電成本：\nNG 購入成本 + TG 維運成本")
         self.tableWidget_5.item(1, 8).setToolTip("增加外售電效益：\n金額 - 成本")
 
         if initialize_only:
             self.tableWidget_4.setRowCount(5)
             self.tableWidget_4.setColumnCount(2)
-            items = ['減少外購電金額', '增加外售電金額', 'NG 購入成本', 'TG 維運成本', '總效益']
+            items = ['減少外購電金額', '增加外售電金額', 'NG 發電成本', 'TG 維運成本', '總效益']
             for row, name in enumerate(items):
                 bg_name, bg_value, fg_name, fg_value = color_config(name)
                 self.tableWidget_4.setItem(row, 0,
@@ -1976,6 +2007,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                                                           font_size=11))
                 self.tableWidget_4.setItem(row, 1, make_item("$0", fg_color=fg_value or 'black', bg_color=bg_value,
                                                                   align='right', font_size=11))
+            periods = ['夏尖峰', '夏半尖峰', '夏離峰', '夏週六半', '非夏半尖峰', '非夏離峰', '非夏週六半']
+            for i, period in enumerate(periods):
+                row = i + 2
+                bg = self.get_period_background(period)
+                self.tableWidget_5.setItem(row, 0, make_item(period, bg_color=bg))
 
             self.tableWidget_4.setStyleSheet("QTableWidget { background-color: #FFFFFF; gridline-color: #666666; }")
             self.tableWidget_5.setStyleSheet("QTableWidget { background-color: #FFFFFF; gridline-color: #666666; }")
@@ -1987,7 +2023,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         summary_data = [
             ('減少外購電金額', cost_benefit['降低的購電費用'].sum()),
             ('增加外售電金額', cost_benefit['增加的售電收入'].sum()),
-            ('NG 購入成本', cost_benefit['降低購電的NG購入成本'].sum() + cost_benefit['增加售電的NG購入成本'].sum()),
+            ('NG 發電成本', cost_benefit['降低購電的NG購入成本'].sum() + cost_benefit['增加售電的NG購入成本'].sum()),
             ('TG 維運成本', cost_benefit['降低購電的TG維運成本'].sum() + cost_benefit['增加售電的TG維運成本'].sum()),
         ]
         total_benefit = summary_data[0][1] + summary_data[1][1] - summary_data[2][1] - summary_data[3][1]
@@ -2001,6 +2037,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                                                               font_size=11))
             self.tableWidget_4.setItem(row, 1, make_item(f"${value:,.0f}", fg_color=fg_value, bg_color=bg_value,
                                                               align='right', font_size=11))
+            # 套用 NG 發電成本 / TG 維運成本 tooltip
+            if name in ["NG 發電成本", "TG 維運成本"] and version_used:
+                ng_cost_versions = version_used.get("ng_cost_versions", [])
+                tooltip_html = self.build_ng_table4_tooltip(name, ng_cost_versions)
+                self.tableWidget_4.item(row, 0).setToolTip(tooltip_html)
 
         # ===== 表格 5 資料填入（每個時段） =====
         periods = ['夏尖峰', '夏半尖峰', '夏離峰', '夏週六半', '非夏半尖峰', '非夏離峰', '非夏週六半']
@@ -2020,21 +2061,25 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             ic = i_data['增加售電的NG購入成本'].sum() + i_data['增加售電的TG維運成本'].sum()
             ib = ia - ic
 
-            self.tableWidget_5.setItem(row, 0, make_item(period, bg_color='#FFFFFF'))
+            bg_color = self.get_period_background(period)
+            self.tableWidget_5.setItem(row, 0, make_item(period, bg_color=bg_color))
             self.tableWidget_5.setItem(row, 1, make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"))
             self.tableWidget_5.setItem(row, 2, make_item(f"${ra:,.0f}", fg_color='blue', align='right',
                                                               bg_color="#FCD5B4"))
             self.tableWidget_5.setItem(row, 3,
                                        make_item(f"${rc:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
-            self.tableWidget_5.setItem(row, 4, make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red',
-                                                              align='right', bg_color="#FFFFFF"))
+            # 替代動態顏色判斷，改為統一顏色
+            self.tableWidget_5.setItem(row, 4, make_item(f"${rb:,.0f}",
+                                                         fg_color='black', bg_color='#EAF1FA', align='right'))
 
             self.tableWidget_5.setItem(row, 5, make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"))
             self.tableWidget_5.setItem(row, 6, make_item(f"${ia:,.0f}", fg_color='blue', align='right',
                                                               bg_color="#D8E4BC"))
             self.tableWidget_5.setItem(row, 7, make_item(f"${ic:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
-            self.tableWidget_5.setItem(row, 8, make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red',
-                                                              align='right', bg_color="#FFFFFF"))
+            # 替代動態顏色判斷，改為統一顏色
+            self.tableWidget_5.setItem(row, 8, make_item(f"${ib:,.0f}",
+                                                         fg_color='black', bg_color='#EAF1FA', align='right'))
+
             # 🔹 建立購電/售電版本清單（避免重複）
             purchase_versions = []
             sale_versions = []
@@ -2058,6 +2103,16 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 tooltip_html = self.build_price_tooltip(period, sale_versions, is_sale=True)
                 self.tableWidget_5.item(row, 6).setToolTip(tooltip_html)
 
+            # ➤ 減少外購電成本 tooltip
+            rc_ng = r_data['降低購電的NG購入成本'].sum()
+            rc_tg = r_data['降低購電的TG維運成本'].sum()
+            self.tableWidget_5.item(row, 3).setToolTip(self.build_cost_cell_tooltip(rc_ng, rc_tg))
+
+            # ➤ 增加外售電成本 tooltip
+            ic_ng = i_data['增加售電的NG購入成本'].sum()
+            ic_tg = i_data['增加售電的TG維運成本'].sum()
+            self.tableWidget_5.item(row, 7).setToolTip(self.build_cost_cell_tooltip(ic_ng, ic_tg))
+
         # ===== 小計列 =====
         row = len(periods) + 2
         reduce_all = cost_benefit[cost_benefit['降低的購電費用'] > 0]
@@ -2079,12 +2134,12 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             make_item(f"${ra:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#FCD5B4"),
             make_item(f"${rc:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
             make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red', align='right', bold=True,
-                           bg_color="#FFFFFF"),
+                           bg_color="#EAF1FA"),
             make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"),
             make_item(f"${ia:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#D8E4BC"),
             make_item(f"${ic:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
             make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red', align='right', bold=True,
-                           bg_color="#FFFFFF")
+                           bg_color="#EAF1FA")
         ]
         for col, item in enumerate(subtotal):
             self.tableWidget_5.setItem(row, col, item)
@@ -2102,57 +2157,137 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.auto_resize(self.tableWidget_4)
         self.auto_resize(self.tableWidget_5)
 
-        # ----- 顯示版本資訊到 tableWidget_6 -----
-        self.tableWidget_6.clear()
-        self.tableWidget_6.setColumnCount(2)
-        self.tableWidget_6.setRowCount(0)
-        self.tableWidget_6.setHorizontalHeaderLabels(['項目', '適用範圍與數值'])
-        self.tableWidget_6.verticalHeader().setVisible(False)
-        self.tableWidget_6.horizontalHeader().setVisible(True)
-        self.tableWidget_6.setStyleSheet("QTableWidget { gridline-color: #666666; font-size: 9pt; }")
-        self.tableWidget_6.horizontalHeader().setStyleSheet("QHeaderView::section { font-size: 9pt; }")
+    def get_period_background(self, period):
+        color_map = {
+            '夏尖峰': '#FFD9B3',
+            '夏半尖峰': '#FFE5CC',
+            '夏離峰': '#FFF1E0',
+            '夏週六半': '#FFF8F0',
+            '非夏半尖峰': '#D0E6FF',
+            '非夏離峰': '#E3F0FF',
+            '非夏週六半': '#F0F8FF',
+            '小計': '#D9D9D9'
+        }
+        return color_map.get(period, '#FFFFFF')
 
-        if version_used:
-            for name, value in version_used.items():
-                row = self.tableWidget_6.rowCount()
-                self.tableWidget_6.insertRow(row)
-                self.tableWidget_6.setItem(row, 0, make_item(name, align='center', font_size=8))
-                self.tableWidget_6.setItem(row, 1, make_item(value, align='left', font_size=8))
+    def get_benefit_colors(self, value) -> Tuple[str, str]:  # 用 typing.Tuple 替代 tuple[str, str]
+        return ('blue', '#E6F0FF') if value >= 0 else ('red', '#FBE4E4')
 
-        # 自動調整寬高
-        self.tableWidget_6.resizeColumnsToContents()
-        self.tableWidget_6.resizeRowsToContents()
+    def build_ng_table4_tooltip(self, name: str, ng_cost_versions: list) -> str:
+        """
+        根據欄位名稱，產生 NG 發電成本或 TG 維運成本的 tooltip 內容（支援多版本）
+        """
+        if not ng_cost_versions or name not in ["NG 發電成本", "TG 維運成本"]:
+            return ""
 
-        frame = self.tableWidget_6.frameWidth()
-        scroll_w = self.tableWidget_6.verticalScrollBar().sizeHint().width() if self.tableWidget_6.verticalScrollBar().isVisible() else 0
-        total_width = sum(
-            [self.tableWidget_6.columnWidth(i) for i in range(self.tableWidget_6.columnCount())]) + 2 * frame + scroll_w
-        self.tableWidget_6.setFixedWidth(total_width)
+        tooltip_lines = [f"{name}："]
 
-        scroll_h = self.tableWidget_6.horizontalScrollBar().sizeHint().height() if self.tableWidget_6.horizontalScrollBar().isVisible() else 0
-        total_height = self.tableWidget_6.verticalHeader().length() + self.tableWidget_6.horizontalHeader().height() + 2 * frame + scroll_h
-        self.tableWidget_6.setFixedHeight(total_height)
+        for v in ng_cost_versions:
+            if name == "NG 發電成本" and v.get("value") is not None:
+                tooltip_lines.append(
+                    f"<span style='color:#004080;'>{v['value']:.4f} 元/kWH</span> "
+                    f"<span style='color:#999999;'>（適用：{v['start']} ~ {v['end']}）</span>"
+                )
+            elif name == "TG 維運成本" and v.get("tg_cost") is not None:
+                tooltip_lines.append(
+                    f"<span style='color:#004080;'>{v['tg_cost']:.4f} 元/kWH</span> "
+                    f"<span style='color:#999999;'>（適用：{v['start']} ~ {v['end']}）</span>"
+                )
+
+        return (
+                "<html><body><div style='white-space:pre; font-size:9pt;'>"
+                + "<br>".join(tooltip_lines)
+                + "</div></body></html>"
+        )
+
+    def build_cost_cell_tooltip(self, ng_cost: float, tg_cost: float) -> str:
+        """
+        回傳 NG 與 TG 成本組成的 tooltip HTML 文字。
+        金額為紅色，格式固定。
+        """
+        return (
+            "<html><body><div style='white-space:pre; font-size:9pt;'>"
+            f"NG 發電成本：<span style='color:#C00000;'>${ng_cost:,.0f}</span> 元<br>"
+            f"TG 維運成本：<span style='color:#C00000;'>${tg_cost:,.0f}</span> 元"
+            "</div></body></html>"
+        )
+
+    def build_cost_tooltip(self, ng_cost_list):
+        """
+        根據版本清單產生減少外購電成本與增加外售電成本的 tooltip。
+        支援多版本、HTML 格式與顏色標記。
+        """
+        if not ng_cost_list:
+            return ""
+
+        tooltip_lines = [
+            "減少外購電成本：(1) + (2)",
+            "<b>(1) NG 發電成本單價：</b>"
+        ]
+
+        for ver in ng_cost_list:
+            if ver.get("value") is not None:
+                tooltip_lines.append(
+                    f"<span style='color:#004080;'>{ver['value']:.4f} 元/kWH</span> "
+                    f"<span style='color:#999999;'>（適用：{ver['start']} ~ {ver['end']}）</span>"
+                )
+
+        tooltip_lines.append("<b>(2) TG 維運成本單價：</b>")
+        for ver in ng_cost_list:
+            if ver.get("tg_cost") is not None:
+                tooltip_lines.append(
+                    f"<span style='color:#004080;'>{ver['tg_cost']:.4f} 元/kWH</span> "
+                    f"<span style='color:#999999;'>（適用：{ver['start']} ~ {ver['end']}）</span>"
+                )
+
+        return (
+                "<html><body><div style='white-space:pre; font-size:9pt;'>"
+                + "<br>".join(tooltip_lines)
+                + "</div></body></html>"
+        )
 
     def build_price_tooltip(self, period, ver_list, is_sale=False):
         if not ver_list:
             return ""
 
-        # 顯示的時段標題
+        # 決定表頭名稱
         if is_sale:
-            # 售電分類：離峰 / 非離峰
             header = "離峰" if period in ['夏離峰', '非夏離峰'] else "非離峰"
         else:
-            # 購電：直接顯示原本的時段名稱
             header = period
 
-        lines = [header]
+        lines = [f"<b>{header}單價：</b>"]
+
+        # 單價列表
         for ver in sorted(ver_list, key=lambda x: x['version']):
             price_str = f"<span style='color:#004080;'>${ver['value']:.4f}</span>"
             range_str = f"<span style='color:#999999;'>（適用：{ver['version']}）</span>"
             lines.append(f"{price_str}{range_str}")
 
-        return f"<html><body><div style='white-space:pre; font-size:9pt;'>" + "<br>".join(
-            lines) + "</div></body></html>"
+        # 判斷是否為 NG 成本欄位（非欄位本身而是 tooltip 顯示）
+        if ver_list and isinstance(ver_list[0], dict):
+            first = ver_list[0]
+
+            ng_cost = first.get('ng_cost')
+            tg_cost = first.get('tg_cost') or first.get('tg_maintain_cost')
+            range_text = ""
+
+            if first.get("ng_cost_range") and isinstance(first["ng_cost_range"], str):
+                range_text = first["ng_cost_range"]
+            elif first.get("ng_cost_range_text"):
+                range_text = first["ng_cost_range_text"]
+
+            if ng_cost and tg_cost:
+                lines.append("<hr>")
+                lines.append(
+                    f"<div style='color:#666666; font-size:8pt;'>"
+                    f"NG 發電成本：{ng_cost:.4f} 元/kWh<br>"
+                    f"TG 維運成本：{tg_cost:.4f} 元/kWh<br>"
+                    f"（適用：{range_text}）"
+                    f"</div>"
+                )
+
+        return "<html><body><div style='white-space:pre; font-size:9pt;'>" + "<br>".join(lines) + "</div></body></html>"
 
     def auto_resize(self, table: QtWidgets.QTableWidget, min_height: int = 60):
         """
