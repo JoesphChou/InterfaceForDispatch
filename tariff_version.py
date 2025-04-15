@@ -73,7 +73,7 @@ def get_current_rate_type_v6(
         if start and end:
             return f"{start.strftime('%Y/%m/%d')} ~ {end.strftime('%Y/%m/%d')}"
         elif start and not end:
-            return f"{start.strftime('%Y/%m/%d')} ~（目前適用）"
+            return f"{start.strftime('%Y/%m/%d')} ~（目前）"
         elif not start and end:
             return f"（最早版本）~ {end.strftime('%Y/%m/%d')}"
         else:
