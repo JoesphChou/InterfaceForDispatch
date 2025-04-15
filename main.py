@@ -13,6 +13,8 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
+import mplcursors
 
 
 def timeit(func):
@@ -299,9 +301,138 @@ class TrendChartCanvas(FigureCanvas):
         self.ax = fig.add_subplot(111)
         super().__init__(fig)
         self.setParent(parent)
-        self.plot_sample()
 
     def plot_from_dataframe(self, df):
+        if not {'原始TPC', '即時TPC'}.issubset(df.columns):
+            self.ax.clear()
+            self.ax.set_title("資料格式錯誤：缺少 '原始TPC' 或 '即時TPC'")
+            self.draw()
+            return
+
+        self.df = df
+        self.ax.clear()
+        self.setup_base_plot(df)
+        self.setup_tooltips(df)
+        self.draw()
+
+    def setup_base_plot(self, df):
+        #COLOR_UNCOMP = '#6C9BD2'  # 未補NG：鋼藍
+        #COLOR_COMP = '#F4B400'  # 有補NG：琥珀黃
+        COLOR_UNCOMP = '#4FC3F7'  # 改成亮藍
+        COLOR_COMP = '#FF7043'  # 改成橘紅
+        self.x = df.index
+        self.y1 = df['原始TPC'].astype(float).to_numpy()
+        self.y2 = df['即時TPC'].astype(float).to_numpy()
+
+        # 未補NG（區域圖 + 透明線）
+        self.ax.fill_between(self.x, self.y1, color=COLOR_UNCOMP, alpha=0.6, label='未補NG')
+        self.line1, = self.ax.plot(self.x, self.y1, alpha=0, picker=5)
+
+        # 有補NG（折線）
+        self.line2, = self.ax.plot(self.x, self.y2, color=COLOR_COMP, linewidth=1, label='有補NG')
+
+        self.ax.set_title("台電供電量 (未補NG VS 有補NG)")
+        self.ax.set_xlabel("時間")
+        self.ax.set_ylabel("電量 (MW)")
+        self.ax.grid(True)
+        self.ax.legend()
+
+        locator = mdates.AutoDateLocator()
+        self.ax.xaxis.set_major_locator(locator)
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+        self.ax.set_xlim(df.index[0], df.index[-1])
+
+        # 設定 Y 軸上下限（依照資料動態調整）
+        y_all = np.concatenate([self.y1, self.y2])
+        y_min = np.min(y_all)
+        y_max = np.max(y_all)
+        padding = (y_max - y_min) * 0.1 if y_max != y_min else 1  # 避免單一值導致上下限一樣
+        self.ax.set_ylim(y_min - padding, y_max + padding)
+
+        self.figure.autofmt_xdate()
+
+        # 垂直標線
+        self.vline = self.ax.axvline(df.index[0], color='black', linestyle='--', linewidth=0.8, alpha=0.5)
+
+    def setup_tooltips(self, df):
+        import matplotlib.dates as mdates
+
+        # 時間 tooltip（底部黑底白字）
+        self._tooltip_time = self.ax.text(
+            0.5, -0.12, '', transform=self.ax.transAxes,
+            ha='center', va='top', fontsize=9,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor='black', edgecolor='black'),
+            color='white'
+        )
+
+        # 上方：未補NG
+        self._tooltip1 = self.ax.annotate('', xy=(0, 0), xytext=(10, -10), textcoords='offset points',
+                                          bbox=dict(boxstyle="round", fc="white", ec="gray", lw=0.5), fontsize=9,
+                                          visible=False)
+        # 下方：有補NG
+        self._tooltip2 = self.ax.annotate('', xy=(0, 0), xytext=(10, -50), textcoords='offset points',
+                                          bbox=dict(boxstyle="round", fc="white", ec="gray", lw=0.5), fontsize=9,
+                                          visible=False)
+
+        # 滑鼠事件綁定
+        self.figure.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
+
+    def on_mouse_move(self, event):
+        if not event.inaxes:
+            self._tooltip1.set_visible(False)
+            self._tooltip2.set_visible(False)
+            self._tooltip_time.set_text('')
+            self.draw()
+            return
+
+        try:
+            x_pos = mdates.num2date(event.xdata).replace(tzinfo=None)
+        except Exception:
+            return
+
+        # 超出 x 軸資料區間 → 隱藏 tooltip
+        if x_pos < self.x[0] or x_pos > self.x[-1]:
+            self._tooltip1.set_visible(False)
+            self._tooltip2.set_visible(False)
+            self._tooltip_time.set_text('')
+            self.draw()
+            return
+
+        idx = np.searchsorted(self.x, x_pos)
+        if idx >= len(self.x):
+            idx = len(self.x) - 1
+
+        x_val = self.x[idx]
+        y1_val = self.y1[idx]
+        y2_val = self.y2[idx]
+
+        # 垂直線位置 (修正 vline 警告)
+        self.vline.set_xdata([x_val])
+
+        # 底部時間
+        self._tooltip_time.set_text(x_val.strftime('%m/%d %H:%M'))
+        self._tooltip_time.set_position(
+            ((mdates.date2num(x_val) - mdates.date2num(self.x[0])) /
+             (mdates.date2num(self.x[-1]) - mdates.date2num(self.x[0])), -0.12)
+        )
+        y_mid = (y1_val + y2_val) / 2  # 對齊 tooltip anchor 的中間基準值
+        # 更新 tooltip1
+        self._tooltip1.xy = (x_val, y_mid)
+        self._tooltip1.set_text(f"未補NG：\n{y1_val:,.1f} MW")
+        self._tooltip1.set_fontsize(10)
+        self._tooltip1.set_fontweight('bold')
+        self._tooltip1.set_visible(True)
+
+        # 更新 tooltip2
+        self._tooltip2.xy = (x_val, y_mid)
+        self._tooltip2.set_text(f"有補NG：\n{y2_val:,.1f} MW")
+        self._tooltip2.set_fontsize(10)
+        self._tooltip2.set_fontweight('bold')
+        self._tooltip2.set_visible(True)
+
+        self.draw()
+
+    def plot_from_dataframe2(self, df):
         self.ax.clear()
 
         # 確保資料欄存在
@@ -317,8 +448,8 @@ class TrendChartCanvas(FigureCanvas):
         y2 = df['即時TPC']
 
         # 繪製兩條線
-        self.ax.plot(x, y1, label='台電供電量(未補NG)', color='#ff0000', linewidth=1)
-        self.ax.plot(x, y2, label='台電供電量(有補NG)', color='#0000ff', linewidth=1,linestyle='-.')
+        self.ax.plot(x, y1, label='台電供電量(未補NG)', color='#0000ff', linewidth=1,linestyle='-.')
+        self.ax.plot(x, y2, label='台電供電量(有補NG)', color='#ff0000', linewidth=0.5)
 
         # 區間填色（依照效益正負）
         #self.ax.fill_between(x, y1, y2, where=(y2 > y1), interpolate=True, color='#B7D7F4', alpha=0.7, label='正效益')
@@ -1930,10 +2061,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def update_benefit_tables(self, cost_benefit=None, t_resolution=None, version_used=None, initialize_only=False):
         def color_config(name):
             return {
-                '減少外購電金額': ('#F79646', '#FCD5B4', 'white', 'blue'),
-                '增加外售電金額': ('#93C47D', '#D8E4BC', 'white', 'blue'),
-                'NG 發電成本': ('#a297c1', '#DDD0EC', 'white', 'red'),
-                'TG 維運成本': ('#a297c1', '#DDD0EC', 'white', 'red'),
+                '減少外購電金額': ('#8064A2', '#DDD0EC', 'white', 'blue'),
+                '增加外售電金額': ('#769d64', '#D8E4BC', 'white', 'blue'),
+                'NG 發電成本': ('#F79646', '#FBE4D5', 'white', 'red'),
+                'TG 維運成本': ('#F79646', '#FBE4D5', 'white', 'red'),
                 '總效益': ('#D9D9D9', '#EAF1FA', 'black', None)
             }.get(name, ('#FFFFFF', '#FFFFFF', 'black', 'black'))
 
@@ -1964,25 +2095,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 self.tableWidget_5.setColumnWidth(col, 60)
         self.tableWidget_5.verticalHeader().setDefaultSectionSize(28)
 
-        # 表頭設計
-        header_row1 = ["時段", "減少外購電", "", "", "", "增加外售電", "", "", ""]
-        for col, text in enumerate(header_row1):
-            bg = "#D9D9D9" if col == 0 else ("#F79646" if 1 <= col <= 4 else "#93C47D")
-            fg = "black" if col == 0 else "white"
-            self.tableWidget_5.setItem(0, col, make_item(text, bold=True, bg_color=bg, fg_color=fg))
-
-        header_row2 = ["時段", "時數", "金額", "成本", "效益", "時數", "金額", "成本", "效益"]
-        for col, text in enumerate(header_row2):
-            bg_map = {
-                1: '#FCD5B4', 2: '#FCD5B4', 3: '#ddd0ec', 4:'#D9D9D9',
-                5: '#D8E4BC', 6: '#D8E4BC', 7: '#ddd0ec', 8:'#D9D9D9'
-            }
-            bg = bg_map.get(col, '#FFFFFF')
-            self.tableWidget_5.setItem(1, col, make_item(text, bold=True, bg_color=bg))
-
-        self.tableWidget_5.setSpan(0, 1, 1, 4)
-        self.tableWidget_5.setSpan(0, 5, 1, 4)
-        self.tableWidget_5.setSpan(0, 0, 2, 1)
+        # 呼叫函式進行tableWidget_5 的表頭設計
+        self.set_tableWidget5_header()
 
         # 🧩 NG 發電成本與 TG 維運成本版本資料（多版本）
         if not initialize_only and version_used and "ng_cost_versions" in version_used:
@@ -2007,7 +2121,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                                                           font_size=11))
                 self.tableWidget_4.setItem(row, 1, make_item("$0", fg_color=fg_value or 'black', bg_color=bg_value,
                                                                   align='right', font_size=11))
-            periods = ['夏尖峰', '夏半尖峰', '夏離峰', '夏週六半', '非夏半尖峰', '非夏離峰', '非夏週六半']
+            periods = ['夏尖峰', '夏半尖峰', '夏離峰', '夏週六半', '非夏半尖峰', '非夏離峰', '非夏週六半','小計']
             for i, period in enumerate(periods):
                 row = i + 2
                 bg = self.get_period_background(period)
@@ -2063,11 +2177,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
             bg_color = self.get_period_background(period)
             self.tableWidget_5.setItem(row, 0, make_item(period, bg_color=bg_color))
-            self.tableWidget_5.setItem(row, 1, make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"))
+            self.tableWidget_5.setItem(row, 1, make_item(f"{rh:.1f} hr", bg_color="#DDD0EC"))
             self.tableWidget_5.setItem(row, 2, make_item(f"${ra:,.0f}", fg_color='blue', align='right',
-                                                              bg_color="#FCD5B4"))
+                                                              bg_color="#DDD0EC"))
             self.tableWidget_5.setItem(row, 3,
-                                       make_item(f"${rc:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
+                                       make_item(f"${rc:,.0f}", fg_color='red', align='right', bg_color="#FBE4D5"))
             # 替代動態顏色判斷，改為統一顏色
             self.tableWidget_5.setItem(row, 4, make_item(f"${rb:,.0f}",
                                                          fg_color='black', bg_color='#EAF1FA', align='right'))
@@ -2075,7 +2189,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tableWidget_5.setItem(row, 5, make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"))
             self.tableWidget_5.setItem(row, 6, make_item(f"${ia:,.0f}", fg_color='blue', align='right',
                                                               bg_color="#D8E4BC"))
-            self.tableWidget_5.setItem(row, 7, make_item(f"${ic:,.0f}", fg_color='red', align='right', bg_color="#ddd0ec"))
+            self.tableWidget_5.setItem(row, 7, make_item(f"${ic:,.0f}", fg_color='red', align='right', bg_color="#FBE4D5"))
             # 替代動態顏色判斷，改為統一顏色
             self.tableWidget_5.setItem(row, 8, make_item(f"${ib:,.0f}",
                                                          fg_color='black', bg_color='#EAF1FA', align='right'))
@@ -2129,15 +2243,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         ib = ia - ic
 
         subtotal = [
-            make_item("小計", bold=True),
-            make_item(f"{rh:.1f} hr", bg_color="#FCD5B4"),
-            make_item(f"${ra:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#FCD5B4"),
-            make_item(f"${rc:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
+            make_item("小計", bold=True, bg_color="#D9D9D9"),
+            make_item(f"{rh:.1f} hr", bg_color="#DDD0EC"),
+            make_item(f"${ra:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#DDD0EC"),
+            make_item(f"${rc:,.0f}", fg_color='red', align='right', bold=True, bg_color="#FBE4D5"),
             make_item(f"${rb:,.0f}", fg_color='blue' if rb >= 0 else 'red', align='right', bold=True,
                            bg_color="#EAF1FA"),
             make_item(f"{ih:.1f} hr", bg_color="#D8E4BC"),
             make_item(f"${ia:,.0f}", fg_color='blue', align='right', bold=True, bg_color="#D8E4BC"),
-            make_item(f"${ic:,.0f}", fg_color='red', align='right', bold=True, bg_color="#ddd0ec"),
+            make_item(f"${ic:,.0f}", fg_color='red', align='right', bold=True, bg_color="#FBE4D5"),
             make_item(f"${ib:,.0f}", fg_color='blue' if ib >= 0 else 'red', align='right', bold=True,
                            bg_color="#EAF1FA")
         ]
@@ -2156,6 +2270,29 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         self.auto_resize(self.tableWidget_4)
         self.auto_resize(self.tableWidget_5)
+
+    def set_tableWidget5_header(self):
+        # 第一層表頭
+        header_row1 = ["時段", "減少外購電", "", "", "", "增加外售電", "", "", ""]
+        for col, text in enumerate(header_row1):
+            bg = "#ececec" if col == 0 else ("#8064A2" if 1 <= col <= 4 else "#769d64")
+            fg = "black" if col == 0 else "white"
+            self.tableWidget_5.setItem(0, col, make_item(text, bold=True, bg_color=bg, fg_color=fg))
+
+        # 第二層表頭
+        header_row2 = ["時段", "時數", "金額", "成本", "效益", "時數", "金額", "成本", "效益"]
+        for col, text in enumerate(header_row2):
+            bg_map = {
+                1: '#DDD0EC', 2: '#DDD0EC', 3: '#FBE4D5', 4: '#EAF1FA',
+                5: '#D8E4BC', 6: '#D8E4BC', 7: '#FBE4D5', 8: '#EAF1FA'
+            }
+            bg = bg_map.get(col, '#FFFFFF')
+            self.tableWidget_5.setItem(1, col, make_item(text, bold=True, bg_color=bg))
+
+        # 合併儲存格
+        self.tableWidget_5.setSpan(0, 0, 2, 1)
+        self.tableWidget_5.setSpan(0, 1, 1, 4)
+        self.tableWidget_5.setSpan(0, 5, 1, 4)
 
     def get_period_background(self, period):
         color_map = {
