@@ -3313,8 +3313,8 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
     <widget class="QTableWidget" name="tableWidget_4">
      <property name="geometry">
       <rect>
-       <x>290</x>
-       <y>10</y>
+       <x>270</x>
+       <y>20</y>
        <width>242</width>
        <height>142</height>
       </rect>
@@ -3342,8 +3342,8 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
     <widget class="QPushButton" name="pushButton_5">
      <property name="geometry">
       <rect>
-       <x>190</x>
-       <y>80</y>
+       <x>100</x>
+       <y>110</y>
        <width>81</width>
        <height>31</height>
       </rect>
@@ -3408,30 +3408,11 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout"/>
     </widget>
-    <widget class="QTableWidget" name="tableWidget_6">
-     <property name="geometry">
-      <rect>
-       <x>550</x>
-       <y>10</y>
-       <width>251</width>
-       <height>142</height>
-      </rect>
-     </property>
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-       <horstretch>0</horstretch>
-       <verstretch>0</verstretch>
-      </sizepolicy>
-     </property>
-     <property name="horizontalScrollBarPolicy">
-      <enum>Qt::ScrollBarAlwaysOff</enum>
-     </property>
-    </widget>
     <widget class="QLabel" name="label_29">
      <property name="geometry">
       <rect>
-       <x>20</x>
-       <y>120</y>
+       <x>550</x>
+       <y>30</y>
        <width>91</width>
        <height>21</height>
       </rect>
@@ -3443,14 +3424,14 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
       </font>
      </property>
      <property name="text">
-      <string>NG 使用量：</string>
+      <string>NG 使用量</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_30">
      <property name="geometry">
       <rect>
-       <x>120</x>
-       <y>120</y>
+       <x>520</x>
+       <y>50</y>
        <width>131</width>
        <height>41</height>
       </rect>
@@ -3463,6 +3444,9 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
      </property>
      <property name="text">
       <string/>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
      </property>
     </widget>
    </widget>
