@@ -321,6 +321,7 @@ class TrendChartCanvas(FigureCanvas):
         COLOR_UNCOMP = '#4FC3F7'  # 改成亮藍
         COLOR_COMP = '#FF7043'  # 改成橘紅
         self.x = df.index
+        self.x = df.index
         self.y1 = df['原始TPC'].astype(float).to_numpy()
         self.y2 = df['即時TPC'].astype(float).to_numpy()
 
@@ -844,8 +845,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             self.tw2.topLevelItem(1).setText(0,'AH120')
             self.tw2.topLevelItem(2).setText(0,'AH190')
             self.tw2.topLevelItem(3).setText(0,'AH130')
-            self.tw2.topLevelItem(4).setText(0,'1H360')
-            self.tw2.topLevelItem(5).setText(0,'1H450')
+            self.tw2.topLevelItem(4).setText(0,'1H450')
+            self.tw2.topLevelItem(5).setText(0,'1H360')
             self.tw3.topLevelItem(0).child(0).setText(0, '2H120 & 2H220')
             self.tw3.topLevelItem(0).child(1).setText(0, '5H120 & 5H220')
             self.tw3.topLevelItem(0).child(2).setText(0, '1H120 & 1H220')
@@ -1259,8 +1260,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw2.topLevelItem(1).setText(2, pre_check2(current_p['AH120'],b=0))
         self.tw2.topLevelItem(2).setText(2, pre_check2(current_p['AH190'],b=0))
         self.tw2.topLevelItem(3).setText(2, pre_check2(current_p['AH130'],b=0))
-        self.tw2.topLevelItem(4).setText(2, pre_check2(current_p['1H360'],b=0))
-        self.tw2.topLevelItem(5).setText(2, pre_check2(current_p['1H450'],b=0))
+        self.tw2.topLevelItem(4).setText(2, pre_check2(current_p['1H450'],b=0))
+        self.tw2.topLevelItem(5).setText(2, pre_check2(current_p['1H360'],b=0))
 
         self.tw3.topLevelItem(0).setText(2, pre_check2(current_p['2H120':'1H420'].sum()))
         self.tw3.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H120':'2H220'].sum()))
@@ -1357,8 +1358,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw2.topLevelItem(1).setText(1, pre_check(current_p['AH120'], 0))
         self.tw2.topLevelItem(2).setText(1, pre_check(current_p['AH190'], 0))
         self.tw2.topLevelItem(3).setText(1, pre_check(current_p['AH130'],0))
-        self.tw2.topLevelItem(4).setText(1, pre_check(current_p['1H360'], 0))
-        self.tw2.topLevelItem(5).setText(1, pre_check(current_p['1H450'], 0))
+        self.tw2.topLevelItem(4).setText(1, pre_check(current_p['1H450'], 0))
+        self.tw2.topLevelItem(5).setText(1, pre_check(current_p['1H360'], 0))
 
         ng_to_power = get_ng_generation_cost_v2(self.unit_prices).get("convertible_power")
         #ng_to_power = self.unit_prices.loc['可轉換電力', 'current']
