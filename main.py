@@ -202,9 +202,9 @@ def scrapy_schedule():
         (x_coord, start, end, furnace_id, process_type, get_sort_group(process_type))
         for (x_coord, start, end, furnace_id, process_type) in schedule_data
     ]
-
-    # 根據 sort_group 與 x_coord 排序
-    schedule_data_with_group.sort(key=lambda x: (x[5], x[0]))
+    # BUG 待解。如果X軸都在118，就必需要用起始時間來決定先後關係，不然可能會造成第2以(含)之後的排程都+1天.
+    # 根據 sort_group 與 x_coord 排序，如果x_coord相同時，則用起始時間排序
+    schedule_data_with_group.sort(key=lambda x: (x[5], x[0], x[1]))
 
     # 移除排序欄位後，回復為原本格式
     schedule_data = [(x[0], x[1], x[2], x[3], x[4]) for x in schedule_data_with_group]
@@ -1218,12 +1218,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(1).child(1).child(3).setText(2, pre_check2(current_p['5KB28']))
         self.tw1.topLevelItem(1).child(2).setText(2, pre_check2(current_p['W3']))
 
-        w42 = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
-        w4_total = current_p['AJ130':'AJ320'].sum() + w42
+        w41_utility = current_p['W4']
+        w42_utility = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
+        w4_utility = w41_utility + w42_utility
+        w41_main = current_p['AJ130':'AJ170'].sum()
+        w4_total = w41_main + w4_utility
 
         self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(current_p['AJ130':'AJ320'].sum()))
-        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w42))
+        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(w41_main))
+        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w4_utility))
 
         w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
         self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
@@ -1253,8 +1256,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(3).child(4).child(3).setText(2, pre_check2(current_p['2KB29']))
         self.tw1.topLevelItem(3).child(5).setText(2, pre_check2(current_p['W5']))
         self.tw1.topLevelItem(4).setText(2, pre_check2(current_p['WA']))
-        #other=w2_total+w3_total+w4_total+w5_total+current_p['WA']
-        #self.label_17.setText(str(other))
 
         self.tw2.topLevelItem(0).setText(2, pre_check2(current_p['9H140':'9KB33'].sum(),b=0))
         self.tw2.topLevelItem(1).setText(2, pre_check2(current_p['AH120'],b=0))
@@ -1318,12 +1319,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(1).child(1).child(3).setText(1, pre_check(current_p['5KB28']))
         self.tw1.topLevelItem(1).child(2).setText(1, pre_check(current_p['W3']))
 
-        w42 = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
-        w4_total = current_p['AJ130':'AJ320'].sum() + w42
+        w41_utility = current_p['W4']
+        w42_utility = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
+        w4_utility = w41_utility + w42_utility
+        w41_main = current_p['AJ130':'AJ170'].sum()
+        w4_total = w41_main + w4_utility
 
-        self.tw1.topLevelItem(2).setText(1, pre_check(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(1, pre_check(current_p['AJ130':'AJ320'].sum()))
-        self.tw1.topLevelItem(2).child(1).setText(1, pre_check(w42))
+        self.tw1.topLevelItem(2).setText(1, pre_check2(w4_total))
+        self.tw1.topLevelItem(2).child(0).setText(1, pre_check2(w41_main))
+        self.tw1.topLevelItem(2).child(1).setText(1, pre_check2(w4_utility))
 
         w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
         self.tw1.topLevelItem(3).setText(1,pre_check(w5_total))
