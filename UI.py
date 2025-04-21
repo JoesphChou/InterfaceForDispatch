@@ -1145,7 +1145,7 @@ class Ui_Form(object):
         self.tabWidget.addTab(self.tab_3, "")
 
         self.retranslateUi(Form)
-        self.tabWidget.setCurrentIndex(2)
+        self.tabWidget.setCurrentIndex(1)
         self.radioButton_2.clicked['bool'].connect(self.dateEdit_2.setEnabled) # type: ignore
         self.radioButton_2.clicked['bool'].connect(self.pushButton_3.setEnabled) # type: ignore
         self.radioButton.clicked['bool'].connect(self.pushButton_2.setDisabled) # type: ignore
