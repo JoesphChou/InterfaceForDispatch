@@ -518,6 +518,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.query_cbl()      # 查詢特定條件的 基準用電容量(CBL)
         self.query_demand()   # 查詢某一天每一週期的Demand
         self.tws_init()
+        self.update_tw4_schedule()
 
         self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
         # ------- 關於比對歷史紀錄相關功能的監聽事件、初始狀況及執行設定等 ---------
@@ -628,17 +629,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def beautify_tree_widgets(self):
         """ 美化 tw1, tw2, tw3 的即時量與平均值欄位，並區分不同表頭顏色 """
-        """ 使用 setStyleSheet() 來統一美化 tw1, tw2, tw3,t w4 的表頭 """
-        #self.tw1.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
-        #self.tw2.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
-        #self.tw3.setStyleSheet("QHeaderView::section { background-color: #f79646; color: black; font-weight: bold; }")
-        #self.tw4.setStyleSheet("""
-        #    QHeaderView::section {
-        #        background-color: #D4AC0D;  /* 金黃色 */
-        #        font-size: 16px; /* 與內容一致 */
-        #        font-weight: bold;
-        #    }
-        #""")
         self.tw1.setStyleSheet(
             "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
         self.tw2.setStyleSheet(
@@ -663,8 +653,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             widget.setColumnWidth(2, column_widths[name][2])
 
         # **設定 tw4 column 寬度，確保文字完整顯示**
-        self.tw4.setColumnWidth(0, 220)  # **排程時間**
-        self.tw4.setColumnWidth(1, 170)  # **狀態**
+        self.tw4.setColumnWidth(0, 190)  # **排程時間**
+        self.tw4.setColumnWidth(1, 200)  # **狀態**
 
         # **固定 tw4 column 寬度，防止 tw4.clear() 影響**
         self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
@@ -980,21 +970,30 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             process_parent.addChild(active_parent)
 
             if not active_schedules.empty:
-                for _, row in active_schedules.iterrows():
-                    start_time = row["開始時間"].strftime("%H:%M:%S")
-                    end_time = row["結束時間"].strftime("%H:%M:%S")
-                    category = row["類別"]
-                    status = str(row["製程狀態"]) if "製程狀態" in row and pd.notna(row["製程狀態"]) else "N/A"
+                """
+                從iterrows() 改為itertuples() 的說明:
+                1. 效能較快、且省記憶體
+                2. itertuples(index=False)：避免產生多餘的 Index 欄位。
+                2. row.開始時間、row.類別 等是透過屬性方式存取。
+                3. hasattr(row, "製程狀態") 是為了避免製程狀態 欄位在某些 DataFrame 裡不存在（如 future_df），防止程式報錯。
+                """
+                for row in active_schedules.itertuples(index=False):
+                    start_time = row.開始時間.strftime("%H:%M:%S")
+                    end_time = row.結束時間.strftime("%H:%M:%S")
+                    category = row.類別
+                    status = str(row.製程狀態) if hasattr(row, "製程狀態") and pd.notna(row.製程狀態) else "N/A"
 
-                    if row["製程"] == "EAFA":
+                    if row.製程 == "EAFA":
                         process_display = "EAF"
                         status += " (A爐)"
-                    elif row["製程"] == "EAFB":
+                        furnace = "(A爐)"
+                    elif row.製程 == "EAFB":
                         process_display = "EAF"
                         status += " (B爐)"
+                        furnace = "(B爐)"
                     else:
-                        process_display = row["製程"]
-
+                        process_display = row.製程
+                        furnace = ""
                     if process_display != process_name:
                         continue
 
@@ -1011,8 +1010,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                         item.setBackground(0, QtGui.QBrush(QtGui.QColor("#FCF8BC")))  # **淡黃色背景**
                         item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
                     elif category == "future":
-                        minutes = int((row["開始時間"] - pd.Timestamp.now()).total_seconds() / 60)
-                        item.setText(1, f"預計{minutes} 分鐘後開始生產")
+                        minutes = int((row.開始時間 - pd.Timestamp.now()).total_seconds() / 60)
+                        if process_name == "EAF":
+                            item.setText(1, f"{furnace} 預計{minutes} 分鐘後開始生產")
+                        else:
+                            item.setText(1, f"預計{minutes} 分鐘後開始生產")
                         item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **未來排程置中**
 
                     active_parent.addChild(item)
@@ -1224,9 +1226,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         w41_main = current_p['AJ130':'AJ170'].sum()
         w4_total = w41_main + w4_utility
 
-        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(w41_main))
-        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w4_utility))
+        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total, b=0))
+        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(w41_main,b=0))
+        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w4_utility,b=0))
 
         w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
         self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
@@ -1278,15 +1280,19 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
 
         sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
-        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
+        full_load = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
 
-        self.update_table_item(0, 2, pre_check2(tai_power), self.average_back, self.average_text, bold=True)
+        self.update_table_item(0, 2, pre_check2(full_load), self.average_back, self.average_text, bold=True)
         self.update_table_item(1, 2, pre_check2(current_p['2H120':'5KB19'].sum()), self.average_back,
                                self.average_text, bold=True)
         self.update_table_item(2, 2, pre_check2(sun_power, b=5), self.average_back,
                                self.average_text, bold=True)
         self.update_table_item(3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(), b=4), self.average_back,
                                self.average_text, bold=True)
+        # loss
+        dynamic_load = current_p['AH120':'9KB33'].sum()
+        loss = (full_load -w2_total - w3_total -w4_total - w5_total - dynamic_load)
+        self.tw1.topLevelItem(3).child(6).setText(2, pre_check2(loss,b=0))
 
     def tws_update(self, current_p):
         """
@@ -1325,9 +1331,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         w41_main = current_p['AJ130':'AJ170'].sum()
         w4_total = w41_main + w4_utility
 
-        self.tw1.topLevelItem(2).setText(1, pre_check2(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(1, pre_check2(w41_main))
-        self.tw1.topLevelItem(2).child(1).setText(1, pre_check2(w4_utility))
+        self.tw1.topLevelItem(2).setText(1, pre_check(w4_total))
+        self.tw1.topLevelItem(2).child(0).setText(1, pre_check(w41_main, b=4))
+        self.tw1.topLevelItem(2).child(1).setText(1, pre_check(w4_utility))
 
         w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
         self.tw1.topLevelItem(3).setText(1,pre_check(w5_total))
@@ -1386,13 +1392,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.update_tw3_tips_and_colors(ng)
 
         # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
-        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
+        full_load = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
+        tai_power = str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW'
 
-        self.update_table_item(0, 1, pre_check(tai_power), self.real_time_back, self.real_time_text)
+        self.update_table_item(0, 1, pre_check(full_load), self.real_time_back, self.real_time_text)
         self.update_table_item(1, 1, pre_check(current_p['2H120':'5KB19'].sum()), self.real_time_back, self.real_time_text)  # 即時量
         self.update_table_item(2, 1, pre_check(current_p['sp_real_time'], b=5), self.real_time_back, self.real_time_text)
-        self.update_table_item(3, 1, pre_check(current_p['feeder 1510':'feeder 1520'].sum(), b=4), self.real_time_back, self.real_time_text)
+        self.update_table_item(3, 1, tai_power , self.real_time_back, self.real_time_text)
 
     def update_table_item(self, row, column, text, background_color, text_color, bold=False):
         """
