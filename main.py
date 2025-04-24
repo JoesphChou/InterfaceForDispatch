@@ -518,7 +518,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.query_cbl()      # 查詢特定條件的 基準用電容量(CBL)
         self.query_demand()   # 查詢某一天每一週期的Demand
         self.tws_init()
-        self.update_tw4_schedule()
 
         self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
         # ------- 關於比對歷史紀錄相關功能的監聽事件、初始狀況及執行設定等 ---------
@@ -536,6 +535,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_2.start()
 
         self.initialize_cost_benefit_widgets()
+
         # 建立趨勢圖元件並加入版面配置
         plt.rcParams['font.family'] = 'Microsoft JhengHei'  # 微軟正黑體
         plt.rcParams['axes.unicode_minus'] = False  # 支援負號正確顯示
@@ -745,6 +745,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             item.setForeground(QtGui.QBrush(QtGui.QColor(self.average_text)))
 
     def check_box2_event(self):
+        """
+            比對歷史紀錄的勾選值變動時，DashBoard 頁面中的tree widget(1~3)、table widget 3
+            其表格、欄位大小、顯示與否進行調整。
+        """
         #-----------調出當天的各週期平均-----------
         st = pd.Timestamp.today().date()
         et = st + pd.offsets.Day(1)
@@ -796,7 +800,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def check_box_event(self):
         """
-        切換負載的顯示方式
+                ### 切換負載的顯示方式 ###
         :return:
         """
         if self.checkBox.isChecked():
@@ -894,6 +898,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def dashboard_value(self):
         """
+        ### 處理 Dashboard 各表格的即時量呈現，製程排程的更新 ###
         1. 從 parameter.xlse 讀取出tag name 相關對照表, 轉換為list 指定給的 name_list這個變數
         2. tag_name 存成list當作search 的條件，找出符合條件的PIpoint 物件。(結果會存成list)
         3. 把 list 中的所有PIpoint 物件，取出其name、current_value 屬性，轉存在 DataFrame中。
@@ -927,11 +932,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tws_update(c_values)
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
-        # self.update_tw4_schedule()
-
     def update_tw4_schedule(self):
         """
-        更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：
+        ### 更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：###
         - 第一層：製程種類 (EAF, LF1-1, LF1-2)
         - 第二層："生產或等待中" (current + future) / "過去排程" (past)
         - 若無 "生產或等待中" 排程，仍增加此分類，但不增加子排程，並顯示 "目前無排程"
@@ -1056,7 +1059,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def predict_demand(self):
         """
-        1. 計算預測的demand。目前預測需量的計算方式為，
+        ### 計算預測的demand。目前預測需量的計算方式為， ###
         目前週期的累計需量值 + 近180秒的平均需量 / 180 x 該剩期剩餘秒數
         :return:
         """
@@ -1093,7 +1096,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     # @timeit
     def history_demand_of_groups(self, st, et):
         """
-            查詢特定週期，各設備群組(分類)的平均值
+            ### 查詢特定週期，各設備群組(分類)的平均值 ###
+        :param st: 查詢的起始時間點
+               et: 查詢的最終時間點
         :return:
         """
         mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
@@ -1611,20 +1616,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 self.tableWidget_2.item(i, 1 + j * 2).setTextAlignment(4 |4)         # 4
         self.tableWidget_2.resizeColumnsToContents()   # 7
         self.tableWidget_2.resizeRowsToContents()
-    """
-        new_item = QtWidgets.QTableWidgetItem('test')
-        self.tableWidget.setItem(0,0,new_item)              # 設定某表格內容
-        self.tableWidget.item(0,0).text()                   # 表格指定位置的內容
-        self.tableWidget.horizontalHeaderItem(0).text()     # 表格第n列的名稱
-        self.tableWidget.setHorizontalHeaderLabels()        # 設定表格column 名稱
-        self.tableWidget.item(row, column).setToolTip(QString & toolTip)        # 個別item 的提示信息 
-        self.tableWidget.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers) # 設表格為唯讀
-        self.tableWidget.verticalHeader().setVisible(False)       # 表格row 名稱顯示與否
-        self.tableWidget.horizontalHeader().setVisible(False)     # 表格column 名稱顯示與否
-        self.tableWidget.setRowHeight(int row, int height)        # 設置指定row 的高度
-        self.tableWidget.setColumnWidth(int column, int width)    # 設置指定column 的寬度
-        self.tableWidget_2.setAlternatingRowColors(True)    # 隔行交替背景色
-    """
 
     def query_cbl(self):
         """
