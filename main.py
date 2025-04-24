@@ -535,6 +535,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.thread_2.start()
 
         self.initialize_cost_benefit_widgets()
+
         # 建立趨勢圖元件並加入版面配置
         plt.rcParams['font.family'] = 'Microsoft JhengHei'  # 微軟正黑體
         plt.rcParams['axes.unicode_minus'] = False  # 支援負號正確顯示
@@ -628,17 +629,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def beautify_tree_widgets(self):
         """ 美化 tw1, tw2, tw3 的即時量與平均值欄位，並區分不同表頭顏色 """
-        """ 使用 setStyleSheet() 來統一美化 tw1, tw2, tw3,t w4 的表頭 """
-        #self.tw1.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
-        #self.tw2.setStyleSheet("QHeaderView::section { background-color: #c89aa8; color: black; font-weight: bold; }")
-        #self.tw3.setStyleSheet("QHeaderView::section { background-color: #f79646; color: black; font-weight: bold; }")
-        #self.tw4.setStyleSheet("""
-        #    QHeaderView::section {
-        #        background-color: #D4AC0D;  /* 金黃色 */
-        #        font-size: 16px; /* 與內容一致 */
-        #        font-weight: bold;
-        #    }
-        #""")
         self.tw1.setStyleSheet(
             "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
         self.tw2.setStyleSheet(
@@ -663,8 +653,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             widget.setColumnWidth(2, column_widths[name][2])
 
         # **設定 tw4 column 寬度，確保文字完整顯示**
-        self.tw4.setColumnWidth(0, 220)  # **排程時間**
-        self.tw4.setColumnWidth(1, 170)  # **狀態**
+        self.tw4.setColumnWidth(0, 190)  # **排程時間**
+        self.tw4.setColumnWidth(1, 200)  # **狀態**
 
         # **固定 tw4 column 寬度，防止 tw4.clear() 影響**
         self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
@@ -755,6 +745,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             item.setForeground(QtGui.QBrush(QtGui.QColor(self.average_text)))
 
     def check_box2_event(self):
+        """
+            比對歷史紀錄的勾選值變動時，DashBoard 頁面中的tree widget(1~3)、table widget 3
+            其表格、欄位大小、顯示與否進行調整。
+        """
         #-----------調出當天的各週期平均-----------
         st = pd.Timestamp.today().date()
         et = st + pd.offsets.Day(1)
@@ -806,7 +800,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def check_box_event(self):
         """
-        切換負載的顯示方式
+                ### 切換負載的顯示方式 ###
         :return:
         """
         if self.checkBox.isChecked():
@@ -904,6 +898,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def dashboard_value(self):
         """
+        ### 處理 Dashboard 各表格的即時量呈現，製程排程的更新 ###
         1. 從 parameter.xlse 讀取出tag name 相關對照表, 轉換為list 指定給的 name_list這個變數
         2. tag_name 存成list當作search 的條件，找出符合條件的PIpoint 物件。(結果會存成list)
         3. 把 list 中的所有PIpoint 物件，取出其name、current_value 屬性，轉存在 DataFrame中。
@@ -937,11 +932,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tws_update(c_values)
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
-        # self.update_tw4_schedule()
-
     def update_tw4_schedule(self):
         """
-        更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：
+        ### 更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：###
         - 第一層：製程種類 (EAF, LF1-1, LF1-2)
         - 第二層："生產或等待中" (current + future) / "過去排程" (past)
         - 若無 "生產或等待中" 排程，仍增加此分類，但不增加子排程，並顯示 "目前無排程"
@@ -980,21 +973,30 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             process_parent.addChild(active_parent)
 
             if not active_schedules.empty:
-                for _, row in active_schedules.iterrows():
-                    start_time = row["開始時間"].strftime("%H:%M:%S")
-                    end_time = row["結束時間"].strftime("%H:%M:%S")
-                    category = row["類別"]
-                    status = str(row["製程狀態"]) if "製程狀態" in row and pd.notna(row["製程狀態"]) else "N/A"
+                """
+                從iterrows() 改為itertuples() 的說明:
+                1. 效能較快、且省記憶體
+                2. itertuples(index=False)：避免產生多餘的 Index 欄位。
+                2. row.開始時間、row.類別 等是透過屬性方式存取。
+                3. hasattr(row, "製程狀態") 是為了避免製程狀態 欄位在某些 DataFrame 裡不存在（如 future_df），防止程式報錯。
+                """
+                for row in active_schedules.itertuples(index=False):
+                    start_time = row.開始時間.strftime("%H:%M:%S")
+                    end_time = row.結束時間.strftime("%H:%M:%S")
+                    category = row.類別
+                    status = str(row.製程狀態) if hasattr(row, "製程狀態") and pd.notna(row.製程狀態) else "N/A"
 
-                    if row["製程"] == "EAFA":
+                    if row.製程 == "EAFA":
                         process_display = "EAF"
                         status += " (A爐)"
-                    elif row["製程"] == "EAFB":
+                        furnace = "(A爐)"
+                    elif row.製程 == "EAFB":
                         process_display = "EAF"
                         status += " (B爐)"
+                        furnace = "(B爐)"
                     else:
-                        process_display = row["製程"]
-
+                        process_display = row.製程
+                        furnace = ""
                     if process_display != process_name:
                         continue
 
@@ -1011,8 +1013,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                         item.setBackground(0, QtGui.QBrush(QtGui.QColor("#FCF8BC")))  # **淡黃色背景**
                         item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
                     elif category == "future":
-                        minutes = int((row["開始時間"] - pd.Timestamp.now()).total_seconds() / 60)
-                        item.setText(1, f"預計{minutes} 分鐘後開始生產")
+                        minutes = int((row.開始時間 - pd.Timestamp.now()).total_seconds() / 60)
+                        if process_name == "EAF":
+                            item.setText(1, f"{furnace} 預計{minutes} 分鐘後開始生產")
+                        else:
+                            item.setText(1, f"預計{minutes} 分鐘後開始生產")
                         item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **未來排程置中**
 
                     active_parent.addChild(item)
@@ -1054,7 +1059,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
     def predict_demand(self):
         """
-        1. 計算預測的demand。目前預測需量的計算方式為，
+        ### 計算預測的demand。目前預測需量的計算方式為， ###
         目前週期的累計需量值 + 近180秒的平均需量 / 180 x 該剩期剩餘秒數
         :return:
         """
@@ -1091,7 +1096,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     # @timeit
     def history_demand_of_groups(self, st, et):
         """
-            查詢特定週期，各設備群組(分類)的平均值
+            ### 查詢特定週期，各設備群組(分類)的平均值 ###
+        :param st: 查詢的起始時間點
+               et: 查詢的最終時間點
         :return:
         """
         mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
@@ -1224,9 +1231,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         w41_main = current_p['AJ130':'AJ170'].sum()
         w4_total = w41_main + w4_utility
 
-        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(w41_main))
-        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w4_utility))
+        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total, b=0))
+        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(w41_main,b=0))
+        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w4_utility,b=0))
 
         w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
         self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
@@ -1278,15 +1285,19 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
 
         sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
-        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
+        full_load = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
 
-        self.update_table_item(0, 2, pre_check2(tai_power), self.average_back, self.average_text, bold=True)
+        self.update_table_item(0, 2, pre_check2(full_load), self.average_back, self.average_text, bold=True)
         self.update_table_item(1, 2, pre_check2(current_p['2H120':'5KB19'].sum()), self.average_back,
                                self.average_text, bold=True)
         self.update_table_item(2, 2, pre_check2(sun_power, b=5), self.average_back,
                                self.average_text, bold=True)
         self.update_table_item(3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(), b=4), self.average_back,
                                self.average_text, bold=True)
+        # loss
+        dynamic_load = current_p['AH120':'9KB33'].sum()
+        loss = (full_load -w2_total - w3_total -w4_total - w5_total - dynamic_load)
+        self.tw1.topLevelItem(3).child(6).setText(2, pre_check2(loss,b=0))
 
     def tws_update(self, current_p):
         """
@@ -1325,9 +1336,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         w41_main = current_p['AJ130':'AJ170'].sum()
         w4_total = w41_main + w4_utility
 
-        self.tw1.topLevelItem(2).setText(1, pre_check2(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(1, pre_check2(w41_main))
-        self.tw1.topLevelItem(2).child(1).setText(1, pre_check2(w4_utility))
+        self.tw1.topLevelItem(2).setText(1, pre_check(w4_total))
+        self.tw1.topLevelItem(2).child(0).setText(1, pre_check(w41_main, b=4))
+        self.tw1.topLevelItem(2).child(1).setText(1, pre_check(w4_utility))
 
         w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
         self.tw1.topLevelItem(3).setText(1,pre_check(w5_total))
@@ -1386,13 +1397,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.update_tw3_tips_and_colors(ng)
 
         # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
-        tai_power = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
+        full_load = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
+        tai_power = str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW'
 
-        self.update_table_item(0, 1, pre_check(tai_power), self.real_time_back, self.real_time_text)
+        self.update_table_item(0, 1, pre_check(full_load), self.real_time_back, self.real_time_text)
         self.update_table_item(1, 1, pre_check(current_p['2H120':'5KB19'].sum()), self.real_time_back, self.real_time_text)  # 即時量
         self.update_table_item(2, 1, pre_check(current_p['sp_real_time'], b=5), self.real_time_back, self.real_time_text)
-        self.update_table_item(3, 1, pre_check(current_p['feeder 1510':'feeder 1520'].sum(), b=4), self.real_time_back, self.real_time_text)
+        self.update_table_item(3, 1, tai_power , self.real_time_back, self.real_time_text)
 
     def update_table_item(self, row, column, text, background_color, text_color, bold=False):
         """
@@ -1604,20 +1616,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                 self.tableWidget_2.item(i, 1 + j * 2).setTextAlignment(4 |4)         # 4
         self.tableWidget_2.resizeColumnsToContents()   # 7
         self.tableWidget_2.resizeRowsToContents()
-    """
-        new_item = QtWidgets.QTableWidgetItem('test')
-        self.tableWidget.setItem(0,0,new_item)              # 設定某表格內容
-        self.tableWidget.item(0,0).text()                   # 表格指定位置的內容
-        self.tableWidget.horizontalHeaderItem(0).text()     # 表格第n列的名稱
-        self.tableWidget.setHorizontalHeaderLabels()        # 設定表格column 名稱
-        self.tableWidget.item(row, column).setToolTip(QString & toolTip)        # 個別item 的提示信息 
-        self.tableWidget.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers) # 設表格為唯讀
-        self.tableWidget.verticalHeader().setVisible(False)       # 表格row 名稱顯示與否
-        self.tableWidget.horizontalHeader().setVisible(False)     # 表格column 名稱顯示與否
-        self.tableWidget.setRowHeight(int row, int height)        # 設置指定row 的高度
-        self.tableWidget.setColumnWidth(int column, int width)    # 設置指定column 的寬度
-        self.tableWidget_2.setAlternatingRowColors(True)    # 隔行交替背景色
-    """
 
     def query_cbl(self):
         """
