@@ -9,13 +9,8 @@ from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, 
 from functools import wraps
 from make_item import make_item
 from typing import Tuple
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
-import numpy as np
-import mplcursors
-
+from visualization import TrendChartCanvas # 引入數據可視化模組
+from ui_handler import setup_ui_behavior
 
 def timeit(func):
     @wraps(func)
@@ -295,252 +290,26 @@ def scrapy_schedule():
 
     return past_df, current_df, future_df
 
-class TrendChartCanvas(FigureCanvas):
-    def __init__(self, parent=None, width=6, height=3, dpi=100):
-        fig = Figure(figsize=(width, height), dpi=dpi)
-        self.ax = fig.add_subplot(111)
-        super().__init__(fig)
-        self.setParent(parent)
-
-    def plot_from_dataframe(self, df):
-        if not {'原始TPC', '即時TPC'}.issubset(df.columns):
-            self.ax.clear()
-            self.ax.set_title("資料格式錯誤：缺少 '原始TPC' 或 '即時TPC'")
-            self.draw()
-            return
-
-        self.df = df
-        self.ax.clear()
-        self.setup_base_plot(df)
-        self.setup_tooltips(df)
-        self.draw()
-
-    def setup_base_plot(self, df):
-        #COLOR_UNCOMP = '#6C9BD2'  # 未補NG：鋼藍
-        #COLOR_COMP = '#F4B400'  # 有補NG：琥珀黃
-        COLOR_UNCOMP = '#4FC3F7'  # 改成亮藍
-        COLOR_COMP = '#FF7043'  # 改成橘紅
-        self.x = df.index
-        self.x = df.index
-        self.y1 = df['原始TPC'].astype(float).to_numpy()
-        self.y2 = df['即時TPC'].astype(float).to_numpy()
-
-        # 未補NG（區域圖 + 透明線）
-        self.ax.fill_between(self.x, self.y1, color=COLOR_UNCOMP, alpha=0.6, label='未補NG')
-        self.line1, = self.ax.plot(self.x, self.y1, alpha=0, picker=5)
-
-        # 有補NG（折線）
-        self.line2, = self.ax.plot(self.x, self.y2, color=COLOR_COMP, linewidth=1, label='有補NG')
-
-        self.ax.set_title("台電供電量 (未補NG VS 有補NG)")
-        self.ax.set_xlabel("時間")
-        self.ax.set_ylabel("電量 (MW)")
-        self.ax.grid(True)
-        self.ax.legend()
-
-        locator = mdates.AutoDateLocator()
-        self.ax.xaxis.set_major_locator(locator)
-        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
-        self.ax.set_xlim(df.index[0], df.index[-1])
-
-        # 設定 Y 軸上下限（依照資料動態調整）
-        y_all = np.concatenate([self.y1, self.y2])
-        y_min = np.min(y_all)
-        y_max = np.max(y_all)
-        padding = (y_max - y_min) * 0.1 if y_max != y_min else 1  # 避免單一值導致上下限一樣
-        self.ax.set_ylim(y_min - padding, y_max + padding)
-
-        self.figure.autofmt_xdate()
-
-        # 垂直標線
-        self.vline = self.ax.axvline(df.index[0], color='black', linestyle='--', linewidth=0.8, alpha=0.5)
-
-    def setup_tooltips(self, df):
-        import matplotlib.dates as mdates
-
-        # 時間 tooltip（底部黑底白字）
-        self._tooltip_time = self.ax.text(
-            0.5, -0.12, '', transform=self.ax.transAxes,
-            ha='center', va='top', fontsize=9,
-            bbox=dict(boxstyle="round,pad=0.3", facecolor='black', edgecolor='black'),
-            color='white'
-        )
-
-        # 上方：未補NG
-        self._tooltip1 = self.ax.annotate('', xy=(0, 0), xytext=(10, -10), textcoords='offset points',
-                                          bbox=dict(boxstyle="round", fc="white", ec="gray", lw=0.5), fontsize=9,
-                                          visible=False)
-        # 下方：有補NG
-        self._tooltip2 = self.ax.annotate('', xy=(0, 0), xytext=(10, -50), textcoords='offset points',
-                                          bbox=dict(boxstyle="round", fc="white", ec="gray", lw=0.5), fontsize=9,
-                                          visible=False)
-
-        # 滑鼠事件綁定
-        self.figure.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
-
-    def on_mouse_move(self, event):
-        if not event.inaxes:
-            self._tooltip1.set_visible(False)
-            self._tooltip2.set_visible(False)
-            self._tooltip_time.set_text('')
-            self.draw()
-            return
-
-        try:
-            x_pos = mdates.num2date(event.xdata).replace(tzinfo=None)
-        except Exception:
-            return
-
-        # 超出 x 軸資料區間 → 隱藏 tooltip
-        if x_pos < self.x[0] or x_pos > self.x[-1]:
-            self._tooltip1.set_visible(False)
-            self._tooltip2.set_visible(False)
-            self._tooltip_time.set_text('')
-            self.draw()
-            return
-
-        idx = np.searchsorted(self.x, x_pos)
-        if idx >= len(self.x):
-            idx = len(self.x) - 1
-
-        x_val = self.x[idx]
-        y1_val = self.y1[idx]
-        y2_val = self.y2[idx]
-
-        # 垂直線位置 (修正 vline 警告)
-        self.vline.set_xdata([x_val])
-
-        # 底部時間
-        self._tooltip_time.set_text(x_val.strftime('%m/%d %H:%M'))
-        self._tooltip_time.set_position(
-            ((mdates.date2num(x_val) - mdates.date2num(self.x[0])) /
-             (mdates.date2num(self.x[-1]) - mdates.date2num(self.x[0])), -0.12)
-        )
-        y_mid = (y1_val + y2_val) / 2  # 對齊 tooltip anchor 的中間基準值
-        # 更新 tooltip1
-        self._tooltip1.xy = (x_val, y_mid)
-        self._tooltip1.set_text(f"未補NG：\n{y1_val:,.1f} MW")
-        self._tooltip1.set_fontsize(10)
-        self._tooltip1.set_fontweight('bold')
-        self._tooltip1.set_visible(True)
-
-        # 更新 tooltip2
-        self._tooltip2.xy = (x_val, y_mid)
-        self._tooltip2.set_text(f"有補NG：\n{y2_val:,.1f} MW")
-        self._tooltip2.set_fontsize(10)
-        self._tooltip2.set_fontweight('bold')
-        self._tooltip2.set_visible(True)
-
-        self.draw()
-
-    def plot_from_dataframe2(self, df):
-        self.ax.clear()
-
-        # 確保資料欄存在
-        if not {'原始TPC', '即時TPC'}.issubset(df.columns):
-            self.ax.set_title("資料格式錯誤：缺少 '原始TPC' 或 '即時TPC'")
-            self.draw()
-            return
-
-        #x = range(len(df))
-        #x = df.index.strftime('%H:%M:%S')
-        x = df.index
-        y1 = df['原始TPC']
-        y2 = df['即時TPC']
-
-        # 繪製兩條線
-        self.ax.plot(x, y1, label='台電供電量(未補NG)', color='#0000ff', linewidth=1,linestyle='-.')
-        self.ax.plot(x, y2, label='台電供電量(有補NG)', color='#ff0000', linewidth=0.5)
-
-        # 區間填色（依照效益正負）
-        #self.ax.fill_between(x, y1, y2, where=(y2 > y1), interpolate=True, color='#B7D7F4', alpha=0.7, label='正效益')
-        #self.ax.fill_between(x, y1, y2, where=(y2 < y1), interpolate=True, color='#F4CCCC', alpha=0.7, label='負效益')
-
-        locator = mdates.AutoDateLocator()
-        formatter = mdates.ConciseDateFormatter(locator)
-        self.ax.xaxis.set_major_locator(locator)
-        self.ax.xaxis.set_major_formatter(formatter)
-
-        self.ax.set_title("台電供電量(未補NG) vs 台電供電量(有補NG)")
-        self.ax.set_xlabel("時間")
-        self.ax.set_ylabel("電量 (kW)")
-        self.ax.grid(True)
-        self.ax.legend()
-        self.figure.autofmt_xdate()
-        self.draw()
-
-    def plot_sample(self):
-        self.ax.clear()
-        self.ax.plot([0, 1, 2, 3], [10, 20, 15, 25], label='樣本趨勢', marker='o')
-        self.ax.set_title("趨勢圖（測試）")
-        self.ax.set_xlabel("時間點")
-        self.ax.set_ylabel("金額")
-        self.ax.grid(True)
-        self.ax.legend()
-        self.draw()
-
 class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
     def __init__(self):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
 
-        self.pushButton.clicked.connect(self.query_cbl)
-        self.pushButton_2.clicked.connect(self.add_list_item)
-        self.pushButton_3.clicked.connect(self.remove_list_item1)
-        self.pushButton_4.clicked.connect(self.query_demand)
-        self.pushButton_5.clicked.connect(self.benefit_appraisal)
-        self.dateEdit.setDate(QtCore.QDate().currentDate())
-        self.dateEdit_2.setDate(QtCore.QDate().currentDate())
-
-        self.spinBox.setValue(5)
-        self.spinBox_2.setValue(4)
-        self.listWidget.doubleClicked.connect(self.remove_list_item1)
-        self.spinBox_2.valueChanged.connect(self.tz_changed)
-        self.timeEdit.dateTimeChanged.connect(self.tz_changed)
-        self.tableWidget_2.itemSelectionChanged.connect(self.handle_selection_changed)
         self.tag_list = pd.read_excel('.\parameter.xlsx', sheet_name=0)
         self.special_dates = pd.read_excel('.\parameter.xlsx', sheet_name=1)
         self.unit_prices = pd.read_excel('.\parameter.xlsx', sheet_name=2, index_col=0)
         self.time_of_use = pd.read_excel('.\parameter.xlsx', sheet_name=3)
-        self.define_cbl_date(pd.Timestamp.now().date())   # 初始化時，便立即找出預設的cbl參考日，並更新在list widget 裡
+
         # ---------------統一設定即時值、平均值的背景及文字顏色----------------------
         self.real_time_text = "#145A32"   # 即時量文字顏色 深綠色文字
         self.real_time_back = "#D5F5E3"   # 即時量背景顏色 淡綠色背景
         self.average_text = "#154360"     # 平均值文字顏色 深藍色文字
         self.average_back = "#D6EAF8"     # 平均值背景顏色 淡藍色背景
-
-        self.tw1.itemExpanded.connect(self.tw1_expanded_event)
-        self.tw1.itemCollapsed.connect(self.tw1_expanded_event)
-        self.tw3.itemExpanded.connect(self.tw3_expanded_event)
-        self.tw3.itemCollapsed.connect(self.tw3_expanded_event)
-        self.checkBox.stateChanged.connect(self.check_box_event)
-        self.checkBox_2.stateChanged.connect(self.check_box2_event)
-        self.query_cbl()      # 查詢特定條件的 基準用電容量(CBL)
-        self.query_demand()   # 查詢某一天每一週期的Demand
-        self.tws_init()
-
         self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
-        # ------- 關於比對歷史紀錄相關功能的監聽事件、初始狀況及執行設定等 ---------
-        self.horizontalScrollBar.valueChanged.connect(self.confirm_value)
-        self.dateEdit_3.dateChanged.connect(self.date_edit3_user_change)
-        self.checkBox_2.setChecked(False)
-
-        # 使用QThread 的多執行緒，與自動更新選項動作綁定，執行自動更新current value
-        self.thread_1 = QtCore.QThread()
-        self.thread_1.run = self.continuously_update_current_value
-        self.thread_1.start()
-        # 使用QThread 的多執行緒，與自動更新選項動作綁定，執行自動更新製程排程
-        self.thread_2 = QtCore.QThread()
-        self.thread_2.run = self.continuously_scrapy_and_update
-        self.thread_2.start()
-
-        self.initialize_cost_benefit_widgets()
 
         # 建立趨勢圖元件並加入版面配置
-        plt.rcParams['font.family'] = 'Microsoft JhengHei'  # 微軟正黑體
-        plt.rcParams['axes.unicode_minus'] = False  # 支援負號正確顯示
         self.trend_chart = TrendChartCanvas(self)
-        self.verticalLayout.addWidget(self.trend_chart)
+        setup_ui_behavior(self)
 
     def initialize_cost_benefit_widgets(self):
         # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
@@ -575,9 +344,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         :return:
         """
-        # **美化 tw1, tw2, tw3, tw4, tableWidge_3**
-        self.beautify_tree_widgets()
-        self.beautify_table_widgets()
 
         # 定義顏色
         brush_sub = QtGui.QBrush(QtGui.QColor(180, 180, 180))  # 用於第 2 層及以上的即時量數值
