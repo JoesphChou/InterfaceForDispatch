@@ -31,14 +31,14 @@ def setup_ui_behavior(ui):
     ui.tw3.itemExpanded.connect(ui.tw3_expanded_event)
     ui.tw3.itemCollapsed.connect(ui.tw3_expanded_event)
 
-    # ===== ScrollBar 與 DateEdit 控制 =====
-    ui.horizontalScrollBar.valueChanged.connect(ui.confirm_value)
-    ui.dateEdit_3.dateChanged.connect(ui.date_edit3_user_change)
-
     # ===== Tree/Table 樣式初始化 =====
     ui.beautify_tree_widgets()
     ui.beautify_table_widgets()
     ui.tws_init()
+
+    # ===== ScrollBar 與 DateEdit 控制 =====
+    ui.horizontalScrollBar.valueChanged.connect(ui.confirm_value)
+    ui.dateEdit_3.dateChanged.connect(ui.date_edit3_user_change)
 
     # ===== 設定初始日期與時間元件 =====
     ui.dateEdit.setDate(QtCore.QDate().currentDate())

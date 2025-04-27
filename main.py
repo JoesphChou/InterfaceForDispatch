@@ -311,6 +311,21 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.trend_chart = TrendChartCanvas(self)
         setup_ui_behavior(self)
 
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """
+            ❶ 只要覆寫 closeEvent 就能攔截使用者關窗的動作
+            用來強制關閉thread_1、thread_2
+        """
+        for th in (getattr(self, "thread_1", None), getattr(self, "thread_2", None)):
+            if isinstance(th, QtCore.QThread):
+                th.requestInterruption()  # ① 送出中斷旗標
+                th.wait(3000)  # ② 最多等 3 秒；0＝無限等
+                if th.isRunning():  # ③ 保險：實在關不掉就強制殺
+                    th.terminate()
+                    th.wait()
+        # ★ 若還有額外資源（計時器、連線等）也可在這裡一併釋放
+        super().closeEvent(event)   # 呼叫父類別，讓 Qt 正常處理關窗
+
     def initialize_cost_benefit_widgets(self):
         # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
         current_datetime = QtCore.QDateTime.currentDateTime()
@@ -1248,22 +1263,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             tg_child.setForeground(1, QtGui.QBrush(highlight_color if ng_contribution > 0 else default_color))
 
     def continuously_update_current_value(self):
-        """
-        用來每隔11秒，自動更新current value
-        :return:
-        """
-        while True:
+        while not QtCore.QThread.currentThread().isInterruptionRequested():
             self.dashboard_value()
-            time.sleep(11)
+            QtCore.QThread.msleep(11_000)  # 用 Qt 的 sleep，不卡 event-loop
 
     def continuously_scrapy_and_update(self):
-        """
-        用來每隔30秒，自動更新爬製程排程相關資訊
-        :return:
-        """
-        while True:
+        while not QtCore.QThread.currentThread().isInterruptionRequested():
             self.update_tw4_schedule()
-            time.sleep(30)
+            QtCore.QThread.msleep(30_000)
+
 
     def tw3_expanded_event(self):
         """
