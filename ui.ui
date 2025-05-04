@@ -42,7 +42,7 @@
     </font>
    </property>
    <property name="currentIndex">
-    <number>2</number>
+    <number>1</number>
    </property>
    <widget class="QWidget" name="tab_1">
     <property name="enabled">
@@ -966,7 +966,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
      </attribute>
      <column>
       <property name="text">
-       <string>其它負載</string>
+       <string>各單位負載</string>
       </property>
       <property name="font">
        <font>
@@ -1920,6 +1920,14 @@ Runner</string>
         <font>
          <family>微軟正黑體</family>
         </font>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>erorr value</string>
        </property>
        <property name="text">
         <string/>
