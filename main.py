@@ -1,4 +1,3 @@
-import PIconnect as Pi
 from PyQt6 import QtCore, QtWidgets, QtGui
 import sys, re, time, math, urllib3
 import pandas as pd
@@ -11,6 +10,9 @@ from make_item import make_item
 from typing import Tuple
 from visualization import TrendChartCanvas # 引入數據可視化模組
 from ui_handler import setup_ui_behavior
+from data_sources.pi_client import PIClient
+
+pi_client = PIClient()
 
 def timeit(func):
     @wraps(func)
@@ -21,49 +23,6 @@ def timeit(func):
         print(f"{func.__name__} 執行時間：{end - start:.4f} 秒")
         return result
     return wrapper
-
-def query_pi(st, et, tags, extract_type, interval='15m', time_offset = 0):
-    """
-        1. 從 PI 取出的 timestamp 時區改成 GMT+8   123
-        2. 用 PI.PIServer().search 找出tag 對應的PIPoint，回傳的結果是list 型態。
-           將該結果從list 提出，並新增到points 的list 中。
-        3. 針對每一個PIPoint 透過 summaries 的方法，依extract_type 內容，決定特定區間取出值為何種形式。
-           此方法回傳的資料為DataFrame 型態
-        4. 將每筆DataFrame 存成list 之前，將資料型態從Object -> float，若有資料中有文字無法換的，則用NaN 缺失值取代。
-           這邊使用的column名稱 ('RANGE')，必須視依不同的extract type 進行調整。
-        5. 將list 中所有的 DataFrame 合併為一組新的 DataFrame 資料
-        6. 把原本用來做index 的時間，將時區從tz aware 改為 native，並加入與OSAKI 時間差參數進行調整。
-    :param st:  區間起始點的日期、時間
-    :param et:  區間結束點的日期、時間
-    :param tags:  list。 要查調的所有 tag
-    :param extract_type: 預設為 16。16 -> PI.PIConsts.SummaryType.RANGE
-                                   8 -> PI.PIConsts.SummaryType.MAXIMUM
-                                   4 -> PI.PIConstsSummaryType.MINIMUM
-                                   2 -> PI.PIConstsSummaryType.AVERAGE
-    :param time_offset: 預設為 0。 用來近似 與 OSAKI 時間用的參數(秒數)
-    :return: 將結果以 DataFrame 格式回傳。 shape(資料數量, tag數量)
-    """
-    st = st - pd.offsets.Second(time_offset)
-    et = et - pd.offsets.Second(time_offset)
-    Pi.PIConfig.DEFAULT_TIMEZONE = 'Asia/Taipei'        #1
-
-    # 不同的extract_type， data 的column 名稱會不一樣
-    summarytype = { 16: 'RANGE', 8: 'MAXIMUM', 4: 'MINIMUM', 2: 'AVERAGE'}
-
-    with Pi.PIServer() as server:
-        points = list()
-        for tag_name in tags:
-            points.append(server.search(tag_name)[0])   #2
-        buffer = list()
-        for x in range(len(points)):
-            data = points[x].summaries(st, et, interval, extract_type)               # 3
-            data[summarytype[extract_type]] = pd.to_numeric(data[summarytype[extract_type]], errors='coerce')  # 4
-            #data['RANGE'] = pd.to_numeric(data['RANGE'], errors='coerce')            # 4
-            buffer.append(data)
-        raw_data = pd.concat([s for s in buffer], axis=1)                            # 5
-        raw_data.set_index(raw_data.index.tz_localize(None)
-                           + pd.offsets.Second(time_offset), inplace = True)         # 6
-    return raw_data
 
 def pre_check(pending_data, b=1, c='power'):
     """
@@ -187,10 +146,10 @@ def scrapy_schedule():
         schedule_data.append((x_coord, start, end, furnace_id, process_type))
 
     # 建立 sort_group 欄位：將 EAFA、EAFB 合併為 EAF，其它維持原樣
-    def get_sort_group(process_type):
-        if process_type in ["EAFA", "EAFB"]:
+    def get_sort_group(process_type_for_sort):
+        if process_type_for_sort in ["EAFA", "EAFB"]:
             return "EAF"
-        return process_type
+        return process_type_for_sort
 
     # 建立排序用資料
     schedule_data_with_group = [
@@ -295,7 +254,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
 
-        self.tag_list = pd.read_excel('.\parameter.xlsx', sheet_name=0)
+        self.tag_list = pd.read_excel('.\parameter.xlsx', sheet_name=0).dropna(how='all')
         self.special_dates = pd.read_excel('.\parameter.xlsx', sheet_name=1)
         self.unit_prices = pd.read_excel('.\parameter.xlsx', sheet_name=2, index_col=0)
         self.time_of_use = pd.read_excel('.\parameter.xlsx', sheet_name=3)
@@ -306,7 +265,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.average_text = "#154360"     # 平均值文字顏色 深藍色文字
         self.average_back = "#D6EAF8"     # 平均值背景顏色 淡藍色背景
         self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
-
+        self.dashboard_value()
         # 建立趨勢圖元件並加入版面配置
         self.trend_chart = TrendChartCanvas(self)
         setup_ui_behavior(self)
@@ -681,35 +640,36 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         """
         ### 處理 Dashboard 各表格的即時量呈現，製程排程的更新 ###
         1. 從 parameter.xlse 讀取出tag name 相關對照表, 轉換為list 指定給的 name_list這個變數
-        2. tag_name 存成list當作search 的條件，找出符合條件的PIpoint 物件。(結果會存成list)
-        3. 把 list 中的所有PIpoint 物件，取出其name、current_value 屬性，轉存在 DataFrame中。
-        4. 透過 pd.merge() 的方法，做關聯式合併
-        5. 從 buffer 這個dataframe 取出 value 這一列，而index 則採用name 這一列。
-        6. 轉換 value 的資料型態 object->float，若遇文字型態，則用Nan 取代。
-        7. 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
-        8. 使用slice (切片器) 來指定 MultiIndex 的範圍，指定各一級單位B類型(廠區用電)的計算結果，
+        2. 透過pi_client 類別實例中的方法，一次性搜尋多個tag 的PIPoint 物件，並透過PIPoint 的屬性，
+           向 PI Data Archive 發出一次性查詢，並把結果用 pd.Series (tag_name, current_value)
+           的型式回傳，其中current_value 已被強制從object->float，如有文字，則用Nan取代。
+        3. 透過 pd.merge() 的方法，把tag_list 其色columns 以tag_name為中心做關聯式合併。
+        4. 從 buffer 這個dataframe 取出 value 這一列，而index 則採用name 這一列。
+        5. 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
+        6. 使用slice (切片器) 來指定 MultiIndex 的範圍，指定各一級單位B類型(廠區用電)的計算結果，
            指定到wx 這個Series,並重新設定index
-        9. 將wx 內容新增到c_values 之後。
+        7. 將wx 內容新增到c_values 之後。
+
         10. 獲取排程資料，並顯示在 tableWidget_4。
         11. current 排程顯示在第 1 列 (`start ~ end` 和 製程狀態)。
         12. future 排程顯示在後續列 (`start ~ end` 和 還剩幾分鐘開始)。
         13. 若 current 為空，則 future 從第 1 列開始顯示。
         :return:
         """
-        name_list = self.tag_list['tag_name'].values.tolist()   # 1
-        current = Pi.PIServer().search(name_list)    # 2
-        buffer = pd.DataFrame([_.name, _.current_value] for _ in current)   # 3
-        buffer.columns=['tag_name','value']
-        buffer = pd.merge(self.tag_list, buffer, on='tag_name')      # 4
-        buffer.loc[:,'value'] = pd.to_numeric(buffer.loc[:,'value'], errors='coerce') # 6
 
+        name_list = self.tag_list['tag_name'].tolist()      # 1
+        current = pi_client.current_values(name_list)       # 2
+        buffer = pd.DataFrame({
+            'tag_name': name_list,
+            'value': current.values
+        })
+        buffer = pd.merge(self.tag_list, buffer, on='tag_name')  # 3
         c_values = buffer.loc[:,'value']
-        c_values.index = buffer.loc[:,'name']     # 5
-
-        wx_grouped = buffer.groupby(['Group1','Group2'])['value'].sum()     # 7
-        wx = wx_grouped.loc[(slice('W2','WA')),'B']      # 8
+        c_values.index = buffer.loc[:,'name']     # 4
+        wx_grouped = buffer.groupby(['Group1','Group2'])['value'].sum()     # 5
+        wx = wx_grouped.loc[(slice('W2','WA')),'B']      # 6
         wx.index = wx.index.get_level_values(0)
-        c_values = pd.concat([c_values, wx],axis=0)  # 9
+        c_values = pd.concat([c_values, wx],axis=0)  # 7
         self.tws_update(c_values)
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
@@ -847,34 +807,28 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         st = pd.Timestamp.now().floor('15T')    # 目前週期的起始時間
         et = st + pd.offsets.Minute(15)         # 目前週期的結束時間
 
-        back_150s_from_now = pd.Timestamp.now() - pd.offsets.Second(300)    # 300秒前的時間點 (180->300)
+        back_300s_from_now = pd.Timestamp.now() - pd.offsets.Second(300)    # 300秒前的時間點 (180->300)
         diff_between_now_and_et = (et - pd.Timestamp.now()).total_seconds()   # 此週期剩餘時間
 
         tags = self.tag_list.loc[0:1,'tag_name2']
         tags.index = self.tag_list.loc[0:1,'name']
-        name_list = tags.loc[:].values.tolist()
+        name_list = tags.loc[:].dropna().tolist()
 
         # 查詢目前週期的累計需量值
-        query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
-
-        # 將資料型態從Object -> float，若有資料中有文字無法換的，則用NaN 缺失值取代。
-        query_result.iloc[0,:] = pd.to_numeric(query_result.iloc[0,:], errors='coerce')
+        query_result = pi_client.query(st=st, et=et, tags=name_list)
         current_accumulation = query_result.sum(axis = 1) * 4
 
-        # 查近180秒的平均需量，並計算出剩餘時間可能會增加的需量累計值
-        result = query_pi(st=back_150s_from_now, et=back_150s_from_now + pd.offsets.Second(180),
-                             tags=name_list ,extract_type = 16)
-        weight2 = 4 / 180 * diff_between_now_and_et
 
-        # 將資料型態從Object -> float，若有資料中有文字無法換的，則用NaN 缺失值取代。
-        result.iloc[0,:] = pd.to_numeric(result.iloc[0,:], errors='coerce')
+        # 查近180秒的平均需量，並計算出剩餘時間可能會增加的需量累計值
+        result = pi_client.query(st=back_300s_from_now, et=back_300s_from_now + pd.offsets.Second(180),
+                            tags=name_list)
+        weight2 = 4 / 180 * diff_between_now_and_et
         predict = result.sum(axis=1) * weight2
 
         # 取四捨五入
         demand = round((current_accumulation[0] + predict[0]),2)
         return demand
 
-    # @timeit
     def history_demand_of_groups(self, st, et):
         """
             ### 查詢特定週期，各設備群組(分類)的平均值 ###
@@ -885,9 +839,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
         groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
         groups_demand.index = self.tag_list.loc[mask,'name']
-        name_list = groups_demand.loc[:,'tag_name2'].values.tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
-        query_result = query_pi(st=st, et=et, tags=name_list ,extract_type = 16)
-
+        name_list = groups_demand.loc[:,'tag_name2'].dropna().tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
+        query_result = pi_client.query(st=st, et=et, tags=name_list)
         query_result.columns = groups_demand.index
         query_result = query_result.T       # 將query_result 轉置 shape:(96,178) -> (178,96)
         query_result.reset_index(inplace=True, drop=True)  # 重置及捨棄原本的 index
@@ -1016,8 +969,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(w41_main,b=0))
         self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w4_utility,b=0))
 
-        w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
-        self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
+        w5_subtotal = current_p['3KA14':'2KB29'].sum() + current_p['W5']
+        # self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
         self.tw1.topLevelItem(3).child(0).setText(2, pre_check2(current_p['3KA14':'3KA15'].sum()))
         self.tw1.topLevelItem(3).child(0).child(0).setText(2, pre_check2(current_p['3KA14']))
         self.tw1.topLevelItem(3).child(0).child(1).setText(2, pre_check2(current_p['3KA15']))
@@ -1075,10 +1028,12 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
                                self.average_text, bold=True)
         self.update_table_item(3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(), b=4), self.average_back,
                                self.average_text, bold=True)
-        # loss
+        # error_value & w5_total correction
         dynamic_load = current_p['AH120':'9KB33'].sum()
-        loss = (full_load -w2_total - w3_total -w4_total - w5_total - dynamic_load)
-        self.tw1.topLevelItem(3).child(6).setText(2, pre_check2(loss,b=0))
+        error_value = (full_load -w2_total - w3_total -w4_total - w5_subtotal - dynamic_load - current_p['WA'])
+        self.tw1.topLevelItem(3).child(6).setText(2, str(format(round(error_value, 2), '.2f')))
+        w5_total = w5_subtotal + error_value
+        self.tw1.topLevelItem(3).setText(2, pre_check2(w5_total))
 
     def tws_update(self, current_p):
         """
@@ -1121,8 +1076,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw1.topLevelItem(2).child(0).setText(1, pre_check(w41_main, b=4))
         self.tw1.topLevelItem(2).child(1).setText(1, pre_check(w4_utility))
 
-        w5_total = current_p['3KA14':'2KB29'].sum() + current_p['W5']
-        self.tw1.topLevelItem(3).setText(1,pre_check(w5_total))
+        w5_subtotal = current_p['3KA14':'2KB29'].sum() + current_p['W5']
+        self.tw1.topLevelItem(3).setText(1,pre_check(w5_subtotal))
         self.tw1.topLevelItem(3).child(0).setText(1, pre_check(current_p['3KA14':'3KA15'].sum()))
         self.tw1.topLevelItem(3).child(0).child(0).setText(1, pre_check(current_p['3KA14']))
         self.tw1.topLevelItem(3).child(0).child(1).setText(1, pre_check(current_p['3KA15']))
@@ -1186,6 +1141,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.update_table_item(1, 1, pre_check(current_p['2H120':'5KB19'].sum()), self.real_time_back, self.real_time_text)  # 即時量
         self.update_table_item(2, 1, pre_check(current_p['sp_real_time'], b=5), self.real_time_back, self.real_time_text)
         self.update_table_item(3, 1, tai_power , self.real_time_back, self.real_time_text)
+
+        # error_value & w5_total correction
+        dynamic_load = current_p['AH120':'9KB33'].sum()
+        error_value = (full_load -w2_total - w3_total -w4_total - w5_subtotal - dynamic_load - current_p['WA'])
+        self.tw1.topLevelItem(3).child(6).setText(1, str(format(round(error_value, 2), '.2f'))+ ' MW')
+        w5_total = w5_subtotal + error_value
+        self.tw1.topLevelItem(3).setText(1, pre_check(w5_total))
 
     def update_table_item(self, row, column, text, background_color, text_color, bold=False):
         """
@@ -1366,7 +1328,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         tags=('W511_MS1/161KV/1510/kwh11', 'W511_MS1/161KV/1520/kwh11')
         st = pd.Timestamp(str(self.dateEdit.date().toPyDate()))
         et = st + pd.offsets.Day(1)
-        raw_data = query_pi(st=st, et=et, tags=tags, extract_type=16)
+        raw_data = pi_client.query(st=st, et=et, tags=tags)
         raw_data.insert(0, 'TPC', (raw_data.iloc[:, 0] + raw_data.iloc[:, 1]) * 4)
         for j in range(6):          # 1
             for i in range(16):
@@ -1497,30 +1459,23 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             cbl_date = self.define_cbl_date(e_date_time.date())
         tags = ['W511_MS1/161KV/1510/kwh11', 'W511_MS1/161KV/1520/kwh11']
         # 2
-        buffer2 = query_pi(st=pd.Timestamp(cbl_date[-1]),
-                           et=pd.Timestamp(cbl_date[0] + pd.offsets.Day(1)), tags=tags ,extract_type=16)
+        buffer2 = pi_client.query(st=pd.Timestamp(cbl_date[-1]),
+                           et=pd.Timestamp(cbl_date[0] + pd.offsets.Day(1)), tags=tags)
         row_data = (buffer2.iloc[:, 0] + buffer2.iloc[:, 1]) * 4  # 3
         """
             1. 每天要取樣的起始時間點, 存成list
-            2. s_time、e_time 是作為第6點生成一段固定頻率時間的起、終點
-            3. 將指定時間長度的需量，一天為一筆(pd.Series 的型態) 儲存至list
-            4. 將list 中每筆Series name 更改為日期
-            5. 將list 中每筆Series 的index reset
-            6. 重新賦予Series 用時間表示的index 
+            2. 將指定時間長度的需量，一天為一筆(pd.Series 的型態) 儲存至list
+            3. 將list 中每筆Series name 更改為日期
         """
         period_start = [(cbl_date[i] + pd.Timedelta(str(self.timeEdit.time().toPyTime())))
                         for i in range(self.spinBox.value())]       # 1
-        # s_time = str(period_start[0].time())        # 2
-        # e_time = str((period_start[0] + pd.offsets.Minute((self.spinBox_2.value() * 4 - 1) * 15)).time())
 
         demands_buffer = list()
         for i in range(self.spinBox.value()):
             s_point = str(period_start[i])
             e_point = str(period_start[i] + pd.offsets.Minute((self.spinBox_2.value() * 4 - 1) * 15))
-            demands_buffer.append(row_data.loc[s_point: e_point])                   # 3
-            demands_buffer[i].rename(cbl_date[i].date(), inplace=True, copy=False)  # 4
-            # demands_buffer[i].reset_index(drop=True, inplace=True)                  # 5
-            # demands_buffer[i].index = [a for a in (pd.date_range(s_time, e_time, freq='15min').time)]  # 6
+            demands_buffer.append(row_data.loc[s_point: e_point])                   # 2
+            demands_buffer[i].rename(cbl_date[i].date(), inplace=True, copy=False)  # 3
         demands = pd.concat([s for s in demands_buffer], axis=1)
 
         return demands
@@ -1639,7 +1594,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         filter_list = self.tag_list[self.tag_list['name'].isin(target_names)]['tag_name']
 
         # ** 執行查詢PI 系統的函式，並將結果的columns 套上相對應的名稱
-        raw_result = query_pi(st=st, et=et, tags=filter_list ,extract_type = 2, interval=t_resolution_str)
+        raw_result = pi_client.query(st=st,et=et,tags=filter_list,summary="AVERAGE",interval=t_resolution_str)
         raw_result.columns = target_names
 
         # ** 開始計算相關效益 **
@@ -1648,9 +1603,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         cost_benefit['全廠用電量'] = cost_benefit['即時TPC'] + cost_benefit['中龍發電量']
         cost_benefit['NG 總用量'] = raw_result.loc[:, 'TG1 NG':'TG4 NG'].sum(axis=1)
 
-        # ** 根據原始TPC 是否處於逆送電，計算各種效益 **
-        # par1 = {}
-        # par2 = {}
         # ** 用來記錄查詢區間，有用到那些版本的參數 **
         self.version_used = {} # 清空舊資料
         self.purchase_versions_by_period = {}
@@ -1756,6 +1708,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             cost_benefit.loc[ind, '增加的碳費'] = cost_benefit.loc[ind, 'NG 增加的發電度數'] * par1.get('carbon_cost')
             cost_benefit.loc[ind, '原始TPC'] = cost_benefit.loc[ind, '即時TPC'] + cost_benefit.loc[ind, 'NG 增加的發電量']
             cost_benefit.loc[ind, '時段'] = par2.get('rate_label')
+            # ** 根據原始TPC 是否處於逆送電，計算各種效益 **
             if cost_benefit.loc[ind, 'NG 總用量'] != 0:
                 # ** 還原後TPC 處於逆送電時 **
                 if cost_benefit.loc[ind, '原始TPC'] <= 0:
