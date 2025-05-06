@@ -1,8 +1,7 @@
 from PyQt6 import QtCore, QtWidgets, QtGui
-import sys, re, time, math, urllib3
+import sys, re, time, math
 import pandas as pd
 from PyQt6.QtGui import QLinearGradient
-from bs4 import BeautifulSoup
 from UI import Ui_Form
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from functools import wraps
