@@ -1,12 +1,12 @@
-from PyQt6 import QtCore, QtWidgets, QtGui
 import sys, re, time, math
+from typing import Tuple
+from functools import wraps
 import pandas as pd
+from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
 from UI import Ui_Form
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
-from functools import wraps
 from make_item import make_item
-from typing import Tuple
 from visualization import TrendChartCanvas # 引入數據可視化模組
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
@@ -272,7 +272,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         item.setForeground((QtGui.QBrush(QtGui.QColor('white'))))   # 設定文字顏色為白色
 
         self.tableWidget_3.setItem(2, 0, make_item('太陽能', bold=False, bg_color='#f6ffc6',font_size=12))
-        self.tableWidget_3.setItem(3, 0, make_item('台電供電量', bold=False, font_size=12))
+        self.tableWidget_3.setItem(3, 0, make_item('台電供電量\n(需量)', bold=False, font_size=8.5))
 
         # **設定欄位樣式，使其與 tw1, tw2, tw3 保持一致**
         for row in range(self.tableWidget_3.rowCount()):
@@ -469,7 +469,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         :return:
         """
 
-        name_list = self.tag_list['tag_name'].tolist()      # 1
+        name_list = self.tag_list['tag_name'].dropna().tolist()      # 1
         current = pi_client.current_values(name_list)       # 2
         buffer = pd.DataFrame({
             'tag_name': name_list,
@@ -831,15 +831,19 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
 
         sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
-        full_load = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() - sun_power
+        tai_power_demand = current_p['feeder 1510':'feeder 1520'].sum()
+        reversed_power = current_p['feeder 1510_s':'feeder 1520_s'].sum()
+        full_load = tai_power_demand - reversed_power + current_p['2H120':'5KB19'].sum() - sun_power
+
 
         self.update_table_item(0, 2, pre_check2(full_load), self.average_back, self.average_text, bold=True)
         self.update_table_item(1, 2, pre_check2(current_p['2H120':'5KB19'].sum()), self.average_back,
                                self.average_text, bold=True)
         self.update_table_item(2, 2, pre_check2(sun_power, b=5), self.average_back,
                                self.average_text, bold=True)
-        self.update_table_item(3, 2, pre_check2(current_p['feeder 1510':'feeder 1520'].sum(), b=4), self.average_back,
+        self.update_table_item(3, 2, str(format(round(tai_power_demand,2))), self.average_back,
                                self.average_text, bold=True)
+
         # error_value & w5_total correction
         dynamic_load = current_p['AH120':'9KB33'].sum()
         error_value = (full_load -w2_total - w3_total -w4_total - w5_subtotal - dynamic_load - current_p['WA'])
@@ -947,12 +951,12 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         # 方式 2：table widget 3 利用 self.update_table_item 函式，在更新內容後，保留原本樣式不變
         full_load = current_p['feeder 1510':'feeder 1520'].sum() + current_p['2H120':'5KB19'].sum() \
                     - current_p['sp_real_time']
-        tai_power = str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW'
+        tai_power_demand = str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW'
 
         self.update_table_item(0, 1, pre_check(full_load), self.real_time_back, self.real_time_text)
         self.update_table_item(1, 1, pre_check(current_p['2H120':'5KB19'].sum()), self.real_time_back, self.real_time_text)  # 即時量
         self.update_table_item(2, 1, pre_check(current_p['sp_real_time'], b=5), self.real_time_back, self.real_time_text)
-        self.update_table_item(3, 1, tai_power , self.real_time_back, self.real_time_text)
+        self.update_table_item(3, 1, tai_power_demand , self.real_time_back, self.real_time_text)
 
         # error_value & w5_total correction
         dynamic_load = current_p['AH120':'9KB33'].sum()
