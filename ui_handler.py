@@ -1,4 +1,4 @@
-from PyQt6 import QtCore, QtGui
+from PyQt6 import QtCore
 
 def setup_ui_behavior(ui):
     """
