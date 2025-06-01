@@ -1,9 +1,11 @@
 from __future__ import annotations
 from bs4 import BeautifulSoup
-import re, urllib3
+import re, urllib3, time
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Tuple
+from logging_utils import get_logger
+logger = get_logger(__name__)
 
 """schedule_scraper.py
 
@@ -86,6 +88,13 @@ def scrape_schedule(
     # 1. Schedule rectangles from 2138 -------------------------------------------------
     # ------------------------------------------------------------------
     soup_2138 = _fetch_soup(URL_2138, pool)
+    if soup_2138 is None:
+        # 伺服器回 500 → 先以空的 DataFrame 代替
+        past_df = pd.DataFrame(columns=["Group1", "Group2", "value", "timestamp"])
+        current_df = pd.DataFrame(columns=["Group1", "Group2", "value", "timestamp"])
+        future_df = pd.DataFrame(columns=["Group1", "Group2", "value", "timestamp"])
+        return past_df, current_df, future_df
+
     areas = soup_2138.find_all("area")
 
     raw_sched: List[Tuple[int, datetime, datetime, str, str]] = []
@@ -169,17 +178,29 @@ def scrape_schedule(
 # INTERNAL HELPERS
 # ---------------------------------------------------------------------------
 
-def _fetch_soup(url: str, pool: urllib3.PoolManager, timeout: int = 10) -> BeautifulSoup:
+def _fetch_soup(url: str, pool: urllib3.PoolManager, retries: int = 2, delay: float = 2.0):
     """
     以 urllib3 取得網頁並回傳 BeautifulSoup.
-    若 HTTP status 不是 200，主動丟出 RuntimeError.
+    若 HTTP status 不是 200，則記錄錯誤，但不主動丟出 RuntimeError.
     """
-    r = pool.request("GET", url, timeout=timeout, retries=False)
-
-    if r.status !=200:
-        raise RuntimeError(f"GET {url} 失敗: HTTP {r.status}")
-
+    for attempt in range(1, retries + 1):
+        r = pool.request("GET", url)
+        if r.status == 200:
+            # 記錄錯誤，但不丟例外
+            return BeautifulSoup(r.data, "html.parser")
+        logger.warning(f"第 {attempt} 次 GET {url} 失敗: HTTP {r.status}")
+        time.sleep(delay)
+    # 最後一次仍失敗
+    logger.error(f"多次重試後仍無法 GET {url}，回傳 None")
+    return None
+    """
+    if r.status != 200:
+        # 記錄錯誤，但不丟例外
+        logger.error(f"GET {url} 失敗:HTTP {r.status}，將回傳 None")
+        # raise RuntimeError(f"GET {url} 失敗: HTTP {r.status}")
+        return None
     return BeautifulSoup(r.data, "html.parser")
+    """
 
 def _infer_process_type(y: int) -> str | None:
     for proc, (lo, hi) in _PROCESS_Y_RANGES.items():

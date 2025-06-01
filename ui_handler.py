@@ -1,4 +1,6 @@
 from PyQt6 import QtCore
+from logging_utils import get_logger, log_exceptions, timeit
+logger = get_logger(__name__)
 
 def setup_ui_behavior(ui):
     """
@@ -58,10 +60,12 @@ def setup_ui_behavior(ui):
 
     # ===== 啟動 QThread 任務（需主程式定義 run function） =====
     ui.thread_1 = QtCore.QThread()
+    ui.thread_1.setObjectName("Dashboard_Updator")
     ui.thread_1.run = ui.continuously_update_current_value
     ui.thread_1.start()
 
     ui.thread_2 = QtCore.QThread()
+    ui.thread_2.setObjectName("scrapy")
     ui.thread_2.run = ui.continuously_scrapy_and_update
     ui.thread_2.start()
 

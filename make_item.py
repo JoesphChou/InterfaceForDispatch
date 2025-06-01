@@ -1,4 +1,6 @@
 from PyQt6 import QtCore, QtWidgets, QtGui
+from logging_utils import get_logger, log_exceptions, timeit
+logger = get_logger(__name__)
 
 def make_item(text, bold=False, fg_color=None, bg_color=None, align='center', font_size=10):
     item = QtWidgets.QTableWidgetItem(text)

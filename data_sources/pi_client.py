@@ -3,8 +3,40 @@ from functools import lru_cache
 from typing import Iterable, Literal, Dict
 import pandas as pd
 import PIconnect as Pi
+import numpy as np
+from logging_utils import get_logger, log_exceptions
+
+logger = get_logger(__name__)
 
 SummaryType = Literal["RANGE", "MAXIMUM", "MINIMUM", "AVERAGE"]
+
+def _normalize_raw_values(raw_dict: dict) -> dict:
+    """
+    把 raw_dict 裡的 p.current_value 做「屬性/字串檢查」，
+    只要是 AFEnumerationValue、'Bad'、其他非 float 字串等通通先設成 None，
+    並分別在 logger.warning 裡記錄是哪種情況。
+    其餘能直接轉 float 的留待 pd.to_numeric 處理。
+    """
+    for tag_name, val in raw_dict.items():
+        # 1) 先檢查「枚舉型」(AFEnumerationValue)，它會有 .Name 和 .Value 屬性
+        if hasattr(val, 'Name') and hasattr(val, 'Value'):
+            logger.warning(f"[PIClient] Tag '{tag_name}' 回傳枚舉型 (Enumeration)：{val} → 以 NaN 處理")
+            raw_dict[tag_name] = None
+            continue
+
+        # 2) 如果 val 是字串 (例如 'Bad'、'OFF'、'N/A'...)
+        if isinstance(val, str):
+            logger.warning(f"[PIClient] Tag '{tag_name}' 回傳字串：'{val}' → 以 NaN 處理")
+            raw_dict[tag_name] = None
+            continue
+
+        # 3) 如果 val 本身就是 None 或 np.nan，就跳過（後面 to_numeric 會自動轉成 NaN）
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            continue
+
+        # 4) 到這裡 val 很可能是 int、float、也可能是「看起來像數字的字串」→ 交給 to_numeric 處理
+
+    return raw_dict
 
 class PIClient:
     """封裝 PIconnect 取數；任何 UI / service 僅呼叫這層。"""
@@ -22,31 +54,72 @@ class PIClient:
         # 從 PI 取出的 timestamp 時區改成 GMT+8
         Pi.PIConfig.DEFAULT_TIMEZONE = timezone
 
+    # ---------------------------------------
+    # 基本查詢
+    # ---------------------------------------
+    """"""
+    def search_points(self, tags: Iterable[str]) -> Dict[str, Pi.PIPoint]:
+        """
+        一次性搜尋多個tag 的PIPoint 物件，並回傳一個字典。
+        """
+        tags = list(tags)   # 將傳入的Iterable[str} (可能是generator,set,Index)轉成可重複使用的list
+        try:
+            # 這句就會自動連線；若 PI Server 不可用，
+            # PIconnect 應該會在此處拋出例外 (比如網路錯誤、憑證錯誤…)
+            with Pi.PIServer() as server:                 # **只開一次連線**
+                points = server.search(tags)              # PIconnect 支援 list/tuple
+        except Exception as e:
+            # 你可以選擇重新拋出，自訂例外，或回傳空 dict
+            logger.error(f"[PIClient] 無法連線到 PI Server：{e}")
+            return {}  # 或 raise e
+        # # 成功拿到 PIPoint 列表，回傳一個 dict，裡面的 points 與 tags 順序一致
+        return dict(zip(tags, points))
+
+    # ---------------------------------------
+    # 即時值
+    # ---------------------------------------
+    @log_exceptions(logger)     # 若發生未捕捉例外，自動寫 ERROR log + stacktrace
+    def current_values(self, tags: Iterable[str]) -> pd.Series:
+        """
+        將PIPoint 物件中的屬性 (current_value PI Data Archive 發出一次性查詢)，
+        把該結果的資料型態嘗試從 object->float，若遇文字型態，則用Nan 取代。
+        凡是無法轉型的原始值，都記一條 WARNING log。
+        最終以 pd.Series 回傳。
+        """
+        # 1) 如果遲線失敗，pts 就會是空字典 {}
+        pts = self.search_points(tags)
+
+        # 2) 先把「原始值」收齊
+        raw = {t: p.current_value for t, p in pts.items()}
+
+        # 3) 屬性/字串檢查，非數值一律轉成None
+        raw = _normalize_raw_values(raw)
+
+        # 4) 逐一轉float，失敗就Nan
+        numeric = pd.to_numeric(pd.Series(raw), errors="coerce")
+
+        # 5) 找出被轉成 NaN 的項目（且原本不是 NaN / None）
+        mask = numeric.isna() & pd.Series(raw).notna()
+        if mask.any():
+            logger.warning(
+                "Coerced %d / %d tags to NaN → %s",
+                mask.sum(), len(numeric),
+                ", ".join(f"{t} = {raw[t]}" for t in numeric[mask].index)
+            )
+            """
+            例如：
+            Coerced 2 / 25 tags to NaN → EAFA_Power='OFF', EAFB_Pressure='N/A'
+            """
+
+        numeric.name = "current_value"
+        return numeric
+
     # ---- (1) 單一 tag，仍保留 LRU ----
     @lru_cache(maxsize=256)
     def _search_point(self, tag: str):
         """只做一次搜尋並快取 PIPoint（連線只用一次）"""
         with Pi.PIServer() as server:
             return server.search(tag)[0]
-
-    def search_points(self, tags: Iterable[str]) -> Dict[str, Pi.PIPoint]:
-        """
-        一次性搜尋多個tag 的PIPoint 物件，並回傳一個字典。
-        """
-        tags = list(tags)   # 將傳入的Iterable[str} (可能是generator,set,Index)轉成可重複使用的list
-        with Pi.PIServer() as server:                 # **只開一次連線**
-            points = server.search(tags)              # PIconnect 支援 list/tuple
-        # points 與 tags 順序一致
-        return dict(zip(tags, points))
-
-    def current_values(self, tags: Iterable[str]) -> pd.Series:
-        """
-        將PIPoint 物件中的屬性 (current_value PI Data Archive 發出一次性查詢)，把該結果的資料型態 object->float，
-        若遇文字型態，則用Nan 取代。最終以 pd.Series 回傳。
-        """
-        pts = self.search_points(tags)
-        return pd.Series({t: pd.to_numeric(p.current_value, errors='coerce') for t, p in pts.items()},
-                         name="current_value")
 
     def query(
         self,
@@ -79,3 +152,10 @@ class PIClient:
         raw.index = raw.index.tz_localize(None) + pd.offsets.Second(tz_offset_sec)  #4
         raw.columns = list(tags)    #5
         return raw
+
+if __name__ == "__main__":  # pragma: no cover  # 測試用，正式執行不跑
+    client = PIClient()
+
+    # 假設其中一個 Tag 會回傳 "OFF" → 會被記 WARNING
+    demo_tags = ["W511_MS1/22.8KV/AJ_270/P", "W512_FT-401.PV", "W512_FT-202.PV"]
+    print(client.current_values(demo_tags))

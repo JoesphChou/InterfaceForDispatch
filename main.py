@@ -1,6 +1,9 @@
-import sys, re, time, math
+from logging_utils import setup_logging, log_exceptions, timeit
+
+setup_logging("logs/app.log", level="INFO")
+
+import sys, re, math
 from typing import Tuple
-from functools import wraps
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
@@ -12,8 +15,7 @@ from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 
-pi_client = PIClient()
-
+"""
 def timeit(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -23,6 +25,7 @@ def timeit(func):
         print(f"{func.__name__} 執行時間：{end - start:.4f} 秒")
         return result
     return wrapper
+"""
 
 def pre_check(pending_data, b=1, c='power'):
     """
@@ -38,7 +41,6 @@ def pre_check(pending_data, b=1, c='power'):
     if pending_data > 0.1:
         if c == 'gas':
             return str(format(round(pending_data, 1),'.1f'))
-            # return str(format(round(pending_data, 1), '.1f')) + ' Nm3/hr'
         elif c == 'h':
             return str(format(round(pending_data, 2), '.2f'))
         else:
@@ -122,6 +124,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_5.horizontalHeader().setVisible(False)
 
         self.update_benefit_tables(initialize_only=True)
+
 
     def tws_init(self):
         """
@@ -461,11 +464,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         6. 使用slice (切片器) 來指定 MultiIndex 的範圍，指定各一級單位B類型(廠區用電)的計算結果，
            指定到wx 這個Series,並重新設定index
         7. 將wx 內容新增到c_values 之後。
-
-        10. 獲取排程資料，並顯示在 tableWidget_4。
-        11. current 排程顯示在第 1 列 (`start ~ end` 和 製程狀態)。
-        12. future 排程顯示在後續列 (`start ~ end` 和 還剩幾分鐘開始)。
-        13. 若 current 為空，則 future 從第 1 列開始顯示。
         :return:
         """
 
@@ -1376,7 +1374,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         minutes = remainder // 60
         self.label_26.setText(f"{int(hours):02d}時{int(minutes):02d}分")
 
-    @timeit
+    @log_exceptions()
+    @timeit(level=20)
     def benefit_appraisal(self, *_):
 
         # **限制時間長度小於一定時間，而且不可以是負數的時間**
@@ -1995,6 +1994,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             table.setFixedHeight(total_h)
 
 if __name__ == "__main__":
+    pi_client = PIClient()
     app = QtWidgets.QApplication(sys.argv)
     myWin = MyMainForm()
     myWin.show()
