@@ -7,7 +7,7 @@ from typing import Tuple
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
-from UI import Ui_Form
+from UI import Ui_MainWindow
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from make_item import make_item
 from visualization import TrendChartCanvas # 引入數據可視化模組
@@ -63,7 +63,7 @@ def pre_check2(pending_data, b=1):
     else:
         return describe[b]
 
-class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
+class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
@@ -492,7 +492,16 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         - 若無 "過去排程" 資料，仍增加此分類，但不增加子排程，並顯示 "無相關排程"
         - **column 2 (狀態欄) 文字置中**
         """
-        past_df, current_df, future_df = scrape_schedule()
+        past_df, current_df, future_df, status = scrape_schedule()
+        if status == "ERROR":
+            # showMessage(text, timeout_ms)：timeout_ms 單位是毫秒，
+            # 若 timeout_ms = 0，訊息就會一直停留，不會自動消失。
+            self.statusBar().showMessage("⚠ 撈取排程資料失敗，請檢查網路或來源", 10000)
+            # 以上讓訊息顯示 5 秒後自動消失。如果要一直顯示，第二個參數可改成 0。
+            # 例如： self.statusBar().showMessage("⚠ 排程撈取失敗", 0)
+        else:
+            self.statusBar().clearMessage()
+
         self.tw4.clear()
 
         process_map = {"EAF": None, "LF1-1": None, "LF1-2": None}

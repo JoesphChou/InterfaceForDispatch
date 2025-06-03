@@ -67,10 +67,10 @@ _POOL = urllib3.PoolManager(retries=False, timeout=5.0)
 
 def scrape_schedule(
     *,
-    now: datetime | None = None,
-    pool: urllib3.PoolManager | None = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Fetch both pages and return *(past_df, current_df, future_df)*.
+    now: datetime or None = None,
+    pool: urllib3.PoolManager or None = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
+    """Fetch both pages and return *(past_df, current_df, future_df, status)*.
 
     Parameters
     ----------
@@ -93,7 +93,8 @@ def scrape_schedule(
         past_df = pd.DataFrame(columns=["Group1", "Group2", "value", "timestamp"])
         current_df = pd.DataFrame(columns=["Group1", "Group2", "value", "timestamp"])
         future_df = pd.DataFrame(columns=["Group1", "Group2", "value", "timestamp"])
-        return past_df, current_df, future_df
+        status = "ERROR"
+        return past_df, current_df, future_df, status
 
     areas = soup_2138.find_all("area")
 
@@ -171,8 +172,8 @@ def scrape_schedule(
     past_df = pd.DataFrame(past, columns=["開始時間", "結束時間", "爐號", "製程"])
     current_df = pd.DataFrame(current, columns=["開始時間", "結束時間", "爐號", "製程", "製程狀態"])
     future_df = pd.DataFrame(future, columns=["開始時間", "結束時間", "爐號", "製程"])
-
-    return past_df, current_df, future_df
+    status = "OK"
+    return past_df, current_df, future_df, status
 
 # ---------------------------------------------------------------------------
 # INTERNAL HELPERS
@@ -193,16 +194,8 @@ def _fetch_soup(url: str, pool: urllib3.PoolManager, retries: int = 2, delay: fl
     # 最後一次仍失敗
     logger.error(f"多次重試後仍無法 GET {url}，回傳 None")
     return None
-    """
-    if r.status != 200:
-        # 記錄錯誤，但不丟例外
-        logger.error(f"GET {url} 失敗:HTTP {r.status}，將回傳 None")
-        # raise RuntimeError(f"GET {url} 失敗: HTTP {r.status}")
-        return None
-    return BeautifulSoup(r.data, "html.parser")
-    """
 
-def _infer_process_type(y: int) -> str | None:
+def _infer_process_type(y: int) -> str or None:
     for proc, (lo, hi) in _PROCESS_Y_RANGES.items():
         if lo <= y <= hi:
             return proc
@@ -269,7 +262,7 @@ def _get_status(soup: BeautifulSoup, element_id: str) -> str:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    p_df, c_df, f_df = scrape_schedule()
+    p_df, c_df, f_df, status = scrape_schedule()
     print("Past\n", p_df.tail())
     print("Current\n", c_df)
     print("Future\n", f_df.head())
