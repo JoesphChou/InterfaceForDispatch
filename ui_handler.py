@@ -1,4 +1,8 @@
 from PyQt6 import QtCore
+from PyQt6 import QtWidgets
+
+from logging_utils import get_logger
+logger = get_logger(__name__)
 
 def setup_ui_behavior(ui):
     """
@@ -40,6 +44,15 @@ def setup_ui_behavior(ui):
     ui.horizontalScrollBar.valueChanged.connect(ui.confirm_value)
     ui.dateEdit_3.dateChanged.connect(ui.date_edit3_user_change)
 
+    # ===== 主視窗下面 status bar (狀態欄) 相關設定 =====
+    font = ui.statusBar().font()
+    font.setPointSize(12)
+    ui.statusBar().setFont(font)
+
+    ui.multiLineLabel = QtWidgets.QLabel(ui)
+    ui.multiLineLabel.setWordWrap(True)
+    ui.statusBar().addWidget(ui.multiLineLabel, 1)
+
     # ===== 設定初始日期與時間元件 =====
     ui.dateEdit.setDate(QtCore.QDate().currentDate())
     ui.dateEdit_2.setDate(QtCore.QDate().currentDate())
@@ -58,10 +71,12 @@ def setup_ui_behavior(ui):
 
     # ===== 啟動 QThread 任務（需主程式定義 run function） =====
     ui.thread_1 = QtCore.QThread()
+    ui.thread_1.setObjectName("Dashboard_Updator")
     ui.thread_1.run = ui.continuously_update_current_value
     ui.thread_1.start()
 
     ui.thread_2 = QtCore.QThread()
+    ui.thread_2.setObjectName("scrapy")
     ui.thread_2.run = ui.continuously_scrapy_and_update
     ui.thread_2.start()
 

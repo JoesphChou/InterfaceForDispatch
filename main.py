@@ -1,28 +1,19 @@
-import sys, re, time, math
+from logging_utils import setup_logging, log_exceptions, timeit
+
+setup_logging("logs/app.log", level="INFO")
+
+import sys, re, math
 from typing import Tuple
-from functools import wraps
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
-from UI import Ui_Form
+from UI import Ui_MainWindow
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from make_item import make_item
 from visualization import TrendChartCanvas # 引入數據可視化模組
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
-
-pi_client = PIClient()
-
-def timeit(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        end = time.perf_counter()
-        print(f"{func.__name__} 執行時間：{end - start:.4f} 秒")
-        return result
-    return wrapper
 
 def pre_check(pending_data, b=1, c='power'):
     """
@@ -38,7 +29,6 @@ def pre_check(pending_data, b=1, c='power'):
     if pending_data > 0.1:
         if c == 'gas':
             return str(format(round(pending_data, 1),'.1f'))
-            # return str(format(round(pending_data, 1), '.1f')) + ' Nm3/hr'
         elif c == 'h':
             return str(format(round(pending_data, 2), '.2f'))
         else:
@@ -61,7 +51,7 @@ def pre_check2(pending_data, b=1):
     else:
         return describe[b]
 
-class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
+class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
@@ -122,6 +112,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         self.tableWidget_5.horizontalHeader().setVisible(False)
 
         self.update_benefit_tables(initialize_only=True)
+
 
     def tws_init(self):
         """
@@ -461,11 +452,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         6. 使用slice (切片器) 來指定 MultiIndex 的範圍，指定各一級單位B類型(廠區用電)的計算結果，
            指定到wx 這個Series,並重新設定index
         7. 將wx 內容新增到c_values 之後。
-
-        10. 獲取排程資料，並顯示在 tableWidget_4。
-        11. current 排程顯示在第 1 列 (`start ~ end` 和 製程狀態)。
-        12. future 排程顯示在後續列 (`start ~ end` 和 還剩幾分鐘開始)。
-        13. 若 current 為空，則 future 從第 1 列開始顯示。
         :return:
         """
 
@@ -494,7 +480,16 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         - 若無 "過去排程" 資料，仍增加此分類，但不增加子排程，並顯示 "無相關排程"
         - **column 2 (狀態欄) 文字置中**
         """
-        past_df, current_df, future_df = scrape_schedule()
+        past_df, current_df, future_df, status = scrape_schedule()
+        if status == "ERROR":
+            # showMessage(text, timeout_ms)：timeout_ms 單位是毫秒，
+            # 若 timeout_ms = 0，訊息就會一直停留，不會自動消失。
+            self.statusBar().showMessage("⚠ 撈取排程資料失敗，請檢查網路或來源", 10000)
+            # 以上讓訊息顯示 5 秒後自動消失。如果要一直顯示，第二個參數可改成 0。
+            # 例如： self.statusBar().showMessage("⚠ 排程撈取失敗", 0)
+        else:
+            self.statusBar().clearMessage()
+
         self.tw4.clear()
 
         process_map = {"EAF": None, "LF1-1": None, "LF1-2": None}
@@ -1376,8 +1371,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
         minutes = remainder // 60
         self.label_26.setText(f"{int(hours):02d}時{int(minutes):02d}分")
 
-    @timeit
+    @log_exceptions()
+    @timeit(level=20)
     def benefit_appraisal(self, *_):
+
+        self.statusBar().showMessage("⏳🏃‍計算效益中，請稍後...🏃⏳", 100000)
+        # 會短暫回到事件循環(只執行一次)，讓 statusBar().showMessage 先跑一次。
+        QtWidgets.QApplication.processEvents()
 
         # **限制時間長度小於一定時間，而且不可以是負數的時間**
         if "錯誤" in self.label_26.text():
@@ -1603,6 +1603,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
 
         self.update_benefit_tables(cost_benefit, t_resolution, version_used = self.version_used)
         self.trend_chart.plot_from_dataframe(cost_benefit)
+
+        self.statusBar().clearMessage()
 
     def update_benefit_tables(self, cost_benefit=None, t_resolution=None, version_used=None, initialize_only=False):
         def color_config(name):
@@ -1995,6 +1997,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_Form):
             table.setFixedHeight(total_h)
 
 if __name__ == "__main__":
+    pi_client = PIClient()
     app = QtWidgets.QApplication(sys.argv)
     myWin = MyMainForm()
     myWin.show()
