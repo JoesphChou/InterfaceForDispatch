@@ -15,18 +15,6 @@ from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 
-"""
-def timeit(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        end = time.perf_counter()
-        print(f"{func.__name__} 執行時間：{end - start:.4f} 秒")
-        return result
-    return wrapper
-"""
-
 def pre_check(pending_data, b=1, c='power'):
     """
     此函式用來判顯示在tree,table widget  的即時資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
@@ -1387,6 +1375,10 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
     @timeit(level=20)
     def benefit_appraisal(self, *_):
 
+        self.statusBar().showMessage("⏳🏃‍計算效益中，請稍後...🏃⏳", 100000)
+        # 會短暫回到事件循環(只執行一次)，讓 statusBar().showMessage 先跑一次。
+        QtWidgets.QApplication.processEvents()
+
         # **限制時間長度小於一定時間，而且不可以是負數的時間**
         if "錯誤" in self.label_26.text():
             self.show_box('起始時間必須比結束時間早！')
@@ -1611,6 +1603,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
 
         self.update_benefit_tables(cost_benefit, t_resolution, version_used = self.version_used)
         self.trend_chart.plot_from_dataframe(cost_benefit)
+
+        self.statusBar().clearMessage()
 
     def update_benefit_tables(self, cost_benefit=None, t_resolution=None, version_used=None, initialize_only=False):
         def color_config(name):

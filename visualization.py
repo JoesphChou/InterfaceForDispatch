@@ -3,7 +3,7 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
-from logging_utils import get_logger, log_exceptions, timeit
+from logging_utils import get_logger
 logger = get_logger(__name__)
 
 class TrendChartCanvas(FigureCanvas):
