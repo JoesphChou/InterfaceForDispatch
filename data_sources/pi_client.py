@@ -53,27 +53,43 @@ class PIClient:
     def __init__(self, timezone: str = "Asia/Taipei"):
         # 從 PI 取出的 timestamp 時區改成 GMT+8
         Pi.PIConfig.DEFAULT_TIMEZONE = timezone
+        self._point_cache: Dict[str, Pi.PIPoint] = {}
 
-    # ---------------------------------------
-    # 基本查詢
-    # ---------------------------------------
-    """"""
+    # ---- 單一 tag，仍保留 LRU ----
+    @lru_cache(maxsize=256)
+    def _search_point(self, tag: str) -> Pi.PIPoint | None:
+        """
+            單一 tag 搜尋，並快取PIPoint。
+            如果失敗，log 後回傳 None。
+        """
+        try:
+            with Pi.PIServer() as server:
+                return server.search(tag)[0]
+        except Exception as e:
+            logger.error('單點搜尋失敗 %s : %s', tag, e)
+            return None
+
+    # ---- 多 tag 查詢 ----
     def search_points(self, tags: Iterable[str]) -> Dict[str, Pi.PIPoint]:
         """
         一次性搜尋多個tag 的PIPoint 物件，並回傳一個字典。
+        但只對 self._point_cache 裡沒有的做搜尋，並對每一筆失敗個別處理。
         """
         tags = list(tags)   # 將傳入的Iterable[str} (可能是generator,set,Index)轉成可重複使用的list
-        try:
-            # 這句就會自動連線；若 PI Server 不可用，
-            # PIconnect 應該會在此處拋出例外 (比如網路錯誤、憑證錯誤…)
-            with Pi.PIServer() as server:                 # **只開一次連線**
-                points = server.search(tags)              # PIconnect 支援 list/tuple
-        except Exception as e:
-            # 你可以選擇重新拋出，自訂例外，或回傳空 dict
-            logger.error(f"[PIClient] 無法連線到 PI Server：{e}")
-            return {}  # 或 raise e
-        # # 成功拿到 PIPoint 列表，回傳一個 dict，裡面的 points 與 tags 順序一致
-        return dict(zip(tags, points))
+        result: Dict[str, Pi.PIPoint] = {}
+        for tag in tags:
+            # 先試從 cache（_search_point 本身也快取）
+            point = self._point_cache.get(tag)
+            if point is None:
+                # 再呼一次底層搜尋（帶快取）
+                point = self._search_point(tag)
+                if point:
+                    self._point_cache[tag] = point
+                else:
+                    # 這裡可以決定是跳過、raise 或是用 dummy point
+                    continue
+            result[tag] = point
+        return result
 
     # ---------------------------------------
     # 即時值
@@ -114,13 +130,6 @@ class PIClient:
         numeric.name = "current_value"
         return numeric
 
-    # ---- (1) 單一 tag，仍保留 LRU ----
-    @lru_cache(maxsize=256)
-    def _search_point(self, tag: str):
-        """只做一次搜尋並快取 PIPoint（連線只用一次）"""
-        with Pi.PIServer() as server:
-            return server.search(tag)[0]
-
     def query(
         self,
         st: pd.Timestamp,
@@ -152,6 +161,42 @@ class PIClient:
         raw.index = raw.index.tz_localize(None) + pd.offsets.Second(tz_offset_sec)  #4
         raw.columns = list(tags)    #5
         return raw
+
+    def fetch_history(
+        self,
+        tags: Iterable[str],
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        freq: str = "1T",
+        fillna_method: str = "ffill",
+    ) -> pd.DataFrame:
+        """
+        批次抓取多個 PI tag 的區段資料並對齊為同一時間軸。
+
+        Parameters
+        ----------
+        tags : list[str]
+        start, end : pd.Timestamp
+        freq : str
+            重新取樣的頻率；傳給 pandas.resample 使用，如 "30S", "5T"。
+        fillna_method : str
+            收斂空值方法，支援 "ffill" / "bfill" / "none"。
+        """
+        tags = list(tags)
+        raw = {}
+        for tag in tags:
+            try:
+                # 直接呼叫目前這個 client 的 query，傳入單一 tag
+                df_tag: pd.DataFrame = self.query(start, end, [tag], summary="RANGE", interval=freq)
+                # query 回傳的 df_tag.columns = [tag], 所以取該欄
+                raw[tag] = df_tag[tag]
+            except Exception as e:
+                logger.error("fetch_history 無法取到 %s：%s", tag, e)
+
+        df = pd.DataFrame(raw).sort_index()
+        if fillna_method in ("ffill", "bfill"):
+            df = getattr(df, fillna_method)()
+        return df
 
 if __name__ == "__main__":  # pragma: no cover  # 測試用，正式執行不跑
     client = PIClient()
