@@ -1,6 +1,6 @@
 from __future__ import annotations
 from functools import lru_cache
-from typing import Iterable, Literal, Dict
+from typing import Iterable, Literal, Dict, Optional
 import pandas as pd
 import PIconnect as Pi
 import numpy as np
@@ -8,7 +8,7 @@ from logging_utils import get_logger, log_exceptions
 
 logger = get_logger(__name__)
 
-SummaryType = Literal["RANGE", "MAXIMUM", "MINIMUM", "AVERAGE"]
+SummaryType = Literal["RANGE", "MAXIMUM", "MINIMUM", "AVERAGE","TOTAL"]
 
 def _normalize_raw_values(raw_dict: dict) -> dict:
     """
@@ -47,7 +47,6 @@ class PIClient:
         "MINIMUM": Pi.PIConsts.SummaryType.MINIMUM,
         "AVERAGE": Pi.PIConsts.SummaryType.AVERAGE,
         "TOTAL": Pi.PIConsts.SummaryType.TOTAL,
-        "ALL": Pi.PIConsts.SummaryType.ALL,
     }
 
     def __init__(self, timezone: str = "Asia/Taipei"):
@@ -137,6 +136,7 @@ class PIClient:
         tags: Iterable[str],
         summary: SummaryType = "RANGE",
         interval: str = "15m",
+        fillna_method: Optional[str] = None,
         tz_offset_sec: int = 0,
     ) -> pd.DataFrame:
         st, et = [t - pd.offsets.Second(tz_offset_sec) for t in (st, et)]
@@ -150,53 +150,26 @@ class PIClient:
             3.將list 中所有的 DataFrame 合併為一組新的 DataFrame 資料
             4.把原本用來做index 的時間，將時區從tz aware 改為 native，並加入與OSAKI 時間差參數進行調整。
             5.將結果直接用tag 當欄名，以DataFrame 格式回傳。 shape(資料數量, tag數量)
+            6.決定是否填補nan 值
+        Parameters
+        ----------
+        fillna_method : str
+            收斂空值方法，支援 "ffill" / "bfill" / "None"。
         """
         dfs = []
         for tag in tags:
             point = self._search_point(tag)
-            df = point.summaries(st, et, interval, code)    #1
-            dfs.append(pd.to_numeric(df[summary], errors="coerce"))     #2
+            df = point.summaries(st, et, interval, code)                # 1
+            dfs.append(pd.to_numeric(df[summary], errors="coerce"))     # 2
 
-        raw = pd.concat(dfs, axis=1)    #3
-        raw.index = raw.index.tz_localize(None) + pd.offsets.Second(tz_offset_sec)  #4
-        raw.columns = list(tags)    #5
+        raw = pd.concat(dfs, axis=1)                # 3
+        raw.index = raw.index.tz_localize(None) + pd.offsets.Second(tz_offset_sec)  # 4
+        raw.columns = list(tags)                    # 5
+
+        if fillna_method in ("ffill", "bfill"):     # 6
+            raw = getattr(raw, fillna_method)()
+
         return raw
-
-    def fetch_history(
-        self,
-        tags: Iterable[str],
-        start: pd.Timestamp,
-        end: pd.Timestamp,
-        freq: str = "1T",
-        fillna_method: str = "ffill",
-    ) -> pd.DataFrame:
-        """
-        批次抓取多個 PI tag 的區段資料並對齊為同一時間軸。
-
-        Parameters
-        ----------
-        tags : list[str]
-        start, end : pd.Timestamp
-        freq : str
-            重新取樣的頻率；傳給 pandas.resample 使用，如 "30S", "5T"。
-        fillna_method : str
-            收斂空值方法，支援 "ffill" / "bfill" / "none"。
-        """
-        tags = list(tags)
-        raw = {}
-        for tag in tags:
-            try:
-                # 直接呼叫目前這個 client 的 query，傳入單一 tag
-                df_tag: pd.DataFrame = self.query(start, end, [tag], summary="RANGE", interval=freq)
-                # query 回傳的 df_tag.columns = [tag], 所以取該欄
-                raw[tag] = df_tag[tag]
-            except Exception as e:
-                logger.error("fetch_history 無法取到 %s：%s", tag, e)
-
-        df = pd.DataFrame(raw).sort_index()
-        if fillna_method in ("ffill", "bfill"):
-            df = getattr(df, fillna_method)()
-        return df
 
 if __name__ == "__main__":  # pragma: no cover  # 測試用，正式執行不跑
     client = PIClient()

@@ -14,13 +14,13 @@ def setup_ui_behavior(ui):
     """
     # ===== 按鈕事件連結 =====
     ui.pushButton.clicked.connect(ui.query_cbl)
-    ui.pushButton_2.clicked.connect(ui.add_list_item)
-    ui.pushButton_3.clicked.connect(ui.remove_list_item1)
+    ui.pushButton_2.clicked.connect(ui.add_item_to_cbl_list)
+    ui.pushButton_3.clicked.connect(ui.remove_item_from_cbl_list)
     ui.pushButton_4.clicked.connect(ui.query_demand)
     ui.pushButton_5.clicked.connect(ui.benefit_appraisal)
 
     # ===== Tree/Table 選擇與輸入事件 =====
-    ui.listWidget.doubleClicked.connect(ui.remove_list_item1)
+    ui.listWidget.doubleClicked.connect(ui.remove_item_from_cbl_list)
     ui.spinBox_2.valueChanged.connect(ui.tz_changed)
     ui.timeEdit.dateTimeChanged.connect(ui.tz_changed)
     ui.tableWidget_2.itemSelectionChanged.connect(ui.handle_selection_changed)

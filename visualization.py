@@ -1,10 +1,93 @@
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 from logging_utils import get_logger
+import pandas as pd
+from typing import List, Optional, Tuple
+from PyQt6 import QtWidgets
+from PyQt6.QtWidgets import QFileDialog
+
 logger = get_logger(__name__)
+
+def plot_tag_trends(
+    df: pd.DataFrame,
+    tags: List[str],
+    *,
+    title: Optional[str] = None,
+    figsize: Tuple[int, int] = (12, 6),
+    show_legend: bool = True,
+):
+    """
+    將多個 tag 的時間序列疊在同一張圖。
+
+    Parameters
+    ----------
+    df : DataFrame，index 為 Timestamp
+    tags : 欲繪製的欄位名稱
+    title : 圖表標頭
+    figsize : 圖表大小
+    show_legend : 是否顯示圖例
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    for tag in tags:
+        if tag not in df.columns:
+            continue
+        ax.plot(df.index, df[tag], label=tag)
+
+    # 軸線格式化
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d\n%H:%M"))
+    ax.set_xlabel("Datetime")
+    ax.set_ylabel("Value")
+    if title:
+        ax.set_title(title)
+
+    if show_legend:
+        ax.legend(loc="best")
+
+    # 加網格
+    ax.grid(True, which='major', linestyle='--', alpha=0.5)     # 主格線
+    ax.minorticks_on()                                          # 開啟次要刻度
+    ax.grid(True, which='minor', linestyle=':', alpha=0.3)      # 次格線
+
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig, ax
+
+class CustomToolbar(NavigationToolbar2QT):
+# 客製NavigationToolbar2QT.save_figure 這個類別方法
+# 用來解決save 的對話框被藏到背後去，而導致app 卡住。
+    def save_figure(self, *args):
+        # 單一 flag
+        filename, _ = QFileDialog.getSaveFileName(
+            parent=self,
+            caption="Save Figure",
+            directory="",
+            filter="PNG Files (*.png);;All Files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog
+        )
+
+        if filename:
+            self.canvas.figure.savefig(filename)
+
+class TrendWindow(QtWidgets.QMainWindow):
+    def __init__(self, fig, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("用電特性趨勢圖")
+        # 建立中央容器
+        central_widget = QtWidgets.QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QtWidgets.QVBoxLayout(central_widget)
+
+        # 建立 Matplotlib Canvas 與 Toolbar
+        canvas = FigureCanvas(fig)
+        toolbar = CustomToolbar(canvas, self)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas)
+
+        self.resize(900, 500)
 
 class TrendChartCanvas(FigureCanvas):
     def __init__(self, parent=None, width=6, height=3, dpi=100):
@@ -14,6 +97,7 @@ class TrendChartCanvas(FigureCanvas):
         self.setParent(parent)
         plt.rcParams['font.family'] = 'Microsoft JhengHei'  # 微軟正黑體
         plt.rcParams['axes.unicode_minus'] = False  # 支援負號正確顯示
+
 
     def plot_from_dataframe(self, df):
         if not {'原始TPC', '即時TPC'}.issubset(df.columns):
