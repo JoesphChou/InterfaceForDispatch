@@ -1,19 +1,23 @@
-from logging_utils import setup_logging, log_exceptions, timeit
+from logging_utils import setup_logging, log_exceptions, timeit, get_logger
 
 setup_logging("logs/app.log", level="INFO")
+logger = get_logger(__name__)
 
 import sys, re, math
-from typing import Tuple
+from typing import Tuple, Optional
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
 from UI import Ui_MainWindow
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from make_item import make_item
-from visualization import TrendChartCanvas # 引入數據可視化模組
+from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends # 引入數據可視化模組
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
+from data_sources.data_analysis import (estimate_speed_from_last_peaks, analyze_production_avg_cycle,
+                                        analyze_production_single_cycle)
+
 
 def pre_check(pending_data, b=1, c='power'):
     """
@@ -72,6 +76,143 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         self.trend_chart = TrendChartCanvas(self)
         setup_ui_behavior(self)
 
+        # --- 等待放到 ui_handler.py ---
+        self.pushButton_6.clicked.connect(self.analyze_hsm)
+        self.pushButton_9.clicked.connect(self.on_show_trend)
+        self.listWidget_2.addItems(['HSM 軋延機組'])
+        self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
+        self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
+        self.listWidget_3.itemDoubleClicked.connect(self.remove_target_tag_from_list3)
+        self.radioButton_5.setChecked(True)
+
+        # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
+        current_datetime = QtCore.QDateTime.currentDateTime()
+        rounded_current_datetime = current_datetime.addSecs(
+            -current_datetime.time().minute() * 60 - current_datetime.time().second())
+
+        # 設定結束時間為目前整點時間
+        self.dateTimeEdit_4.setDateTime(rounded_current_datetime)
+
+        # 設定起始時間為結束時間的前兩小時
+        start_datetime = rounded_current_datetime.addSecs(-7200)  # 前兩小時
+        self.dateTimeEdit_3.setDateTime(start_datetime)
+        self.dateTimeEdit_5.setDateTime(rounded_current_datetime.addSecs(-900))
+
+    def remove_target_tag_from_list3(self, item: QtWidgets.QListWidgetItem):
+        row = self.listWidget_3.row(item)           # 取得該 item 所在的列號
+        taken = self.listWidget_3.takeItem(row)     # 從listWidget_3 拿出(並移除) 該item
+        del taken                                   # del 掉這些物件，避免記憶體累積和洩漏
+
+    def add_target_tag_to_list3(self, item: QtWidgets.QListWidgetItem):
+        name = item.text()
+        self.listWidget_3.addItems([name])
+        #self.listWidget_3.addItems(self.tag_list.loc[self.tag_list['name'] == name, 'tag_name2'])
+
+    def analyze_hsm(self):
+        """ 試調分析 HSM 用電資訊 """
+        # -- 設定區 --
+        interval = 2
+        tag_reference = self.tag_list.set_index('name').copy()
+        tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
+        start = pd.Timestamp(self.dateTimeEdit_5.dateTime().toString())
+        end = pd.Timestamp(self.dateTimeEdit_5.dateTime().toString()) + pd.offsets.Minute(self.spinBox_5.value())
+
+        # 從PI 系統抓資料
+        df = pi_client.query(start, end, tags, 'AVERAGE', f'{interval}s', 'ffill')
+
+        # 將資料分類
+        # 取出 9h140~9h280、9h180~9kb33 的欄位名稱list
+        cols = (list(df.loc[:,'W511_HSM/33KV/9H_140/P':'W511_HSM/33KV/9H_280/P'].columns) +
+                list(df.loc[:,'W511_HSM/33KV/9H_180/P':'W511_HSM/11.5KV/9KB1_2_33/P'].columns))
+
+        original_date = pd.DataFrame(df[cols].sum(axis=1),columns=['Main_group'])
+        filter_date = df.loc[:,'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
+
+        # 呼叫 data_analysis 的 analyze_production_avg_cycle
+        res3 = analyze_production_avg_cycle(original_date['Main_group'], threshold=self.spinBox_3.value(),
+                                            smooth_window=int(40/interval), prominence=self.spinBox_4.value(),
+                                            power_filter=filter_date, plot=True)
+
+    def on_show_trend(self):
+        """趨勢圖測試區"""
+        interval = 2
+        tags = []
+        tags2 = []
+        tag_reference = self.tag_list.set_index('name').copy()
+
+        # 1. 先決定 tag 與區間，可由 UI 元件收集
+        for i in range(self.listWidget_3.count()):
+            if self.listWidget_3.item(i).text() == 'HSM 軋延機組':
+                if self.radioButton_5.isChecked():
+                    tags.extend(tag_reference.loc['9H140':'9KB33','tag_name2'].tolist())
+                else:
+                    tags.extend(tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist())
+            else:
+                if self.radioButton_5.isChecked():
+                    tags.extend(tag_reference.loc[
+                                    tag_reference.index == self.listWidget_3.item(i).text(), 'tag_name2'].tolist())
+                else:
+                    tags.extend(tag_reference.loc[
+                                    tag_reference.index == self.listWidget_3.item(i).text(), 'tag_name'].tolist())
+        tags2.extend(tag_reference.loc['9H160':'9H170', 'tag_name'].tolist())
+        start = pd.Timestamp(self.dateTimeEdit_3.dateTime().toString())
+        end = pd.Timestamp(self.dateTimeEdit_4.dateTime().toString())
+
+        # 2. 抓資料
+        if not tags:
+            self.statusBar().showMessage("尚未選擇要顯示的迴路！！")
+            return
+
+        if self.radioButton_5.isChecked():     # --- 用 kwh 反推 ---
+            df = pi_client.query(start, end, tags, 'RANGE', f'{interval}s', 'ffill')
+            df = df * 3600 / interval
+        else:                   # --- 用 p值讀資料 ---
+            df = pi_client.query(start, end, tags, 'AVERAGE', f'{interval}s', 'ffill')
+
+        if self.checkBox_3.isChecked():
+            df = pd.DataFrame(df.sum(axis=1),columns=['add'])
+            tags.append('add')
+
+        # 3. 畫圖
+        fig, _ = plot_tag_trends(df, tags, title="用電趨勢圖")
+
+        # 4. 開新窗
+        self._trend_win = TrendWindow(fig, self)  # 持有引用避免被 GC
+        self._trend_win.show()
+
+        """
+        # 5. FFT 分析
+        if self.checkBox_4.isChecked():
+            #main_period, freqs, amps = detect_periodicity(df['add'], 1/interval)
+
+            res2 = estimate_speed_from_last_peaks(df['add'], height=self.spinBox_3.value(), smooth_window=20,
+                                                  prominence=self.spinBox_4.value())
+            print("------即時用的生產速度-----------")
+            if not res2['rest']:
+                print("(1) 最後兩峰間隔:", res2['dt_s'], " 秒")
+                print("(2) 生產速度:", res2['rate_items_per_15min'], " 卷/15分鐘")
+                #print("(3) 這段週期內秏電:", res2['energy_interval_kwh'], " kwh")
+                print("(4) 每卷需量:", res2['demand_per_item'], " MW \n")
+            else:
+                print(res2['error'])
+
+            res = analyze_production_single_cycle(df['add'], threshold=self.spinBox_3.value(),
+                                                     smooth_window=20, prominence=self.spinBox_4.value(),
+                                                     power_filter=df2['filter'], plot=True)
+            print("-----power_filter + smoothed + 以第一/最後完整週期長度推估 unfinished------------")
+            print("(1) 生產速度：", res['rate_items_per_15min'], "卷/15 分鐘")
+            print("(2) 總共生產件數：", res['total_items'], "卷")
+            print("(3) 15分鐘需量:", res['demand_15m'], " MW \n")
+
+            res3 = analyze_production_avg_cycle(df['add'], threshold=self.spinBox_3.value(),
+                                                     smooth_window=20, prominence=self.spinBox_4.value(),
+                                                     power_filter=df2['filter'], plot=True)
+            print("-----power_filter + smoothed + 以所有完整週期平均長度推估 unfinished：------------")
+            print("(1) 生產速度：", res3['rate_items_per_15min'], "卷/15 分鐘")
+            print("(2) 總共生產件數：", res3['total_items'], "卷")
+            print("(3) 15分鐘需量:", res3['demand_15m'], " MW \n")
+        """
+
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """
             ❶ 只要覆寫 closeEvent 就能攔截使用者關窗的動作
@@ -112,7 +253,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         self.tableWidget_5.horizontalHeader().setVisible(False)
 
         self.update_benefit_tables(initialize_only=True)
-
 
     def tws_init(self):
         """
@@ -1327,11 +1467,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
                 return True
         return False
 
-    def remove_list_item1(self):
+    def remove_item_from_cbl_list(self):
         selected = self.listWidget.currentRow() # 取得目前被點撃item 的index
         self.listWidget.takeItem(selected) # 將指定index 的item 刪除
 
-    def add_list_item(self):
+    def add_item_to_cbl_list(self):
         pending_date = pd.Timestamp(self.dateEdit_2.date().toString())
         if pending_date.date() >= pd.Timestamp.today().date():      # datetime格式比較
             self.show_box(content='不可指定今天或未來日期作為CBL參考日期！')
@@ -1393,7 +1533,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             return
 
         # ** 時間上的解析度設定 **
-        t_resolution = 20
+        t_resolution = 10
         t_resolution_str = f'{t_resolution}s'
         coefficient = t_resolution * 1000 / 3600 # 1000: MWH->KWH  3600: hour->second
         special_date = self.special_dates['台電離峰日'].tolist()
@@ -1809,7 +1949,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         # ** 計算及顯示指定期間的NG 使用量
         ng_active = cost_benefit[cost_benefit['NG 總用量'] > 0]
         ng_duration_secs = len (ng_active) * t_resolution
-        ng_amount = cost_benefit['NG 總用量'].mean() * ng_duration_secs / 3600
+        ng_amount = cost_benefit.loc[cost_benefit['NG 總用量']>0, 'NG 總用量'].mean() * ng_duration_secs / 3600
         par1 = get_ng_generation_cost_v2(self.unit_prices, cost_benefit.index[0])
         ng_kwh = ng_amount * par1.get('convertible_power')
         self.label_30.setText(f"{ng_amount:,.0f} Nm3\n({ng_kwh:,.0f} kWH)")
