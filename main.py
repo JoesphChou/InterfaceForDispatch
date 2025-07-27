@@ -15,9 +15,7 @@ from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends # 引�
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
-from data_sources.data_analysis import (estimate_speed_from_last_peaks, analyze_production_avg_cycle,
-                                        analyze_production_single_cycle)
-
+from data_sources.data_analysis import estimate_speed_from_last_peaks, analyze_production_avg_cycle
 
 def pre_check(pending_data, b=1, c='power'):
     """
@@ -55,11 +53,46 @@ def pre_check2(pending_data, b=1):
     else:
         return describe[b]
 
+class PiReader(QtCore.QThread):
+    # 定義完成訊號，傳回讀到的資料或例外
+    data_ready = QtCore.pyqtSignal(object, object) # (tag_group, data 或 exception)
+
+    def __init__(self, pi_client, key, parent=None):
+        super().__init__(parent)
+        self.pi_client = pi_client
+        self.query_kwargs = None    # 先暫時不給參數
+        self.key = key
+        self.logger = get_logger(__name__)
+
+    def set_query_params(self, **kwargs):
+        """ 在啟動前設定好所有要傳給pi_client.query() 的參數 """
+        self.query_kwargs = kwargs
+
+    @timeit(level=20)
+    def run(self):
+        if not self.query_kwargs:
+            self.logger.error("run(0 前必須先呼叫 set_query_params() 設定參數")
+            return
+
+        self.logger.info(f"開始 PI 查詢，參數:{self.query_kwargs}")
+        try:
+            data = self.pi_client.query(**self.query_kwargs)
+            self.logger.info("PI 查詢完成，資料筆數: %d", len(data))
+            self.data_ready.emit(self.key, data)
+
+        except Exception as e:
+            self.logger.exception("PI 查詢失敗")
+            self.data_ready.emit(self.query_kwargs, e)
+
 class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
         super(MyMainForm, self).__init__()
         self.setupUi(self)
 
+        # --- 用QThread 同時讀取兩組PI 資料的功能 (等待放到 ui_handler.py) ---
+        self.pi_client = pi_client
+
+        # -------- 從外部資料讀取設定檔，並儲存成這個實例本身的成員變數 -----------
         self.tag_list = pd.read_excel('.\parameter.xlsx', sheet_name=0).dropna(how='all')
         self.special_dates = pd.read_excel('.\parameter.xlsx', sheet_name=1)
         self.unit_prices = pd.read_excel('.\parameter.xlsx', sheet_name=2, index_col=0)
@@ -71,12 +104,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         self.average_text = "#154360"     # 平均值文字顏色 深藍色文字
         self.average_back = "#D6EAF8"     # 平均值背景顏色 淡藍色背景
         self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
+        self.hsm_attribute = pd.DataFrame()            # 用來紀錄從HSM 用電資料分析出來的特性
+
         self.dashboard_value()
         # 建立趨勢圖元件並加入版面配置
         self.trend_chart = TrendChartCanvas(self)
         setup_ui_behavior(self)
 
-        # --- 等待放到 ui_handler.py ---
+        # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
         self.pushButton_9.clicked.connect(self.on_show_trend)
         self.listWidget_2.addItems(['HSM 軋延機組'])
@@ -84,6 +119,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
         self.listWidget_3.itemDoubleClicked.connect(self.remove_target_tag_from_list3)
         self.radioButton_5.setChecked(True)
+        self.pushButton_7.clicked.connect(lambda: self.analyze_hsm_long_period())
 
         # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
         current_datetime = QtCore.QDateTime.currentDateTime()
@@ -106,12 +142,145 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
     def add_target_tag_to_list3(self, item: QtWidgets.QListWidgetItem):
         name = item.text()
         self.listWidget_3.addItems([name])
-        #self.listWidget_3.addItems(self.tag_list.loc[self.tag_list['name'] == name, 'tag_name2'])
+
+    @QtCore.pyqtSlot(dict, object)
+    def on_data_ready(self, tags: tuple, result: object):
+        if isinstance(result, Exception):
+            QtWidgets.QMessageBox.critical(
+                self,
+                "歷史負載查詢錯誤",
+                f"標籤 {tags} 查詢失敗：{result}"
+            )
+            return
+        # 結果正常，存起來
+        self._history_results[tags] = result
+
+        # 等到兩組都拿到，才做後續處理
+        needed = {tuple(self.thread1.key), tuple(self.thread2.key)}
+        if needed.issubset(self._history_results):
+            # -------- 計算特定週期，各設備群組(分類)的平均值 -----------
+            df1 = self._history_results[tuple(self.thread1.key)]
+
+            mask = ~pd.isnull(self.tag_list.loc[:, 'tag_name2'])  # 作為用來篩選出tag中含有有kwh11 的布林索引器
+            groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
+            groups_demand.index = self.tag_list.loc[mask, 'name']
+            df1.columns = groups_demand.index
+            df1 = df1.T  # 將query_result 轉置 shape:(96,178) -> (178,96)
+            df1.reset_index(inplace=True, drop=True)  # 重置及捨棄原本的 index
+            df1.index = groups_demand.index  # 將index 更新為各迴路或gas 的名稱 (套用groups_demands.index 即可)
+            time_list = [t.strftime('%H:%M') for t in pd.date_range('00:00', '23:45', freq='15min')]
+            df1.columns = time_list  # 用週期的起始時間，作為各column 的名稱
+            df1.loc[:, '00:00':'23:45'] = df1.loc[:, '00:00':'23:45'] * 4  # kwh -> MW/15 min
+            groups_demand = pd.concat([groups_demand, df1], axis=1, copy=False)
+
+            wx_list = list()  # 暫存各wx的計算結果用
+            for _ in time_list:
+                # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
+                wx_grouped = groups_demand.groupby(['Group1', 'Group2'])[_].sum()
+                c = wx_grouped.loc['W2':'WA', 'B']
+                c.name = _
+                c.index = c.index.get_level_values(0)  # 重新將index 設置為原multiIndex 的第一層index 內容
+                wx_list.append(c)
+            wx = pd.DataFrame([wx_list[_] for _ in range(96)])
+            # 將wx 計算結果轉置，並along index 合併於groups_demand 下方, 並將結果存在class 變數中
+            self.history_datas_of_groups = pd.concat([groups_demand, wx.T], axis=0)
+
+            # -------- 分析特定週期的 HSM生產時生 -----------
+            df2 = self._history_results[tuple(self.thread2.key)]
+            # 將資料分類
+            # 取出 9h140~9h280、9h180~9kb33 的欄位名稱list
+            cols = (list(df2.loc[:, 'W511_HSM/33KV/9H_140/P':'W511_HSM/33KV/9H_280/P'].columns) +
+                    list(df2.loc[:, 'W511_HSM/33KV/9H_180/P':'W511_HSM/11.5KV/9KB1_2_33/P'].columns))
+
+            # original_date = pd.DataFrame(df[cols].sum(axis=1),columns=['Main_group'])
+            original_date = df2[cols].sum(axis=1)
+            filter_date = df2.loc[:, 'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
+
+            # 將所有的資料透過迴圈，15分鍾為一組，透過函式分析 HSM 產線特性，並將結果先以字典的方式儲存，最後再轉成dataframe 格式
+            results = {}
+            for (t1, win1), (t2, win2) in zip(original_date.resample('15T'), filter_date.resample('15T')):
+                assert t1 == t2, f"時間不一致！ HSM 軋延機群={t1}, 要濾掉訊號={t2}"
+                results[t1] = analyze_production_avg_cycle(win1, threshold=10, smooth_window=8, prominence=1,
+                                                           power_filter=win2, plot=False)
+
+            df_res = pd.DataFrame.from_dict(results, orient='index')
+            print(df_res)
+
+    @log_exceptions()
+    @timeit(level=20)
+    def history_demand_of_groups2(self, st, et):
+        """
+            ### 查詢特定週期，各設備群組(分類)的平均值 ###
+        :param st: 查詢的起始時間點
+               et: 查詢的最終時間點
+        :return:
+        """
+        # ---------- 準備兩組 tags 清單 ------------
+        # ---用來查各種歷史需量值的tags
+        mask = ~pd.isnull(self.tag_list.loc[:, 'tag_name2'])  # 作為用來篩選出tag中含有有kwh11 的布林索引器
+        groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
+        groups_demand.index = self.tag_list.loc[mask, 'name']
+        production_line_tags = groups_demand.loc[:, 'tag_name2'].dropna().tolist()  # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
+
+        # 用來查詢 HSM 歷史 p值的 tags
+        tag_reference = self.tag_list.set_index('name').copy()
+        hsm_tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
+
+        # 暫存結果用
+        self._history_results ={}
+
+        # 建立並啟動兩支執行緒
+        self.thread1 = PiReader(self.pi_client, key='all_product_line', parent=self)
+        self.thread2 = PiReader(self.pi_client, key='hsm', parent=self)
+
+        # 分別呼叫兩個類別實例的 set_query_params() 傳遞參數
+        self.thread1.set_query_params(st=st, et=et, tags=production_line_tags)
+        self.thread2.set_query_params(st=st, et=et, tags=hsm_tags, summary='AVERAGE',
+                                      interval='5s', fillna_method='ffill')
+
+        # 將兩支執行緒都 connect 到同一個槽函式
+        self.thread1.data_ready.connect(self.on_data_ready)
+        self.thread2.data_ready.connect(self.on_data_ready)
+
+        # 開始執行
+        self.thread1.start()
+        self.thread2.start()
+
+    @log_exceptions()
+    @timeit(level=20)
+    def analyze_hsm_long_period(self):
+        interval = 5
+        tag_reference = self.tag_list.set_index('name').copy()
+        tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
+        start = pd.Timestamp(self.dateTimeEdit_3.dateTime().toString())
+        end = pd.Timestamp(self.dateTimeEdit_4.dateTime().toString())
+
+        df = pi_client.query(start, end, tags, 'AVERAGE', f'{interval}s', 'ffill')
+
+        # 將資料分類
+        # 取出 9h140~9h280、9h180~9kb33 的欄位名稱list
+        cols = (list(df.loc[:,'W511_HSM/33KV/9H_140/P':'W511_HSM/33KV/9H_280/P'].columns) +
+                list(df.loc[:,'W511_HSM/33KV/9H_180/P':'W511_HSM/11.5KV/9KB1_2_33/P'].columns))
+
+        #original_date = pd.DataFrame(df[cols].sum(axis=1),columns=['Main_group'])
+        original_date = df[cols].sum(axis=1)
+        filter_date = df.loc[:,'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
+
+        # 將所有的資料透過迴圈，15分鍾為一組，透過函式分析 HSM 產線特性，並將結果先以字典的方式儲存，最後再轉成dataframe 格式
+        results={}
+        for (t1, win1), (t2, win2) in zip(original_date.resample('15T'), filter_date.resample('15T')):
+            assert t1 == t2, f"時間不一致！ HSM 軋延機群={t1}, 要濾掉訊號={t2}"
+            results[t1] = analyze_production_avg_cycle(win1, threshold=10,
+                                         smooth_window=int(40 / interval), prominence=1,
+                                         power_filter=win2, plot=False)
+
+        df_res = pd.DataFrame.from_dict(results, orient='index')
+        print(df_res)
 
     def analyze_hsm(self):
         """ 試調分析 HSM 用電資訊 """
         # -- 設定區 --
-        interval = 2
+        interval = self.spinBox_6.value()
         tag_reference = self.tag_list.set_index('name').copy()
         tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
         start = pd.Timestamp(self.dateTimeEdit_5.dateTime().toString())
@@ -125,17 +294,18 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         cols = (list(df.loc[:,'W511_HSM/33KV/9H_140/P':'W511_HSM/33KV/9H_280/P'].columns) +
                 list(df.loc[:,'W511_HSM/33KV/9H_180/P':'W511_HSM/11.5KV/9KB1_2_33/P'].columns))
 
-        original_date = pd.DataFrame(df[cols].sum(axis=1),columns=['Main_group'])
+        original_date = df[cols].sum(axis=1)
         filter_date = df.loc[:,'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
 
+
         # 呼叫 data_analysis 的 analyze_production_avg_cycle
-        res3 = analyze_production_avg_cycle(original_date['Main_group'], threshold=self.spinBox_3.value(),
+        res3 = analyze_production_avg_cycle(original_date, threshold=self.spinBox_3.value(),
                                             smooth_window=int(40/interval), prominence=self.spinBox_4.value(),
                                             power_filter=filter_date, plot=True)
 
     def on_show_trend(self):
         """趨勢圖測試區"""
-        interval = 2
+        interval = self.spinBox_6.value()
         tags = []
         tags2 = []
         tag_reference = self.tag_list.set_index('name').copy()
@@ -432,15 +602,14 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             比對歷史紀錄的勾選值變動時，DashBoard 頁面中的tree widget(1~3)、table widget 3
             其表格、欄位大小、顯示與否進行調整。
         """
-        #-----------調出當天的各週期平均-----------
-        st = pd.Timestamp.today().date()
-        et = st + pd.offsets.Day(1)
-        self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
         tw3_base_width = (self.tw3.columnWidth(0) + self.tw3.columnWidth(1) +20)
         base_width = self.tableWidget_3.columnWidth(0) + self.tableWidget_3.columnWidth(1)
 
         if self.checkBox_2.isChecked():     # 顯示歷史平均值
-            self.history_demand_of_groups(st=st, et=et)
+            # -----------調出當天的各週期平均 (透過dateEdit_3 變更所發出的信號，再由對應的函式執行 -----------
+            st = pd.Timestamp.today().date()
+            self.dateEdit_3.setDate(QtCore.QDate(st.year, st.month, st.day))
+
             #------function visible_____
             self.dateEdit_3.setVisible(True)
             self.horizontalScrollBar.setVisible(True)
@@ -458,6 +627,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             # ----------------------顯示平均值欄位，並增加 tablewidget3 總寬度 ----------------
             self.tableWidget_3.setColumnHidden(2, False)
             new_width = base_width + self.tableWidget_3.columnWidth(2)
+
+            # ------------- 將self.history_datas_of_group 資料更新至對應的欄位中
+            # self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
+            # self.scroller_changed_event()
+
         else:
             # ------function visible_____
             self.dateEdit_3.setVisible(False)
@@ -776,6 +950,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         demand = round((current_accumulation[0] + predict[0]),2)
         return demand
 
+    @log_exceptions()
+    @timeit(level=20)
     def history_demand_of_groups(self, st, et):
         """
             ### 查詢特定週期，各設備群組(分類)的平均值 ###
@@ -788,6 +964,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         groups_demand.index = self.tag_list.loc[mask,'name']
         name_list = groups_demand.loc[:,'tag_name2'].dropna().tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
         query_result = pi_client.query(st=st, et=et, tags=name_list)
+
         query_result.columns = groups_demand.index
         query_result = query_result.T       # 將query_result 轉置 shape:(96,178) -> (178,96)
         query_result.reset_index(inplace=True, drop=True)  # 重置及捨棄原本的 index
@@ -796,6 +973,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         query_result.columns = time_list        # 用週期的起始時間，作為各column 的名稱
         query_result.loc[:,'00:00':'23:45'] = query_result.loc[:,'00:00':'23:45'] * 4 # kwh -> MW/15 min
         groups_demand = pd.concat([groups_demand, query_result], axis=1, copy=False)
+
         wx_list = list()    # 暫存各wx的計算結果用
         for _ in time_list:
             # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
@@ -805,48 +983,62 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             c.index = c.index.get_level_values(0)   # 重新將index 設置為原multiIndex 的第一層index 內容
             wx_list.append(c)
         wx = pd.DataFrame([wx_list[_] for _ in range(96)])
+
         # 將wx 計算結果轉置，並along index 合併於groups_demand 下方, 並將結果存在class 變數中
         self.history_datas_of_groups = pd.concat([groups_demand, wx.T], axis=0)
 
-    def date_edit3_user_change(self):
-        if self.dateEdit_3.date() > pd.Timestamp.today().date():
-            # ----選定到未來日期時，查詢當天的各週期資料，並顯示最後一個結束週期的資料----
+    def date_edit3_user_change(self, new_date:QtCore.QDate):
+        column_key = '00:00'
+        if self.dateEdit_3.date() >= pd.Timestamp.today().date():
+            # ----選定到 "未來" 或當天的日期時，查詢今天的各週期資料，並顯示今天的最後一個結束週期的資料----
             sd = pd.Timestamp(pd.Timestamp.now().date())
-            self.dateEdit_3.blockSignals(True)  # 屏蔽dateEdit 的signal, 避免無限執行
-            self.dateEdit_3.setDate(QtCore.QDate(sd.year, sd.month, sd.day))
-            self.dateEdit_3.blockSignals(False) # 設定完dateEdit 後重新開啟DateEdit 的signal
             ed = sd + pd.offsets.Day(1)
             self.history_demand_of_groups(st=sd, et=ed)
 
             # 將et 設定在最接近目前時間點之前的最後15分鐘結束點, 並將 scrollerBar 調整至相對應的值
-            # 並觸發scrollerBar 的value changed 事件，執行後續動作。
-            sp = pd.Timestamp.now().floor('15T')
-            self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T')-1)
+            et = pd.Timestamp.now().floor('15T')
+            st = et - pd.offsets.Minute(15)
+            self.label_16.setText(st.strftime('%H:%M'))
+            self.label_17.setText(et.strftime('%H:%M'))
 
-        else:
-            # ------選擇當天日期時，查詢完資料後，顯示前一個週期的資料，其它日期則顯示第一個週期的資料
+            # 設定水平scrollBar 時，要先block signal, 避免執行多次查詢及更新資料
+            self.horizontalScrollBar.blockSignals(True)
+            self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T') - 1)
+            self.horizontalScrollBar.blockSignals(False)
+            column_key = st.strftime('%H:%M')
+
+        elif self.dateEdit_3.date() < pd.Timestamp.today().date():
+            #  ---- 查詢歷史資料 ----
             sd = pd.Timestamp(self.dateEdit_3.date().toString())
             ed = sd + pd.offsets.Day(1)
             self.history_demand_of_groups(st=sd, et=ed)
-            if pd.Timestamp(self.dateEdit_3.date().toString()).normalize() == pd.Timestamp.today().normalize():
-                sp = pd.Timestamp.now().floor('15T')
-                self.horizontalScrollBar.setValue((sp - pd.Timestamp.now().normalize()) // pd.Timedelta('15T') - 1)
-            else:
-                self.label_16.setText('00:00')
-                self.label_17.setText('00:15')
-                self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
-                self.horizontalScrollBar.setValue(0)
 
-    def confirm_value(self):
+            # ------ 日期為過去時，則顯示第一個週期的資料 ------
+            self.label_16.setText('00:00')
+            self.label_17.setText('00:15')
+
+            # ------------- 將self.history_datas_of_group 資料更新至對應的欄位中
+            self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
+
+            # 設定水平scrollBar 時，要先block signal, 避免執行多次查詢及更新資料
+            self.horizontalScrollBar.blockSignals(True)
+            self.horizontalScrollBar.setValue(0)
+            self.horizontalScrollBar.blockSignals(False)
+            column_key = '00:00'
+
+        # 更新畫面顯示歷史資料（以 st 的時間作為 column key)
+        self.update_history_to_tws(self.history_datas_of_groups.loc[:, column_key])
+
+    def scroller_changed_event(self):
         """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
         now = pd.Timestamp.now()
-        current_date = pd.Timestamp(self.dateEdit_3.date().toString())
+        current_date_widget3 = pd.Timestamp(self.dateEdit_3.date().toString())
         # 依據水平捲軸的值計算所選的區間
-        st = current_date + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
+        st = current_date_widget3 + pd.offsets.Minute(15) * self.horizontalScrollBar.value()
         et = st + pd.offsets.Minute(15)
 
         # 如果查詢日期為今天，檢查是否需要刷新歷史資料
-        if current_date.normalize() == now.normalize():
+        if current_date_widget3.normalize() == now.normalize():
             # 過濾出符合時間格式的欄位，取得目前已查詢的最晚時間欄位
 
             time_columns = [col for col in self.history_datas_of_groups.columns if re.match(r'^\d{2}:\d{2}$', str(col))]
@@ -854,20 +1046,19 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             valid_time_columns = [t for t in time_columns if self.history_datas_of_groups[t].dropna().size > 5]
             if valid_time_columns:
                 last_completed_time_str = max(valid_time_columns,
-                                              key=lambda t: pd.Timestamp(f"{current_date.date()} {t}"))
-                max_time = pd.Timestamp(f"{current_date.date()} {last_completed_time_str}")
-
-            # 如果目前系統時間已超過這個時間（表示有新完成的區間）
-            #if now > max_time:
-            if et > max_time:
-                # 重新查詢整天的歷史資料更新到最新狀態
-                self.history_demand_of_groups(st=current_date, et=current_date + pd.offsets.Day(1))
+                                              key=lambda t: pd.Timestamp(f"{current_date_widget3.date()} {t}"))
+                max_time = pd.Timestamp(f"{current_date_widget3.date()} {last_completed_time_str}")
+                # 如果指定的時間區域，已超過現有資料的時間範圍（表示有新完成的區間）
+                if et > max_time:
+                    # 重新查詢整天的歷史資料更新到最新狀態
+                    self.history_demand_of_groups(st=current_date_widget3, et=current_date_widget3
+                                                                              + pd.offsets.Day(1))
 
         # 如果選取的區間 et 超過目前時間，則調整至最後完成的區間
         if et > now:
             et = now.floor('15T')
             # 重新計算對應的水平捲軸值
-            self.horizontalScrollBar.setValue(((et - current_date) // pd.Timedelta('15T')) - 1)
+            self.horizontalScrollBar.setValue(((et - current_date_widget3) // pd.Timedelta('15T')) - 1)
             st = et - pd.offsets.Minute(15)
 
         self.label_16.setText(st.strftime('%H:%M'))
