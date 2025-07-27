@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Optional
-from scipy.signal import find_peaks, welch
+from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 
 def estimate_speed_from_last_peaks(
@@ -111,6 +111,7 @@ def analyze_production_single_cycle(
 
     data = power - power_filter if power_filter is not None else power.copy()
     sm = data.rolling(smooth_window, center=True).mean().bfill().ffill()
+
     if prominence is None:
         prominence = (sm.max() - sm.min()) * 0.3
 
@@ -259,7 +260,11 @@ def analyze_production_avg_cycle(
     total_s    = (end - start).total_seconds() + dt
 
     data = power - power_filter if power_filter is not None else power.copy()
-    sm   = data.rolling(smooth_window, center=True).mean().bfill().ffill()
+    if smooth_window == 0:
+        sm = data
+    else:
+        sm = data.rolling(smooth_window, center=True).mean().bfill().ffill()
+    #sm   = data.rolling(smooth_window, center=True).mean().bfill().ffill()
     if prominence is None:
         prominence = (sm.max() - sm.min()) * 0.3
 

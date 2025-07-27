@@ -41,8 +41,10 @@ def setup_ui_behavior(ui):
     ui.tws_init()
 
     # ===== ScrollBar 與 DateEdit 控制 =====
-    ui.horizontalScrollBar.valueChanged.connect(ui.confirm_value)
+    ui.horizontalScrollBar.valueChanged.connect(ui.scroller_changed_event)
     ui.dateEdit_3.dateChanged.connect(ui.date_edit3_user_change)
+    # 直接設定calendarwidget 的最大日期，減少在程式中預防未來日期的的撰寫
+    ui.dateEdit_3.setMaximumDate(QtCore.QDate.currentDate())
 
     # ===== 主視窗下面 status bar (狀態欄) 相關設定 =====
     font = ui.statusBar().font()
