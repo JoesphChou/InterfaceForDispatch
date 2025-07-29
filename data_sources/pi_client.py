@@ -12,10 +12,19 @@ SummaryType = Literal["RANGE", "MAXIMUM", "MINIMUM", "AVERAGE","TOTAL"]
 
 def _normalize_raw_values(raw_dict: dict) -> dict:
     """
-    把 raw_dict 裡的 p.current_value 做「屬性/字串檢查」，
-    只要是 AFEnumerationValue、'Bad'、其他非 float 字串等通通先設成 None，
-    並分別在 logger.warning 裡記錄是哪種情況。
-    其餘能直接轉 float 的留待 pd.to_numeric 處理。
+    將 raw_dict 中的原始值轉為 float 或 None，以便後續轉為數值型態。
+
+    處理規則：
+      1. 枚舉型 (AFEnumerationValue)：記 WARNING，設為 None。
+      2. 字串 (例如 'Bad', 'OFF', 'N/A')：記 WARNING，設為 None。
+      3. None 或 np.nan：保留。
+      4. 其他類型 (int, float, 數字字串)：保留，留待 pd.to_numeric 處理。
+
+    Args:
+        raw_dict (dict): key 為 tag name，value 為 原始 p.current_value。
+
+    Returns:
+        dict: 處理後的字典，所有無法轉為 float 的值皆為 None。
     """
     for tag_name, val in raw_dict.items():
         # 1) 先檢查「枚舉型」(AFEnumerationValue)，它會有 .Name 和 .Value 屬性
@@ -39,7 +48,15 @@ def _normalize_raw_values(raw_dict: dict) -> dict:
     return raw_dict
 
 class PIClient:
-    """封裝 PIconnect 取數；任何 UI / service 僅呼叫這層。"""
+    """
+    封裝 PIconnect 取數邏輯，提供即時值與歷史統計查詢功能。
+
+    Attributes:
+        SUMMARY_MAP (Dict[SummaryType, int]):
+            SummaryType 到 PIconnect.SummaryType 常數的對應表。
+        _point_cache (Dict[str, Pi.PIPoint]):
+            已搜尋到的 PIPoint 快取，用於減少搜尋次數。
+    """
 
     SUMMARY_MAP: Dict[SummaryType] = {
         "RANGE": Pi.PIConsts.SummaryType.RANGE,
@@ -50,7 +67,13 @@ class PIClient:
     }
 
     def __init__(self, timezone: str = "Asia/Taipei"):
-        # 從 PI 取出的 timestamp 時區改成 GMT+8
+        """
+        初始化 PIClient 並設定 PIConfig 時區。
+
+        Args:
+            timezone (str):
+                PIConfig 使用的時區字串，例如 "Asia/Taipei"，預設為 GMT+8。
+        """
         Pi.PIConfig.DEFAULT_TIMEZONE = timezone
         self._point_cache: Dict[str, Pi.PIPoint] = {}
 
@@ -58,8 +81,16 @@ class PIClient:
     @lru_cache(maxsize=256)
     def _search_point(self, tag: str) -> Pi.PIPoint | None:
         """
-            單一 tag 搜尋，並快取PIPoint。
-            如果失敗，log 後回傳 None。
+        單一 tag 搜尋 PIPoint，並以 LRU 快取結果。
+
+        Args:
+            tag (str): PI tag 名稱。
+
+        Returns:
+            Pi.PIPoint | None: 找到的 PIPoint 或 None（若搜尋失敗）。
+
+        Logs:
+            ERROR: 搜尋例外時記錄錯誤。
         """
         try:
             with Pi.PIServer() as server:
@@ -71,8 +102,15 @@ class PIClient:
     # ---- 多 tag 查詢 ----
     def search_points(self, tags: Iterable[str]) -> Dict[str, Pi.PIPoint]:
         """
-        一次性搜尋多個tag 的PIPoint 物件，並回傳一個字典。
-        但只對 self._point_cache 裡沒有的做搜尋，並對每一筆失敗個別處理。
+        批次搜尋多個 tags 的 PIPoint，並回傳一個字典。
+
+        只針對快取中不存在的 tag 執行搜尋，成功後存入快取。
+
+        Args:
+            tags (Iterable[str]): 要搜尋的 tag 名稱列表或其他可疊代結構。
+
+        Returns:
+            Dict[str, Pi.PIPoint]: 搜尋成功的 tag->PIPoint 映射，失敗的 tag 則不包含於結果中。
         """
         tags = list(tags)   # 將傳入的Iterable[str} (可能是generator,set,Index)轉成可重複使用的list
         result: Dict[str, Pi.PIPoint] = {}
@@ -96,10 +134,20 @@ class PIClient:
     @log_exceptions(logger)     # 若發生未捕捉例外，自動寫 ERROR log + stacktrace
     def current_values(self, tags: Iterable[str]) -> pd.Series:
         """
-        將PIPoint 物件中的屬性 (current_value PI Data Archive 發出一次性查詢)，
-        把該結果的資料型態嘗試從 object->float，若遇文字型態，則用Nan 取代。
-        凡是無法轉型的原始值，都記一條 WARNING log。
-        最終以 pd.Series 回傳。
+        查詢多個 tags 的即時值並回傳 pd.Series。
+
+        行為流程：
+          1. 搜尋 PIPoint。
+          2. 取得 current_value。
+          3. 呼叫 _normalize_raw_values 處理非數值型態。
+          4. 轉為 float，無法轉型者以 NaN 取代。
+          5. 記錄被強制轉 NaN 的 tag 名稱及原始值。
+
+        Args:
+            tags (Iterable[str]): 要查詢的 tag 名稱列表。
+
+        Returns:
+            pd.Series: 索引為 tag 名稱，值為當前值 (float)，名稱為 "current_value"。
         """
         # 1) 如果遲線失敗，pts 就會是空字典 {}
         pts = self.search_points(tags)
@@ -141,20 +189,25 @@ class PIClient:
     ) -> pd.DataFrame:
         st, et = [t - pd.offsets.Second(tz_offset_sec) for t in (st, et)]
         code = self.SUMMARY_MAP[summary]
-
-        # -- 尋點 & 取數 ----------------------------------------------------
         """
-            1.針對每一個PIPoint 透過 summaries 的方法，依code 內容，決定特定區間取出值為何種形式。回傳的資料為DataFrame 型態
-            2.將資料型態從Object -> float，若有資料中有文字無法換的，則用NaN 缺失值取代。
-              如果 df shape(資料筆數,PIPoint 數量)->(資料筆數,1), 那pd.to_numeric 後會變成pd.Series
-            3.將list 中所有的 DataFrame 合併為一組新的 DataFrame 資料
-            4.把原本用來做index 的時間，將時區從tz aware 改為 native，並加入與OSAKI 時間差參數進行調整。
-            5.將結果直接用tag 當欄名，以DataFrame 格式回傳。 shape(資料數量, tag數量)
-            6.決定是否填補nan 值
-        Parameters
-        ----------
-        fillna_method : str
-            收斂空值方法，支援 "ffill" / "bfill" / "None"。
+        查詢多個 tags 的歷史統計資料並回傳 DataFrame。
+
+        Args:
+            st (pd.Timestamp): 查詢起始時間（含）。
+            et (pd.Timestamp): 查詢結束時間（含）。
+            tags (Iterable[str]): 要查詢的 tag 名稱列表。
+
+        Keyword Args:
+            summary (SummaryType): 統計類型，可為 'RANGE', 'MAXIMUM', 'MINIMUM', 'AVERAGE', 'TOTAL'。
+            interval (str): 時段粒度字串，例如 '15m'、'1h'。
+            fillna_method (Optional[str]): 缺失值填補方法，支援 'ffill' 或 'bfill'。
+            tz_offset_sec (int): 欲調整的時區秒差，預設 0。
+
+        Returns:
+            pd.DataFrame: 索引為時間 (datetime)，欄位為 tags，值為指定 summary 的 float。
+
+        Raises:
+            無：本方法不會主動拋例外，若搜尋點失敗，該 column 會被跳過。
         """
         dfs = []
         for tag in tags:

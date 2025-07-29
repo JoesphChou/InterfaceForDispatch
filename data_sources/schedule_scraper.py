@@ -70,15 +70,21 @@ def scrape_schedule(
     now: datetime or None = None,
     pool: urllib3.PoolManager or None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
-    """Fetch both pages and return *(past_df, current_df, future_df, status)*.
+    """
+    抓取並解析 MES 2138、2137 頁面，回傳「過去／目前／未來」三個 DataFrame 及狀態。
 
-    Parameters
-    ----------
-    now: datetime | None, default ``datetime.now()``
-        Point‑in‑time that defines the three categories. Allows deterministic
-        unit‑testing.
-    pool: urllib3.PoolManager | None
-        Inject an existing connection pool; falls back to a module‑level one.
+    Args:
+        now (datetime | None):
+            用於分類的參考時間，預設為當前時間。
+        pool (urllib3.PoolManager | None):
+            HTTP 連線池，預設使用模組內 _POOL。
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
+            past_df: 已結束排程 (欄位: 開始時間, 結束時間, 爐號, 製程)
+            current_df: 正在進行排程 (欄位: 開始時間, 結束時間, 爐號, 製程, 製程狀態)
+            future_df: 尚未開始排程 (欄位: 開始時間, 結束時間, 爐號, 製程)
+            status: 執行結果 "OK" 或 "ERROR"。
     """
     if now is None:
         now = pd.Timestamp.now()
@@ -181,8 +187,16 @@ def scrape_schedule(
 
 def _fetch_soup(url: str, pool: urllib3.PoolManager, retries: int = 2, delay: float = 2.0):
     """
-    以 urllib3 取得網頁並回傳 BeautifulSoup.
-    若 HTTP status 不是 200，則記錄錯誤，但不主動丟出 RuntimeError.
+    使用 urllib3 取得網頁並解析成 BeautifulSoup。
+
+    Args:
+        url (str): 請求的網址。
+        pool (urllib3.PoolManager): 連線池。
+        retries (int): 重試次數，預設 2 次。
+        delay (float): 重試間隔秒數，預設 2.0 秒。
+
+    Returns:
+        BeautifulSoup | None: 成功回傳解析後的 soup，否則 None。
     """
     for attempt in range(1, retries + 1):
         r = pool.request("GET", url)
@@ -196,6 +210,15 @@ def _fetch_soup(url: str, pool: urllib3.PoolManager, retries: int = 2, delay: fl
     return None
 
 def _infer_process_type(y: int) -> str or None:
+    """
+    根據 y 座標判斷製程類型。
+
+    Args:
+        y (int): area 元素的 Y 軸 pixel 值。
+
+    Returns:
+        str | None: 對應的製程名稱（EAFA, EAFB, LF1-1, LF1-2），找不到時回傳 None。
+    """
     for proc, (lo, hi) in _PROCESS_Y_RANGES.items():
         if lo <= y <= hi:
             return proc
@@ -203,7 +226,15 @@ def _infer_process_type(y: int) -> str or None:
 
 
 def _sort_schedules(raw: List[Tuple[int, datetime, datetime, str, str]]):
-    """Sort by virtual sort_group then x‑axis coordinate then start time."""
+    """
+    依製程群組、X 軸座標、起始時間排序。
+
+    Args:
+        raw (List[Tuple[int, datetime, datetime, str, str]]): 原始排程列表。
+
+    Returns:
+        List[Tuple[int, datetime, datetime, str, str]]: 排序後的列表。
+    """
     def sort_group(proc: str) -> str:
         return "EAF" if proc in ("EAFA", "EAFB") else proc
 
@@ -214,7 +245,16 @@ def _sort_schedules(raw: List[Tuple[int, datetime, datetime, str, str]]):
 
 
 def _deduplicate(sorted_sched):
-    """Remove duplicates (same furnace id within the same process)."""
+    """
+    移除相同製程中重複的爐號記錄。
+
+    Args:
+        schedules: 已排序的排程列表。
+
+    Returns:
+        List[Tuple[int, datetime, datetime, str, str]]: 去重後的列表。
+    """
+
     filtered: List[Tuple[int, datetime, datetime, str, str]] = []
     for rec in sorted_sched:
         _, _, _, furnace, proc = rec
@@ -224,7 +264,17 @@ def _deduplicate(sorted_sched):
     return filtered
 
 def _adjust_cross_day(records, now: datetime):
-    """Apply original cross‑day heuristics in‑place and return a new list."""
+    """
+    對跨日區間進行調整，保持排序一致。
+
+    Args:
+        records: 去重後的排程列表。
+        now (datetime): 分類參考時間。
+
+    Returns:
+        List[Tuple[int, datetime, datetime, str, str]]: 調整後的列表。
+    """
+
     adjusted = list(records)
 
     def unify(proc):
@@ -257,6 +307,16 @@ def _adjust_cross_day(records, now: datetime):
 
 
 def _get_status(soup: BeautifulSoup, element_id: str) -> str:
+    """
+    從狀態頁面取得指定製程的狀態文字。
+
+    Args:
+        soup (BeautifulSoup): 解析後的狀態頁面。
+        element_id (str): HTML 頁面中 span 元素的 id。
+
+    Returns:
+        str: 取得的狀態文字，若找不到則回傳 "未知"。
+    """
     span = soup.find("span", {"id": element_id})
     return span.text.strip() if span else "未知"
 

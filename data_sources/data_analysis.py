@@ -15,25 +15,27 @@ def estimate_speed_from_last_peaks(
     只用最後兩個「大峰」來估算生產速率與單件耗電。
     可用來計算real-time 顯示最近一件所花的時間
 
-    ----
-    power : pd.Series
-        index 為 datetime，values 為瞬時功率 (MW)，等時取樣。
-    height : float, optional
-        峰值最小高度門檻，若 None 則用 power.mean()。
-    prominence : float, optional
-        峰值最小突顯度，若 None 則用 (power.max()-power.min())*0.3。
-    smooth_window : 平滑窗口大小 (樣本數)
+    Args:
+        power : pd.Series
+            index 為 datetime，values 為瞬時功率 (MW)，等時取樣。
+    Keyword Args:
+        height : float, optional
+            峰值最小高度門檻，若 None 則用 power.mean()。
+        prominence : float, optional
+            峰值最小突顯度，若 None 則用 (power.max()-power.min())*0.3。
+        smooth_window : 平滑窗口大小 (樣本數)
 
-    回傳
-    ----
-    {
-      "dt_s": float,                   # 最後兩峰間隔（秒）
-      "rate_items_per_15min": float,   # 卷／15 分鐘
-      "energy_interval_kwh": float,    # 這段週期內耗電 (kWh)
-      "energy_per_item_kwh": float     # 每件平均耗電 (kWh)
-      "demand_per_item": float         # 每卷需量 (kWh)
-      "rest": boolean                  # 根據 peak 數量，判斷是否暫停生產中
-    }
+    Returns:
+        {
+          "dt_s": float,                   # 最後兩峰間隔（秒）
+          "rate_items_per_15min": float,   # 卷／15 分鐘
+          "energy_interval_kwh": float,    # 這段週期內耗電 (kWh)
+          "energy_per_item_kwh": float     # 每件平均耗電 (kWh)
+          "demand_per_item": float         # 每卷需量 (kWh)
+          "rest": boolean                  # 根據 peak 數量，判斷是否暫停生產中
+        }
+    Raises:
+        None: 本函式不會主動拋出例外，但結果中可能包含 'error' 鍵。
     """
     # 1. 取值並算時間間隔
     smoothed = power.rolling(window=smooth_window, center=False)
@@ -104,6 +106,39 @@ def analyze_production_single_cycle(
     """
     方法一：以「生产1件平均时长」T1 为基准计算 unfinished。
     头/尾部 unfinished 仅在窗口首尾信号超过阈值时计算。
+
+    Args:
+        power (pd.Series):
+            瞬時功率時間序列，索引為 datetime，值為功率 (MW)。
+
+    Keyword Args:
+        threshold (float):
+            檢測閾值，超過此值視為生產狀態。
+        smooth_window (int):
+            平滑窗口大小（樣本數）。預設 3。
+        distance (int):
+            峰值檢測的最小樣本距離。預設 1。
+        prominence (Optional[float]):
+            峰值突顯度門檻；若 None 則使用 (sm.max() - sm.min()) * 0.3。預設 None。
+        power_filter (Optional[pd.Series]):
+            需扣除的干擾功率序列，索引需與 power 相同。預設 None。
+        plot (bool):
+            是否繪製分析圖。預設 True。
+
+    Returns:
+        dict: 包含以下欄位：
+            method (str): 'single_cycle'，標識本方法。
+            full_items (int): 完整週期內檢測到的件數。
+            head_frac (float): 頭部未完成件比例。
+            tail_frac (float): 尾部未完成件比例。
+            total_items (float): 完整週期 + 未完成件數總和。
+            rate_items_per_15min (float): 每 15 分鐘生產速率估算。
+            total_kwh (float): 總耗電量（kWh）。
+            kwh_per_item (Optional[float]): 每件平均耗電量（kWh），無耗電時為 None。
+            demand_15m (float): 15 分鐘需量（MW）。
+            cycles (List[Tuple[datetime, datetime, datetime]]): 完整週期的 (start, peak, end) 時間列表。
+            T1_sec (Optional[float]): 平均完整週期時長（秒）。
+            demand_per_item (Optional[float]): 每件單位需量（kWh）。
     """
     dt         = (power.index[1] - power.index[0]).total_seconds()
     start, end = power.index[0], power.index[-1]
@@ -254,6 +289,19 @@ def analyze_production_avg_cycle(
     """
     方法二：以「生產1件+2件最近間隔時長」T2 為基準計算 unfinished，
     頭/尾部 unfinished 僅在窗口首尾信號超過閥值時計算。
+
+        Args:
+        power (pd.Series):
+            瞬時功率時間序列，索引為 datetime，值為功率 (MW)。
+
+    Keyword Args:
+        threshold (float):
+            檢測閾值，超過此值視為生產狀態。
+        smooth_window (int):
+            平滑窗口大小（樣本數）。預設 3。
+        distance (int):
+            峰值檢測的最<|...|>
+
     """
     dt         = (power.index[1] - power.index[0]).total_seconds()
     start, end = power.index[0], power.index[-1]

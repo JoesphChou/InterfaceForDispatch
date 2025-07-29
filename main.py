@@ -54,10 +54,32 @@ def pre_check2(pending_data, b=1):
         return describe[b]
 
 class PiReader(QtCore.QThread):
+    """
+    PiReader 類別，用於在子執行緒中非同步查詢 PI 資料。
+
+    屬性:
+        pi_client (PIClient): 執行 PI 查詢的客戶端實例。
+        key (Any): 識別此執行緒結果的唯一鍵。
+        query_kwargs (Optional[dict]): 傳遞給 PIClient.query 的參數。
+        logger (Logger): 用於記錄狀態與錯誤的 logger。
+    """
     # 定義完成訊號，傳回讀到的資料或例外
     data_ready = QtCore.pyqtSignal(object, object) # (tag_group, data 或 exception)
+    """當資料查詢完成或發生錯誤時發射。
+    參數:
+        key (Any): 查詢識別鍵。
+        result (object): 查詢結果的 DataFrame，或是 Exception。"""
 
     def __init__(self, pi_client, key, parent=None):
+        """
+        初始化 PiReader 執行緒。
+
+        Args:
+            pi_client (PIClient): 用於查詢 PI 的客戶端實例。
+            key (Any): 識別此執行緒結果的鍵。
+            parent (QObject, optional): 父 QObject。
+        """
+
         super().__init__(parent)
         self.pi_client = pi_client
         self.query_kwargs = None    # 先暫時不給參數
@@ -65,7 +87,12 @@ class PiReader(QtCore.QThread):
         self.logger = get_logger(__name__)
 
     def set_query_params(self, **kwargs):
-        """ 在啟動前設定好所有要傳給pi_client.query() 的參數 """
+        """
+        設定 PIClient.query 的參數，必須在啟動執行緒前呼叫。
+
+        Args:
+            **kwargs: 對應 PIClient.query 的參數，例如 st, et, tags, summary, interval, fillna_method。
+        """
         self.query_kwargs = kwargs
 
     @timeit(level=20)
@@ -135,16 +162,41 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         self.dateTimeEdit_5.setDateTime(rounded_current_datetime.addSecs(-900))
 
     def remove_target_tag_from_list3(self, item: QtWidgets.QListWidgetItem):
+        """
+        函式 remove_target_tag_from_list3 的說明。
+
+        Args:
+            item: QtWidgets.QListWidgetItem (type): 參數說明。
+        Returns:
+            type: 回傳值說明。
+        """
         row = self.listWidget_3.row(item)           # 取得該 item 所在的列號
         taken = self.listWidget_3.takeItem(row)     # 從listWidget_3 拿出(並移除) 該item
         del taken                                   # del 掉這些物件，避免記憶體累積和洩漏
 
     def add_target_tag_to_list3(self, item: QtWidgets.QListWidgetItem):
+        """
+        函式 add_target_tag_to_list3 的說明。
+
+        Args:
+            item: QtWidgets.QListWidgetItem (type): 參數說明。
+        Returns:
+            type: 回傳值說明。
+        """
         name = item.text()
         self.listWidget_3.addItems([name])
 
     @QtCore.pyqtSlot(dict, object)
     def on_data_ready(self, tags: tuple, result: object):
+        """
+        函式 on_data_ready 的說明。
+
+        Args:
+            tags: tuple (type): 參數說明。
+            result: object (type): 參數說明。
+        Returns:
+            type: 回傳值說明。
+        """
         if isinstance(result, Exception):
             QtWidgets.QMessageBox.critical(
                 self,
@@ -208,7 +260,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
 
     @log_exceptions()
     @timeit(level=20)
-    def history_demand_of_groups2(self, st, et):
+    def history_demand_of_groups(self, st, et):
         """
             ### 查詢特定週期，各設備群組(分類)的平均值 ###
         :param st: 查詢的起始時間點
@@ -249,6 +301,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
     @log_exceptions()
     @timeit(level=20)
     def analyze_hsm_long_period(self):
+        """
+        函式 analyze_hsm_long_period 的說明。
+
+        Args:
+        Returns:
+            type: 回傳值說明。
+        """
         interval = 5
         tag_reference = self.tag_list.set_index('name').copy()
         tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
@@ -949,43 +1008,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         # 取四捨五入
         demand = round((current_accumulation[0] + predict[0]),2)
         return demand
-
-    @log_exceptions()
-    @timeit(level=20)
-    def history_demand_of_groups(self, st, et):
-        """
-            ### 查詢特定週期，各設備群組(分類)的平均值 ###
-        :param st: 查詢的起始時間點
-               et: 查詢的最終時間點
-        :return:
-        """
-        mask = ~pd.isnull(self.tag_list.loc[:,'tag_name2'])     # 作為用來篩選出tag中含有有kwh11 的布林索引器
-        groups_demand = self.tag_list.loc[mask, 'tag_name2':'Group2']
-        groups_demand.index = self.tag_list.loc[mask,'name']
-        name_list = groups_demand.loc[:,'tag_name2'].dropna().tolist() # 把DataFrame 中標籤名為tag_name2 的值，轉成list輸出
-        query_result = pi_client.query(st=st, et=et, tags=name_list)
-
-        query_result.columns = groups_demand.index
-        query_result = query_result.T       # 將query_result 轉置 shape:(96,178) -> (178,96)
-        query_result.reset_index(inplace=True, drop=True)  # 重置及捨棄原本的 index
-        query_result.index = groups_demand.index    # 將index 更新為各迴路或gas 的名稱 (套用groups_demands.index 即可)
-        time_list = [t.strftime('%H:%M') for t in  pd.date_range('00:00', '23:45', freq='15min')]
-        query_result.columns = time_list        # 用週期的起始時間，作為各column 的名稱
-        query_result.loc[:,'00:00':'23:45'] = query_result.loc[:,'00:00':'23:45'] * 4 # kwh -> MW/15 min
-        groups_demand = pd.concat([groups_demand, query_result], axis=1, copy=False)
-
-        wx_list = list()    # 暫存各wx的計算結果用
-        for _ in time_list:
-            # 利用 group by 的功能，依Group1(單位)、Group2(負載類型)進行分組，將分組結果套入sum()的方法
-            wx_grouped = groups_demand.groupby(['Group1','Group2'])[_].sum()
-            c = wx_grouped.loc['W2':'WA', 'B']
-            c.name = _
-            c.index = c.index.get_level_values(0)   # 重新將index 設置為原multiIndex 的第一層index 內容
-            wx_list.append(c)
-        wx = pd.DataFrame([wx_list[_] for _ in range(96)])
-
-        # 將wx 計算結果轉置，並along index 合併於groups_demand 下方, 並將結果存在class 變數中
-        self.history_datas_of_groups = pd.concat([groups_demand, wx.T], axis=0)
 
     def date_edit3_user_change(self, new_date:QtCore.QDate):
         column_key = '00:00'

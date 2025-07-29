@@ -1,3 +1,12 @@
+"""
+visualization.py
+
+提供繪製趨勢圖與互動工具的功能，包含:
+  - plot_tag_trends: 在單圖中疊多條時序曲線
+  - CustomToolbar: 延伸 NavigationToolbar2QT 以修正儲存對話框行為
+  - TrendWindow: 簡易 QMainWindow 包裝 matplotlib Figure
+  - TrendChartCanvas: 支援滑鼠互動提示的 FigureCanvas
+"""
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
@@ -20,15 +29,19 @@ def plot_tag_trends(
     show_legend: bool = True,
 ):
     """
-    將多個 tag 的時間序列疊在同一張圖。
+    在同一張圖上繪製多個 tag 的時間序列曲線。
 
-    Parameters
-    ----------
-    df : DataFrame，index 為 Timestamp
-    tags : 欲繪製的欄位名稱
-    title : 圖表標頭
-    figsize : 圖表大小
-    show_legend : 是否顯示圖例
+    Args:
+        df (pd.DataFrame): 索引為 Timestamp 的資料表，欄位為各 tag。
+        tags (List[str]): 欲繪製的欄位名稱列表。
+
+    Keyword Args:
+        title (Optional[str]): 圖表標題，預設 None。
+        figsize (Tuple[int,int]): 圖表尺寸 (寬, 高)，單位為英吋，預設 (12,6)。
+        show_legend (bool): 是否顯示圖例，預設 True。
+
+    Returns:
+        Tuple[Figure, Axes]: 繪製完成的 matplotlib Figure 和 Axes 物件。
     """
     fig, ax = plt.subplots(figsize=figsize)
     for tag in tags:
@@ -56,10 +69,17 @@ def plot_tag_trends(
     return fig, ax
 
 class CustomToolbar(NavigationToolbar2QT):
-# 客製NavigationToolbar2QT.save_figure 這個類別方法
-# 用來解決save 的對話框被藏到背後去，而導致app 卡住。
+    """
+    CustomToolbar 類別，繼承 NavigationToolbar2QT，
+    修正儲存對話框被遮蔽問題。
+    """
     def save_figure(self, *args):
-        # 單一 flag
+        """
+        顯示檔案儲存對話框並將當前 Figure 存檔。
+
+        Args:
+            *args: 原方法參數（未使用）。
+        """
         filename, _ = QFileDialog.getSaveFileName(
             parent=self,
             caption="Save Figure",
@@ -72,6 +92,13 @@ class CustomToolbar(NavigationToolbar2QT):
             self.canvas.figure.savefig(filename)
 
 class TrendWindow(QtWidgets.QMainWindow):
+    """
+    TrendWindow 類別，用於在獨立視窗中顯示趨勢圖。
+
+    Args:
+        fig (Figure): 要顯示的 matplotlib Figure 物件。
+        parent (QObject, optional): 父物件，預設 None。
+    """
     def __init__(self, fig, parent=None):
         super().__init__(parent)
         self.setWindowTitle("用電特性趨勢圖")
@@ -90,7 +117,20 @@ class TrendWindow(QtWidgets.QMainWindow):
         self.resize(900, 500)
 
 class TrendChartCanvas(FigureCanvas):
+    """
+    TrendChartCanvas 類別，繼承 FigureCanvas，
+    支援滑鼠互動提示 (tooltip) 的趨勢圖繪製。
+    """
     def __init__(self, parent=None, width=6, height=3, dpi=100):
+        """
+        初始化繪圖畫布並設定字型與顯示參數。
+
+        Args:
+            parent (QWidget, optional): 父物件，預設 None。
+            width (float): 圖形寬度 (英吋)，預設 6。
+            height (float): 圖形高度 (英吋)，預設 3。
+            dpi (int): 圖形解析度 (每英吋點數)，預設 100。
+        """
         fig = Figure(figsize=(width, height), dpi=dpi)
         self.ax = fig.add_subplot(111)
         super().__init__(fig)
@@ -100,6 +140,12 @@ class TrendChartCanvas(FigureCanvas):
 
 
     def plot_from_dataframe(self, df):
+        """
+        根據 DataFrame 繪製趨勢圖並設定互動提示 (tooltip)。
+
+        Args:
+            df (pd.DataFrame): 必須包含 '原始TPC' 與 '即時TPC' 欄位。
+        """
         if not {'原始TPC', '即時TPC'}.issubset(df.columns):
             self.ax.clear()
             self.ax.set_title("資料格式錯誤：缺少 '原始TPC' 或 '即時TPC'")
@@ -113,6 +159,12 @@ class TrendChartCanvas(FigureCanvas):
         self.draw()
 
     def setup_base_plot(self, df):
+        """
+        建立基本圖形元素，包括填色、折線與坐標格式化。
+
+        Args:
+            df (pd.DataFrame): 包含 '原始TPC' 與 '即時TPC' 的資料表。
+        """
         COLOR_UNCOMP = '#4FC3F7'  # 改成亮藍
         COLOR_COMP = '#FF7043'  # 改成橘紅
         self.x = df.index
@@ -146,6 +198,12 @@ class TrendChartCanvas(FigureCanvas):
         self.vline = self.ax.axvline(df.index[0], color='black', linestyle='--', linewidth=0.8, alpha=0.5)
 
     def setup_tooltips(self, df):
+        """
+        設定滑鼠互動提示 (tooltip) 的文字框與樣式。
+
+        Args:
+            df (pd.DataFrame): 原始資料表，用於動態計算提示內容。
+        """
         self._tooltip_time = self.ax.text(
             0.5, -0.12, '', transform=self.ax.transAxes,
             ha='center', va='top', fontsize=9,
