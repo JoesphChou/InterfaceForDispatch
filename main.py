@@ -4,7 +4,7 @@ setup_logging("logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
 import sys, re, math
-from typing import Tuple, Optional
+from typing import Tuple
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
@@ -15,7 +15,7 @@ from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends # 引�
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
-from data_sources.data_analysis import estimate_speed_from_last_peaks, analyze_production_avg_cycle
+from data_sources.data_analysis import analyze_production_avg_cycle
 
 def pre_check(pending_data, b=1, c='power'):
     """
@@ -828,8 +828,17 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         :return:
         """
 
-        name_list = self.tag_list['tag_name'].dropna().tolist()      # 1
-        current = pi_client.current_values(name_list)       # 2
+        name_list = self.tag_list['tag_name'].dropna().tolist()     # 1
+        try:
+            current = pi_client.current_values(name_list)           # 2
+            # 如果之前有錯誤訊息，先清掉
+            self.statusBar().clearMessage()
+        except Exception as e:
+            logger.error(f"[dashboard_value] PI 連線失敗:{e}")
+            # 在 statusBar 顯示一條不會自動消失的警告
+            self.statusBar().showMessage("⚠⚠ 無法連線到 PI Server，請檢查網路或憑證 ⚠⚠", 0)
+            return # 直接結束，避免後面用到 current 而再度崩潰！
+
         buffer = pd.DataFrame({
             'tag_name': name_list,
             'value': current.values
