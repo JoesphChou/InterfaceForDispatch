@@ -17,6 +17,16 @@ from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle
 
+# 設定全域未捕捉異常的 hook
+def handle_uncaught(exc_type, exc_value, exc_traceback):
+    # 如果是 Ctrl+C 等 KeyboardInterrupt，就交還給預設行為
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    # 否則把完整堆疊與例外都記錄到日誌
+    logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+
 def pre_check(pending_data, b=1, c='power'):
     """
     此函式用來判顯示在tree,table widget  的即時資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
@@ -2359,8 +2369,17 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             table.setFixedHeight(total_h)
 
 if __name__ == "__main__":
+    sys.excepthook = handle_uncaught
     pi_client = PIClient()
     app = QtWidgets.QApplication(sys.argv)
     myWin = MyMainForm()
     myWin.show()
-    sys.exit(app.exec())
+
+    # 包try/except 的啟動事件迴圈
+    try:
+        exit_code = app.exec()
+    except Exception:
+        # 任何在事件迴圈裡冒出的例外，都記一次錯誤日誌，但不終止程式 (如果想要強制結束，就再 raise)
+        logger.error("Exception in Qt event loop", exc_info=True)
+        exit_code = 1
+    sys.exit(exit_code)

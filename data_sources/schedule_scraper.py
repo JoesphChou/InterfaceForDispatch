@@ -201,12 +201,13 @@ def _fetch_soup(url: str, pool: urllib3.PoolManager, retries: int = 2, delay: fl
     for attempt in range(1, retries + 1):
         r = pool.request("GET", url)
         if r.status == 200:
-            # 記錄錯誤，但不丟例外
+            # Http 請成成功
             return BeautifulSoup(r.data, "html.parser")
-        logger.warning(f"第 {attempt} 次 GET {url} 失敗: HTTP {r.status}")
+        # logger.warning(f"第 {attempt} 次 GET {url} 失敗: HTTP {r.status}")
         time.sleep(delay)
-    # 最後一次仍失敗
-    logger.error(f"多次重試後仍無法 GET {url}，回傳 None")
+    else:
+        # 迴圈跑完都沒回傳，則記錄錯誤
+        logger.error(f"多次重試後仍無法 GET {url}，回傳 None")
     return None
 
 def _infer_process_type(y: int) -> str or None:
