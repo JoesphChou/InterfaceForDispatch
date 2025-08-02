@@ -3,8 +3,8 @@ from logging_utils import setup_logging, log_exceptions, timeit, get_logger
 setup_logging("logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
-import sys, re, math
-from typing import Tuple
+import sys, re, math, time
+from typing import Tuple, Optional
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
@@ -63,9 +63,137 @@ def pre_check2(pending_data, b=1):
     else:
         return describe[b]
 
+class DashboardThread(QtCore.QThread):
+    """
+        在背景定期呼叫 MainWindow.dashboard_vaule()，
+        並支援中斷與例外捕捉
+    """
+    def __init__(self, main_win, interval: float = 11.0):
+        super().__init__(main_win)
+        self.main_win = main_win
+        self.interval = interval
+
+    def run(self):
+        # 只要沒有被 requestInterruption() 就持續執行
+        while not self.isInterruptionRequested():
+            try:
+                self.main_win.dashboard_value()
+                self.main_win.statusBar().clearMessage()
+            except Exception:
+                logger.error("DashboardThread 未捕捉例外", exc_info=True)
+                self.main_win.statusBar().showMessage("⚠ 更新即時值失敗，請檢查 PI Server 連線", 0)
+            # 分段 sleep，以便快速響應中斷
+            slept = 0.0
+            while slept < self.interval and not self.isInterruptionRequested():
+                time.sleep(0.5)
+                slept += 0.5
+        logger.info("DashboardThread 己收到中斷，停止執行。")
+
+class ScheduleThread(QtCore.QThread):
+    """
+        在背景定期呼叫 Mainwindow.update_tw4_schedule()，
+        並支援中斷與例外捕捉
+    """
+    def __init__(self, main_win: "MyMainWindow", interval: float = 30.0):
+        super().__init__(main_win)
+        self.main_win = main_win
+        self.interval = interval
+
+    def run(self):
+        # 只要沒有被 requestInterruption() 就持續執行
+        while not self.isInterruptionRequested():
+            try:
+                self.main_win.update_tw4_schedule()
+            except Exception:
+                # 記錄log
+                logger.error("背景排程發生錯誤", exc_info=True)
+            slept = 0.0
+            while slept < self.interval and not self.isInterruptionRequested():
+                time.sleep(0.5)
+                slept += 0.5
+        logger.info("ScheduleThread 己收到中斷，停止執行。")
+
+class LoadingOverlay(QtWidgets.QWidget):
+    """
+        可在特定期間，用來阻止主視窗所有互動
+    """
+    def __init__(self, parent):
+        super().__init__(parent)
+        # 讓 overlay 填滿 parent 的 client area
+        self.setGeometry(parent.rect())
+        # 半透明遮罩
+        self.setStyleSheet("background-color: rgba(0, 0, 0, 120);")
+        self.setWindowFlags(
+            QtCore.Qt.WindowType.Widget |
+            QtCore.Qt.WindowType.FramelessWindowHint
+        )
+
+        # ----- 中央小視窗 -----
+        self.box = QtWidgets.QFrame(self)
+        self.box.setFixedSize(220, 100)
+        # 自訂底色與透明度 (最後一個值 180 / 255 ≈ 70% 不透明度)
+        self.box.setStyleSheet("""
+                QFrame {
+                    background-color: rgba(240, 240, 240, 180);
+                    border-radius: 10px;
+                }
+                QLabel {
+                    font-size: 16px;
+                    font_weight: bold;   
+                }
+            """)
+        # 初次定位到中心
+        self._center_box()
+
+        # 用垂直 Layout，把文字與 progress bar 都置中
+        layout = QtWidgets.QVBoxLayout(self.box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)  # 整個 layout 元素置中
+
+        # 提示文字
+        self.label = QtWidgets.QLabel("查詢中，請稍候…", self.box)
+        self.label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.label)
+
+        # 不確定型進度條
+        self.bar = QtWidgets.QProgressBar(self.box)
+        self.bar.setRange(0, 0)  # 0,0 模式會無限跑馬燈
+        self.bar.setFixedHeight(12)
+        self.bar.setTextVisible(False)
+        layout.addWidget(self.bar)
+
+        self.hide()
+
+    def _center_box(self):
+        """把 box 移到 parent 的正中央"""
+        pw, ph = self.width(), self.height()
+        bw, bh = self.box.width(), self.box.height()
+        self.box.move((pw - bw) // 2, (ph - bh) // 2)
+
+    def show(self):
+        # 每次顯示前都重新置中
+        self.setGeometry(self.parent().rect())
+        self._center_box()
+        super().show()
+
+    def hide(self):
+        super().hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 視窗大小變動時，也要更新 overlay 與 box 位置
+        self.setGeometry(self.parent().rect())
+        self._center_box()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        # 視窗被拖動時，也同步
+        self._center_box()
+
 class PiReader(QtCore.QThread):
     """
-    PiReader 類別，用於在子執行緒中非同步查詢 PI 資料。
+    用於在子執行緒中非同步查詢 PI 資料。
 
     屬性:
         pi_client (PIClient): 執行 PI 查詢的客戶端實例。
@@ -111,7 +239,7 @@ class PiReader(QtCore.QThread):
             self.logger.error("run(0 前必須先呼叫 set_query_params() 設定參數")
             return
 
-        self.logger.info(f"開始 PI 查詢，參數:{self.query_kwargs}")
+        self.logger.info(f"開始 PI 查詢, 查詢種類:{self.key}")
         try:
             data = self.pi_client.query(**self.query_kwargs)
             self.logger.info("PI 查詢完成，資料筆數: %d", len(data))
@@ -121,9 +249,9 @@ class PiReader(QtCore.QThread):
             self.logger.exception("PI 查詢失敗")
             self.data_ready.emit(self.query_kwargs, e)
 
-class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
+class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
-        super(MyMainForm, self).__init__()
+        super(MyMainWindow, self).__init__()
         self.setupUi(self)
 
         # --- 用QThread 同時讀取兩組PI 資料的功能 (等待放到 ui_handler.py) ---
@@ -142,6 +270,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         self.average_back = "#D6EAF8"     # 平均值背景顏色 淡藍色背景
         self.history_datas_of_groups = pd.DataFrame()  # 用來紀錄整天的各負載分類的週期平均值
         self.hsm_attribute = pd.DataFrame()            # 用來紀錄從HSM 用電資料分析出來的特性
+        self._history_results ={}           # 在on_data_ready() 中用來暫存結果 dict
+        self._pending_column = None         # 等待更新(update_history_to_tws()) 的欄位key
+        self._isFetching = False            # 用來防止重復觸發 history_demand_of_groups 的Guard flag
+        self.scheduler_thread: Optional[ScheduleThread] = None      # 當作ScheduleThread 的實例，作為背景排程
+        self.dashboard_thread: Optional[DashboardThread] = None     # 當作DashboardThread 的實例，作為背景排程
+
+        self.loader = LoadingOverlay(self)  # 彈出半透明loading 的
 
         self.dashboard_value()
         # 建立趨勢圖元件並加入版面配置
@@ -173,7 +308,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def remove_target_tag_from_list3(self, item: QtWidgets.QListWidgetItem):
         """
-        函式 remove_target_tag_from_list3 的說明。
+        用來移除功能試調區中, "選擇要顯示(listWidget_3)" 的項目
 
         Args:
             item: QtWidgets.QListWidgetItem (type): 參數說明。
@@ -186,7 +321,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def add_target_tag_to_list3(self, item: QtWidgets.QListWidgetItem):
         """
-        函式 add_target_tag_to_list3 的說明。
+        用來新增項目到功能試調區中的"選擇要顯示(listWidget_3)"
 
         Args:
             item: QtWidgets.QListWidgetItem (type): 參數說明。
@@ -196,7 +331,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         name = item.text()
         self.listWidget_3.addItems([name])
 
-    @QtCore.pyqtSlot(dict, object)
+    @QtCore.pyqtSlot(object, object)
     def on_data_ready(self, tags: tuple, result: object):
         """
         函式 on_data_ready 的說明。
@@ -207,6 +342,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         Returns:
             type: 回傳值說明。
         """
+
         if isinstance(result, Exception):
             QtWidgets.QMessageBox.critical(
                 self,
@@ -215,7 +351,8 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             )
             return
         # 結果正常，存起來
-        self._history_results[tags] = result
+        key = tuple(tags) # 將接收到的tags 強制轉成tuple 型別指定給key, 以利後續的issubset 的比對
+        self._history_results[key] = result
 
         # 等到兩組都拿到，才做後續處理
         needed = {tuple(self.thread1.key), tuple(self.thread2.key)}
@@ -266,17 +403,34 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
                                                            power_filter=win2, plot=False)
 
             df_res = pd.DataFrame.from_dict(results, orient='index')
-            print(df_res)
+
+            # 解開重復觸發查詢的 Guard flag 及會觸發查詢的控制項、並隱藏loading overlay
+            self._isFetching = False
+            self.checkBox_2.setEnabled(True)
+            self.dateEdit_3.setEnabled(True)
+            self.horizontalScrollBar.setEnabled(True)
+            self.loader.hide()
+
+            # 整合完 self.history_datas_of_group 之後，呼叫更新畫面
+            self.update_history_to_tws(self.history_datas_of_groups.loc[:, self._pending_column])
+            # 清除 pending，避免重複
+            self._pending_column = None
+
 
     @log_exceptions()
     @timeit(level=20)
     def history_demand_of_groups(self, st, et):
         """
-            ### 查詢特定週期，各設備群組(分類)的平均值 ###
+            查詢特定週期，各設備群組(分類)的平均值
         :param st: 查詢的起始時間點
                et: 查詢的最終時間點
         :return:
         """
+        if self._isFetching:    # 防止重複觸發查詢的Guard flag
+            return
+        self._isFetching = True
+
+
         # ---------- 準備兩組 tags 清單 ------------
         # ---用來查各種歷史需量值的tags
         mask = ~pd.isnull(self.tag_list.loc[:, 'tag_name2'])  # 作為用來篩選出tag中含有有kwh11 的布林索引器
@@ -288,8 +442,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         tag_reference = self.tag_list.set_index('name').copy()
         hsm_tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
 
-        # 暫存結果用
-        self._history_results ={}
+        # 每次查詢前，讓 Overlay 顯示
+        # 同時更新 overlay 尺寸，以為剛好主視窗被 resize
+        self.loader.setGeometry(self.rect())
+        self.loader.show()
+
+        # 先清空先前暫存的，避免影響判斷是否兩個thread 查詢是否完成
+        self._history_results.clear()
 
         # 建立並啟動兩支執行緒
         self.thread1 = PiReader(self.pi_client, key='all_product_line', parent=self)
@@ -303,6 +462,11 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         # 將兩支執行緒都 connect 到同一個槽函式
         self.thread1.data_ready.connect(self.on_data_ready)
         self.thread2.data_ready.connect(self.on_data_ready)
+
+        # 查詢前，把所有會觸發查詢的輸入控制項 disable
+        self.checkBox_2.setEnabled(False)
+        self.dateEdit_3.setEnabled(False)
+        self.horizontalScrollBar.setEnabled(False)
 
         # 開始執行
         self.thread1.start()
@@ -454,17 +618,15 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """
-            ❶ 只要覆寫 closeEvent 就能攔截使用者關窗的動作
-            用來強制關閉thread_1、thread_2
+            ❶ 覆寫 closeEvent 就能攔截使用者關窗的動作
+            在關閉視窗時，優牙中斷這條背景執行緒
         """
-        for th in (getattr(self, "thread_1", None), getattr(self, "thread_2", None)):
-            if isinstance(th, QtCore.QThread):
-                th.requestInterruption()  # ① 送出中斷旗標
-                th.wait(3000)  # ② 最多等 3 秒；0＝無限等
-                if th.isRunning():  # ③ 保險：實在關不掉就強制殺
-                    th.terminate()
-                    th.wait()
-        # ★ 若還有額外資源（計時器、連線等）也可在這裡一併釋放
+        for attr in ("scheduler_thread", "dashboard_thread"):
+            thread = getattr(self, attr, None)
+            if thread is not None:
+                thread.requestInterruption()
+                thread.quit()
+                thread.wait()
         super().closeEvent(event)   # 呼叫父類別，讓 Qt 正常處理關窗
 
     def initialize_cost_benefit_widgets(self):
@@ -697,10 +859,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             self.tableWidget_3.setColumnHidden(2, False)
             new_width = base_width + self.tableWidget_3.columnWidth(2)
 
-            # ------------- 將self.history_datas_of_group 資料更新至對應的欄位中
-            # self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
-            # self.scroller_changed_event()
-
         else:
             # ------function visible_____
             self.dateEdit_3.setVisible(False)
@@ -876,7 +1034,7 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         if status == "ERROR":
             # showMessage(text, timeout_ms)：timeout_ms 單位是毫秒，
             # 若 timeout_ms = 0，訊息就會一直停留，不會自動消失。
-            self.statusBar().showMessage("⚠ 撈取排程資料失敗，請檢查網路或來源", 10000)
+            self.statusBar().showMessage("⚠ 撈取排程資料失敗, 無法連線製程管理資訊系統 (PMIS)", 10000)
             # 以上讓訊息顯示 5 秒後自動消失。如果要一直顯示，第二個參數可改成 0。
             # 例如： self.statusBar().showMessage("⚠ 排程撈取失敗", 0)
         else:
@@ -1029,7 +1187,6 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
         return demand
 
     def date_edit3_user_change(self, new_date:QtCore.QDate):
-        column_key = '00:00'
         if self.dateEdit_3.date() >= pd.Timestamp.today().date():
             # ----選定到 "未來" 或當天的日期時，查詢今天的各週期資料，並顯示今天的最後一個結束週期的資料----
             sd = pd.Timestamp(pd.Timestamp.now().date())
@@ -1046,7 +1203,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             self.horizontalScrollBar.blockSignals(True)
             self.horizontalScrollBar.setValue((et - pd.Timestamp.now().normalize()) // pd.Timedelta('15T') - 1)
             self.horizontalScrollBar.blockSignals(False)
-            column_key = st.strftime('%H:%M')
+
+            # 先記錄要更新的 column，作為後續呼叫更新畫面時的key
+            self._pending_column = st.strftime('%H:%M')
 
         elif self.dateEdit_3.date() < pd.Timestamp.today().date():
             #  ---- 查詢歷史資料 ----
@@ -1058,17 +1217,13 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             self.label_16.setText('00:00')
             self.label_17.setText('00:15')
 
-            # ------------- 將self.history_datas_of_group 資料更新至對應的欄位中
-            self.update_history_to_tws(self.history_datas_of_groups.loc[:, '00:00'])
-
             # 設定水平scrollBar 時，要先block signal, 避免執行多次查詢及更新資料
             self.horizontalScrollBar.blockSignals(True)
             self.horizontalScrollBar.setValue(0)
             self.horizontalScrollBar.blockSignals(False)
-            column_key = '00:00'
 
-        # 更新畫面顯示歷史資料（以 st 的時間作為 column key)
-        self.update_history_to_tws(self.history_datas_of_groups.loc[:, column_key])
+            # 先記錄要更新的 column，作為後續呼叫更新畫面時的key
+            self._pending_column = '00:00'
 
     def scroller_changed_event(self):
         """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
@@ -1104,8 +1259,9 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
 
         self.label_16.setText(st.strftime('%H:%M'))
         self.label_17.setText(et.strftime('%H:%M'))
-        # 更新畫面顯示歷史資料（以 st 的時間作為 column key）
-        self.update_history_to_tws(self.history_datas_of_groups.loc[:, st.strftime('%H:%M')])
+
+        # 先記錄要更新的 column，作為後續呼叫更新畫面時的key
+        self._pending_column = st.strftime('%H:%M')
 
     def update_history_to_tws(self, current_p):
         """
@@ -1407,16 +1563,31 @@ class MyMainForm(QtWidgets.QMainWindow, Ui_MainWindow):
             # 變更字體顏色
             tg_child.setForeground(1, QtGui.QBrush(highlight_color if ng_contribution > 0 else default_color))
 
-    def continuously_update_current_value(self):
-        while not QtCore.QThread.currentThread().isInterruptionRequested():
-            self.dashboard_value()
-            QtCore.QThread.msleep(11_000)  # 用 Qt 的 sleep，不卡 event-loop
+    def start_dashboard_thread(self):
+        """
+        用來建立繼承自 QThread 的 DashboardThread 的實例。
+        並定期執行 dashboard_value() 從PI 系統讀取即時值，並更新到指定表格
+        Returns:
+            None
+        """
+        # 建立並儲存 DashboardThread 的實例
+        self.dashboard_thread = DashboardThread(self, interval=11.0)
+        self.dashboard_thread.setObjectName("DashboardThread")
+        # 啟動執行緒
+        self.dashboard_thread.start()
 
-    def continuously_scrapy_and_update(self):
-        while not QtCore.QThread.currentThread().isInterruptionRequested():
-            self.update_tw4_schedule()
-            QtCore.QThread.msleep(30_000)
-
+    def start_schedule_thread(self):
+        """
+        用來建立繼承自 QThread 的ScheduleThread 的實例。
+        並每隔一段時間執行 update_tw4_schedule() 爬取 PMIS 和更新產線排程訊息
+        Returns:
+            None
+        """
+        # 建立並儲存 ScheduleThread 實例
+        self.scheduler_thread = ScheduleThread(self, interval=30.0)
+        self.scheduler_thread.setObjectName("SchedulerThread")
+        # 啟動執行緒
+        self.scheduler_thread.start()
 
     def tw3_expanded_event(self):
         """
@@ -2372,7 +2543,7 @@ if __name__ == "__main__":
     sys.excepthook = handle_uncaught
     pi_client = PIClient()
     app = QtWidgets.QApplication(sys.argv)
-    myWin = MyMainForm()
+    myWin = MyMainWindow()
     myWin.show()
 
     # 包try/except 的啟動事件迴圈

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from PyQt6 import QtCore
 from PyQt6 import QtWidgets
 
@@ -71,16 +73,9 @@ def setup_ui_behavior(ui):
     if hasattr(ui, 'trend_chart'):
         ui.verticalLayout.addWidget(ui.trend_chart)
 
-    # ===== 啟動 QThread 任務（需主程式定義 run function） =====
-    ui.thread_1 = QtCore.QThread()
-    ui.thread_1.setObjectName("Dashboard_Updator")
-    ui.thread_1.run = ui.continuously_update_current_value
-    ui.thread_1.start()
-
-    ui.thread_2 = QtCore.QThread()
-    ui.thread_2.setObjectName("scrapy")
-    ui.thread_2.run = ui.continuously_scrapy_and_update
-    ui.thread_2.start()
+    # ===== 啟動 QThread 開始背景任務 (連續更新即時值、產線排程） =====
+    ui.start_schedule_thread()
+    ui.start_dashboard_thread()
 
     # ===== 初始化效益分析表格（需要手動設定表格樣式） =====
     if hasattr(ui, 'initialize_cost_benefit_widgets'):
