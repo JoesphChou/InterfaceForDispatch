@@ -307,9 +307,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def real_time_hsm_cycle(self):
         """
-        查詢近15分鐘 (可調整) 的HSM 軋延設備群的 P值，並調用 data_analysis.estimate_speed_from_last_peaks 函式，
+        查詢近15分鐘 (可調整) 的HSM 軋延設備群的 P值，
+        並調用 data_analysis.estimate_speed_from_last_peaks 函式，
         取得 HSM 目前生產速度每卷需量，並更新到指定的 UI 容器中。
-
+        PS. 如果用 kwh 反推的話，需量會比較準；用 P 值的話，生產速率和件數會比較準。(後續再考慮要不要合併使用)
         Args:
             None
         Returns:
@@ -506,59 +507,30 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.thread1.start()
         self.thread2.start()
 
-    @log_exceptions()
-    @timeit(level=20)
-    def analyze_hsm_long_period(self):
-        """
-        函式 analyze_hsm_long_period 的說明。
-
-        Args:
-        Returns:
-            type: 回傳值說明。
-        """
-        interval = 5
-        tag_reference = self.tag_list.set_index('name').copy()
-        tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
-        start = pd.Timestamp(self.dateTimeEdit_3.dateTime().toString())
-        end = pd.Timestamp(self.dateTimeEdit_4.dateTime().toString())
-
-        df = pi_client.query(start, end, tags, 'AVERAGE', f'{interval}s', 'ffill')
-
-        # 將資料分類
-        # 取出 9h140~9h280、9h180~9kb33 的欄位名稱list
-        cols = (list(df.loc[:,'W511_HSM/33KV/9H_140/P':'W511_HSM/33KV/9H_280/P'].columns) +
-                list(df.loc[:,'W511_HSM/33KV/9H_180/P':'W511_HSM/11.5KV/9KB1_2_33/P'].columns))
-
-        #original_date = pd.DataFrame(df[cols].sum(axis=1),columns=['Main_group'])
-        original_date = df[cols].sum(axis=1)
-        filter_date = df.loc[:,'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
-
-        # 將所有的資料透過迴圈，15分鍾為一組，透過函式分析 HSM 產線特性，並將結果先以字典的方式儲存，最後再轉成dataframe 格式
-        results={}
-        for (t1, win1), (t2, win2) in zip(original_date.resample('15T'), filter_date.resample('15T')):
-            assert t1 == t2, f"時間不一致！ HSM 軋延機群={t1}, 要濾掉訊號={t2}"
-            results[t1] = analyze_production_avg_cycle(win1, threshold=10,
-                                         smooth_window=int(40 / interval), prominence=1,
-                                         power_filter=win2, plot=False)
-
-        df_res = pd.DataFrame.from_dict(results, orient='index')
-        print(df_res)
-
     def analyze_hsm(self):
         """ 試調分析 HSM 用電資訊 """
         # -- 設定區 --
         interval = self.spinBox_6.value()
         tag_reference = self.tag_list.set_index('name').copy()
-        tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
         start = pd.Timestamp(self.dateTimeEdit_5.dateTime().toString())
         end = pd.Timestamp(self.dateTimeEdit_5.dateTime().toString()) + pd.offsets.Minute(self.spinBox_5.value())
 
         # 從PI 系統抓資料
-        df = pi_client.query(start, end, tags, 'AVERAGE', f'{interval}s', 'ffill')
+        if self.radioButton_5.isChecked():     # --- 用 kwh 反推 ---
+            tags = tag_reference.loc['9H140':'9KB33', 'tag_name2'].tolist()
+            df = pi_client.query(start, end, tags, 'RANGE', f'{interval}s', 'ffill')
+            df = df * 3600 / interval
 
-        # 針對9h160、9h170 的 P值，從原始HSM 設備群中挑出來，提高分析生產速率和數量的準確性。
+            # 針對9h160、9h170 的 KWH值，從原始HSM 設備群中挑出來，提高分析生產速率和數量的準確性。
+            filter_date = df.loc[:,'W511_HSM/33KV/9H_160/kwh11':'W511_HSM/33KV/9H_170/kwh11'].sum(axis=1)
+        else:
+            tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
+            df = pi_client.query(start, end, tags, 'AVERAGE', f'{interval}s', 'ffill')
+
+            # 針對9h160、9h170 的 P值，從原始HSM 設備群中挑出來，提高分析生產速率和數量的準確性。
+            filter_date = df.loc[:,'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
+
         original_date = df.sum(axis=1)
-        filter_date = df.loc[:,'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
 
         # 呼叫 data_analysis 的 analyze_production_avg_cycle
         res3 = analyze_production_avg_cycle(original_date, threshold=self.spinBox_3.value(),
@@ -1251,7 +1223,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     # 重新查詢整天的歷史資料更新到最新狀態
                     self.history_demand_of_groups(st=current_date_widget3, et=current_date_widget3
                                                                               + pd.offsets.Day(1))
-
 
         # 如果選取的區間 et 超過目前時間，則調整至最後完成的區間
         if et > now:
