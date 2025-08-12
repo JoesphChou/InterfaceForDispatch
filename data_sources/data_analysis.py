@@ -5,93 +5,140 @@ from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 
 def estimate_speed_from_last_peaks(
-        power: pd.Series,
-        *,
-        height: Optional[float] = None,
-        prominence: Optional[float] = None,
-        smooth_window: int = 3
+    power: pd.Series,
+    *,
+    threshold: float,
+    power_filter: pd.Series = None,
+    smooth_window: int = 3,
+    distance: int = 1,
+    prominence: float = None,
+    plot: bool = False
 ) -> dict:
     """
-    只用最後兩個「大峰」來估算生產速率與單件耗電。
-    可用來計算real-time 顯示最近一件所花的時間
+    根據最後兩個 peak 估算生產速率與每件 15 分鐘需量 (MW)，並額外回傳「目前生產速度」。
 
-    Args:
-        power : pd.Series
-            index 為 datetime，values 為瞬時功率 (MW)，等時取樣。
-    Keyword Args:
-        height : float, optional
-            峰值最小高度門檻，若 None 則用 power.mean()。
-        prominence : float, optional
-            峰值最小突顯度，若 None 則用 (power.max()-power.min())*0.3。
-        smooth_window : 平滑窗口大小 (樣本數)
+    參數：
+      power : pd.Series，時間序列的功率（MW）
+      threshold : float，檢測峰值的閾值
+      power_filter : pd.Series，可選，扣除的雜訊
+      smooth_window : int，平滑視窗大小
+      distance : int，find_peaks 最小間隔（資料點數）
+      prominence : float，可選，find_peaks 的 prominence
+      plot : bool，是否繪圖顯示結果
 
-    Returns:
-        {
-          "dt_s": float,                   # 最後兩峰間隔（秒）
-          "rate_items_per_15min": float,   # 卷／15 分鐘
-          "energy_interval_kwh": float,    # 這段週期內耗電 (kWh)
-          "energy_per_item_kwh": float     # 每件平均耗電 (kWh)
-          "demand_per_item": float         # 每卷需量 (kWh)
-          "rest": boolean                  # 根據 peak 數量，判斷是否暫停生產中
-        }
-    Raises:
-        None: 本函式不會主動拋出例外，但結果中可能包含 'error' 鍵。
-    """
-    # 1. 取值並算時間間隔
-    smoothed = power.rolling(window=smooth_window, center=False)
-    smoothed = smoothed.mean().fillna(method='bfill').fillna(method='ffill')
-    #y = power.values.astype(float)
-    #delta_s = (power.index[1] - power.index[0]).total_seconds()
-
-    # 2. 峰值參數預設
-    if height is None:
-        height = power.mean()
-    if prominence is None:
-        prominence = (power.max() - power.min()) * 0.3
-
-    # 3. 找所有峰
-    peaks, props = find_peaks(
-        smoothed,
-        height=height,
-        prominence=prominence,
-        distance=60  # 相鄰樣本皆可
-    )
-    if len(peaks) < 2:
-        return {
-            "rest": True,
-            "error": "不夠峰值來估算，請放寬門檻或換另一段區間"
-        }
-
-    # 4. 取最後兩個峰的 index
-    i1, i2 = peaks[-2], peaks[-1]
-    t1, t2 = power.index[i1], power.index[i2]
-    dt_s = (t2 - t1).total_seconds()
-
-    # 5. 生產速率：件／15 分鐘
-    rate_15m = 900.0 / dt_s
-
-    # 6. 這一件所耗電量：積分對應區間的能量
-    #    用 trapezoid rule 積分 P(t) dt
-    segment = power.iloc[i1:i2 + 1]
-    t_sec = (segment.index - segment.index[0]).total_seconds()
-    t_h = t_sec / 3600.0
-    mwh = np.trapz(segment.values, x=t_h)  # MWh
-    kwh = mwh * 1000.0  # kWh
-
-    # 7. 由於這段區間剛好對應 1 件
-    energy_per_item = kwh
-    demand_per_item = mwh * 4
-
-
-    return {
-        "dt_s": dt_s,
-        "rate_items_per_15min": rate_15m,
-        "energy_interval_kwh": kwh,
-        "energy_per_item_kwh": energy_per_item,
-        "demand_per_item": demand_per_item,
-        "smoothed": smoothed,
-        "rest": False
+    回傳 dict：
+    {
+        "production_normal": bool,         # 是否為正常生產（至少 2 個 peak）
+        "peak_times": List[pd.Timestamp],  # 所有 peak 時間
+        "delta_sec": float or None,        # A：最後兩 peak 間隔秒數
+        "A_sec": float or None,            # 同 delta_sec（為除錯保留）
+        "B_sec": float or None,            # B：最後一個 peak 距時間窗最右端的秒數
+        "rate_items_per_15min": float,     # 「最後兩件」速率 (= 900/A)
+        "current_rate_items_per_15min": float,  # 目前生產速度（依 A/B 規則）
+        "mw_per_item": float or None       # 每件 15 分鐘需量 (MW)
     }
+    """
+    # 1) 扣除雜訊並平滑
+    data = power.copy()
+    if power_filter is not None:
+        data = data - power_filter
+    sm = data.rolling(smooth_window, center=True).mean().bfill().ffill()
+
+    if prominence is None:
+        prominence = (sm.max() - sm.min()) * 0.3
+
+    # 2) 找 peaks
+    peaks, _ = find_peaks(
+        sm.values,
+        height=threshold,
+        prominence=prominence,
+        distance=distance
+    )
+    peak_times = list(sm.index[peaks])
+
+    right_edge = power.index[-1]  # 時間窗最右端
+    production_normal = len(peak_times) >= 2
+
+    result = {
+        "production_normal": production_normal,
+        "peak_times": peak_times,
+        "delta_sec": None,
+        "A_sec": None,
+        "B_sec": None,
+        "rate_items_per_15min": 0.0,
+        "current_rate_items_per_15min": 0.0,
+        "mw_per_item": None,
+    }
+
+    # === 先處理 A（最後兩峰間隔）與 rate_items_per_15min ===
+    if production_normal:
+        t1, t2 = peak_times[-2], peak_times[-1]
+        A = (t2 - t1).total_seconds()
+        result["delta_sec"] = A
+        result["A_sec"] = A
+
+        if A > 0:
+            result["rate_items_per_15min"] = 900.0 / A
+
+        # 計算每件 15 分鐘需量 (MW)
+        segment = power.loc[t1:t2]
+        t_h = (segment.index - t1).total_seconds() / 3600.0
+        mwh = np.trapz(segment.values, x=t_h)
+        result["mw_per_item"] = mwh * 4.0  # MWh×4 = 15 分鐘 MW
+
+    # === 再依你定義的規則計算「目前生產速度」 ===
+    if len(peak_times) >= 2:
+        # 有至少兩個 peak：比較 B 與 A
+        last_peak = peak_times[-1]
+        B = (right_edge - last_peak).total_seconds()
+        result["B_sec"] = B
+
+        A = result["A_sec"] or 0.0
+
+        if B <= A:
+            # 同步用 A 換算
+            result["current_rate_items_per_15min"] = 900.0 / A if A > 0 else 0.0
+        else:
+            # B > A：若 B > 420 秒 → 目前速率為 0；否則用 B 換算
+            if B > 420:
+                result["current_rate_items_per_15min"] = 0.0
+            else:
+                result["current_rate_items_per_15min"] = 900.0 / B if B > 0 else 0.0
+
+    elif len(peak_times) == 1:
+        # 只有 1 個 peak：用 B 換算
+        last_peak = peak_times[-1]
+        B = (right_edge - last_peak).total_seconds()
+        result["B_sec"] = B
+        result["current_rate_items_per_15min"] = 900.0 / B if B > 0 else 0.0
+
+    else:
+        # 沒有 peak：速率為 0
+        result["current_rate_items_per_15min"] = 0.0
+
+    # 3) 視覺化（與原本一致）
+    if plot:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(power.index, power.values, label='原始功率')
+        if power_filter is not None:
+            ax.plot(power_filter.index, power_filter.values, '--', label='濾波（補償）')
+        ax.plot(sm.index, sm.values, label='平滑功率')
+        ax.axhline(threshold, color='r', linestyle='--', label=f'Th={threshold}')
+        ax.plot(peak_times, sm.loc[peak_times], 'kx', label='所有峰值')
+        if production_normal:
+            ax.plot(
+                [peak_times[-2], peak_times[-1]],
+                [sm.loc[peak_times[-2]], sm.loc[peak_times[-1]]],
+                'ro', markersize=8, label='最後兩峰'
+            )
+        ax.set_title('estimate_speed_from_last_peaks 檢視')
+        ax.set_xlabel('時間')
+        ax.set_ylabel('功率 (MW)')
+        ax.legend()
+        plt.tight_layout()
+        plt.show()
+
+    return result
 
 def analyze_production_single_cycle(
     power: pd.Series,

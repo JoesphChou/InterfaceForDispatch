@@ -15,7 +15,7 @@ from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends # 引�
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
-from data_sources.data_analysis import analyze_production_avg_cycle
+from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -291,7 +291,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
         self.listWidget_3.itemDoubleClicked.connect(self.remove_target_tag_from_list3)
         self.radioButton_5.setChecked(True)
-        self.pushButton_7.clicked.connect(lambda: self.analyze_hsm_long_period())
 
         # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
         current_datetime = QtCore.QDateTime.currentDateTime()
@@ -305,6 +304,41 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         start_datetime = rounded_current_datetime.addSecs(-7200)  # 前兩小時
         self.dateTimeEdit_3.setDateTime(start_datetime)
         self.dateTimeEdit_5.setDateTime(rounded_current_datetime.addSecs(-900))
+
+    def real_time_hsm_cycle(self):
+        """
+        查詢近15分鐘 (可調整) 的HSM 軋延設備群的 P值，並調用 data_analysis.estimate_speed_from_last_peaks 函式，
+        取得 HSM 目前生產速度每卷需量，並更新到指定的 UI 容器中。
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        # 用來查詢 HSM 歷史 p值的 tags
+        tag_reference = self.tag_list.set_index('name').copy()
+        hsm_tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
+
+        # 以現在時間的 Timestamp 往下取整到指定的時間粒度的邊界，並指定給et
+        et = pd.Timestamp.now().floor('S')
+        st = et - pd.offsets.Minute(15)
+
+        # 向PI system 查詢資料
+        df2 = pi_client.query(st=st, et=et, tags=hsm_tags,summary='AVERAGE',
+                                      interval='5s', fillna_method='ffill')
+
+        # 針對9h160、9h170 的 P值，從原始HSM 設備群中挑出來，提高分析生產速率和數量的準確性。
+        original_date = df2.sum(axis=1)
+        filter_date = df2.loc[:, 'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
+
+        result = estimate_speed_from_last_peaks(power= original_date, threshold=10.0,
+                                                power_filter= filter_date, smooth_window=8, prominence=1)
+
+        v1 = result.get('current_rate_items_per_15min')
+        v2 = result.get('mw_per_item')
+
+        self.label_44.setText(f"{v1:.2f} 卷/15分鐘" if v1 is not None else "— 卷/15分鐘")
+        self.label_45.setText(f"{v2:.2f} MW" if v2 is not None else "— MW")
 
     def remove_target_tag_from_list3(self, item: QtWidgets.QListWidgetItem):
         """
@@ -522,14 +556,9 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # 從PI 系統抓資料
         df = pi_client.query(start, end, tags, 'AVERAGE', f'{interval}s', 'ffill')
 
-        # 將資料分類
-        # 取出 9h140~9h280、9h180~9kb33 的欄位名稱list
-        cols = (list(df.loc[:,'W511_HSM/33KV/9H_140/P':'W511_HSM/33KV/9H_280/P'].columns) +
-                list(df.loc[:,'W511_HSM/33KV/9H_180/P':'W511_HSM/11.5KV/9KB1_2_33/P'].columns))
-
-        original_date = df[cols].sum(axis=1)
+        # 針對9h160、9h170 的 P值，從原始HSM 設備群中挑出來，提高分析生產速率和數量的準確性。
+        original_date = df.sum(axis=1)
         filter_date = df.loc[:,'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
-
 
         # 呼叫 data_analysis 的 analyze_production_avg_cycle
         res3 = analyze_production_avg_cycle(original_date, threshold=self.spinBox_3.value(),
@@ -582,39 +611,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # 4. 開新窗
         self._trend_win = TrendWindow(fig, self)  # 持有引用避免被 GC
         self._trend_win.show()
-
-        """
-        # 5. FFT 分析
-        if self.checkBox_4.isChecked():
-            #main_period, freqs, amps = detect_periodicity(df['add'], 1/interval)
-
-            res2 = estimate_speed_from_last_peaks(df['add'], height=self.spinBox_3.value(), smooth_window=20,
-                                                  prominence=self.spinBox_4.value())
-            print("------即時用的生產速度-----------")
-            if not res2['rest']:
-                print("(1) 最後兩峰間隔:", res2['dt_s'], " 秒")
-                print("(2) 生產速度:", res2['rate_items_per_15min'], " 卷/15分鐘")
-                #print("(3) 這段週期內秏電:", res2['energy_interval_kwh'], " kwh")
-                print("(4) 每卷需量:", res2['demand_per_item'], " MW \n")
-            else:
-                print(res2['error'])
-
-            res = analyze_production_single_cycle(df['add'], threshold=self.spinBox_3.value(),
-                                                     smooth_window=20, prominence=self.spinBox_4.value(),
-                                                     power_filter=df2['filter'], plot=True)
-            print("-----power_filter + smoothed + 以第一/最後完整週期長度推估 unfinished------------")
-            print("(1) 生產速度：", res['rate_items_per_15min'], "卷/15 分鐘")
-            print("(2) 總共生產件數：", res['total_items'], "卷")
-            print("(3) 15分鐘需量:", res['demand_15m'], " MW \n")
-
-            res3 = analyze_production_avg_cycle(df['add'], threshold=self.spinBox_3.value(),
-                                                     smooth_window=20, prominence=self.spinBox_4.value(),
-                                                     power_filter=df2['filter'], plot=True)
-            print("-----power_filter + smoothed + 以所有完整週期平均長度推估 unfinished：------------")
-            print("(1) 生產速度：", res3['rate_items_per_15min'], "卷/15 分鐘")
-            print("(2) 總共生產件數：", res3['total_items'], "卷")
-            print("(3) 15分鐘需量:", res3['demand_15m'], " MW \n")
-        """
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """
@@ -1021,6 +1017,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.tws_update(c_values)
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
+        # 更新hsm 目前速率及每卷需量
+        self.real_time_hsm_cycle()
+
+
     def update_tw4_schedule(self):
         """
         ### 更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：###
@@ -1226,7 +1226,9 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self._pending_column = '00:00'
 
     def scroller_changed_event(self):
-        """scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示"""
+        """
+        scrollbar 數值變更後，判斷是否屬於未來時間，並依不同狀況執行相對應的區間、紀錄顯示
+        """
         now = pd.Timestamp.now()
         current_date_widget3 = pd.Timestamp(self.dateEdit_3.date().toString())
         # 依據水平捲軸的值計算所選的區間
@@ -1250,6 +1252,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     self.history_demand_of_groups(st=current_date_widget3, et=current_date_widget3
                                                                               + pd.offsets.Day(1))
 
+
         # 如果選取的區間 et 超過目前時間，則調整至最後完成的區間
         if et > now:
             et = now.floor('15T')
@@ -1262,6 +1265,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # 先記錄要更新的 column，作為後續呼叫更新畫面時的key
         self._pending_column = st.strftime('%H:%M')
+        # 整合完 self.history_datas_of_group 之後，呼叫更新畫面
+        self.update_history_to_tws(self.history_datas_of_groups.loc[:, self._pending_column])
 
     def update_history_to_tws(self, current_p):
         """
