@@ -208,6 +208,9 @@ class PIClient:
 
         Raises:
             無：本方法不會主動拋例外，若搜尋點失敗，該 column 會被跳過。
+        
+        備註：
+            本方法將略過搜尋失敗或 summaries 失敗的tag
         """
         dfs = []
         for tag in tags:

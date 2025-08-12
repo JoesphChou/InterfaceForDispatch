@@ -1,12 +1,3 @@
-from __future__ import annotations
-from bs4 import BeautifulSoup
-import re, urllib3, time
-import pandas as pd
-from datetime import datetime
-from typing import Dict, List, Tuple
-from logging_utils import get_logger
-logger = get_logger(__name__)
-
 """schedule_scraper.py
 
 A standalone helper that scrapes Dragon Steel MES “2138” (schedule chart) and “2137”
@@ -18,8 +9,8 @@ The implementation is refactored from the former ``scrapy_schedule`` routine in
 
 Usage
 -----
->>> from schedule_scraper import scrape_schedule
->>> past, current, future = scrape_schedule()  # returns three DataFrames
+- >>> from schedule_scraper import scrape_schedule
+- >>> past, current, future = scrape_schedule()  # returns three DataFrames
 
 Each DataFrame columns
 ----------------------
@@ -33,6 +24,16 @@ The function purposefully keeps the original heuristics for de‑duplication,
 cross‑day correction and coordinate‑based sorting so that the UI’s downstream
 logic remains unchanged.
 """
+
+from __future__ import annotations
+from bs4 import BeautifulSoup
+import re, urllib3, time
+import pandas as pd
+from datetime import datetime
+from typing import Dict, List, Tuple
+from logging_utils import get_logger
+logger = get_logger(__name__)
+
 # 公開介面宣告：意思是當其它 使用用【from schedule_scraper import *】 時，
 # 只會匯入scrape_schedule
 __all__ = ["scrape_schedule"]

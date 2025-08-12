@@ -247,7 +247,7 @@ class PiReader(QtCore.QThread):
 
         except Exception as e:
             self.logger.exception("PI 查詢失敗")
-            self.data_ready.emit(self.query_kwargs, e)
+            self.data_ready.emit(self.key, e)
 
 class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -282,6 +282,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # 建立趨勢圖元件並加入版面配置
         self.trend_chart = TrendChartCanvas(self)
         setup_ui_behavior(self)
+        # self.tabWidget.setTabVisible(3,False)
+        # -self.actionTrend_Chart.triggered.connect()
 
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
@@ -369,13 +371,29 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     @QtCore.pyqtSlot(object, object)
     def on_data_ready(self, tags: tuple, result: object):
         """
-        函式 on_data_ready 的說明。
+        背景查詢完成時的槽函式。接收 PiReader 執行緒帶回的結果，當兩組查詢（all_product_line 與 hsm）
+        都完成後，彙整各設備群組的 15 分鐘平均用電，並對 HSM 進行每 15 分鐘的生產週期分析，最後更新 UI。
 
-        Args:
-            tags: tuple (type): 參數說明。
-            result: object (type): 參數說明。
-        Returns:
-            type: 回傳值說明。
+        參數：
+            tags (Any):
+                由執行緒回傳的識別資訊。
+            result (object):
+                成功時為 pd.DataFrame；失敗時為 Exception。
+
+        行為：
+            1) 若 result 為 Exception，彈出錯誤對話框並結束。
+            2) 成功時暫存至 self._history_results[key]。
+            3) 當 thread1、thread2 兩組結果都到齊：
+               a. 依 self.tag_list 建立各群組的時間表，將 kWh 轉為 MW/15min（×4），
+                  以 Group1/Group2 聚合，產出 self.history_datas_of_groups。
+               b. 從 HSM 相關欄位計算主線功率（original_date）與濾除訊號（filter_date），
+                  以 15T 切窗後逐窗呼叫 analyze_production_avg_cycle(...) 估算生產件數、每件耗電等指標。
+               c. 解除 _isFetching 與 UI 鎖定、隱藏 loading，並呼叫
+                  update_history_to_tws(self.history_datas_of_groups.loc[:, self._pending_column]) 更新畫面，
+                  最後將 _pending_column 設回 None。
+
+        回傳：
+            None（透過副作用更新：self._history_results、self.history_datas_of_groups、UI 控制項與 TreeWidget 顯示）
         """
 
         if isinstance(result, Exception):
@@ -386,11 +404,11 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             )
             return
         # 結果正常，存起來
-        key = tuple(tags) # 將接收到的tags 強制轉成tuple 型別指定給key, 以利後續的issubset 的比對
+        key = str(tags) # 將接收到的tags 強制轉成str 型別指定給key, 以利後續的issubset 的比對
         self._history_results[key] = result
 
         # 等到兩組都拿到，才做後續處理
-        needed = {tuple(self.thread1.key), tuple(self.thread2.key)}
+        needed = {self.thread1.key, self.thread2.key}
         if needed.issubset(self._history_results):
             # -------- 計算特定週期，各設備群組(分類)的平均值 -----------
             df1 = self._history_results[tuple(self.thread1.key)]
