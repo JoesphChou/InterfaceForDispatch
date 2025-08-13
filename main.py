@@ -26,43 +26,6 @@ def handle_uncaught(exc_type, exc_value, exc_traceback):
     # 否則把完整堆疊與例外都記錄到日誌
     logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
-
-def pre_check(pending_data, b=1, c='power'):
-    """
-    此函式用來判顯示在tree,table widget  的即時資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
-    :param c: 用來判斷是燃氣或電力的類別
-    :param pending_data:要判斷的數值。
-    :param b:若數值接近 0，預設回傳'停機'的述述。
-    :return: 回傳值為文字型態。
-    """
-    describe = ['--', '停機', '資料異常','未使用','0 MW','未發電']
-    if pd.isnull(pending_data):
-        return describe[2]
-    if pending_data > 0.1:
-        if c == 'gas':
-            return str(format(round(pending_data, 1),'.1f'))
-        elif c == 'h':
-            return str(format(round(pending_data, 2), '.2f'))
-        else:
-            return str(format(round(pending_data, 2),'.2f')) + ' MW'
-    else:
-        return describe[b]
-
-def pre_check2(pending_data, b=1):
-    """
-    此函式用來判顯示在tree,table widget  的 "歷史" 資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
-    :param b: 用來指定用那一個describe，預設為'停機'
-    :param pending_data:
-    :return:
-    """
-    describe = ['--', '停機', '資料異常', '未使用', '0 MW', '未發電']
-    if pd.isnull(pending_data):
-        return describe[2]
-    if pending_data > 0.1:
-        return str(format(round(pending_data, 2), '.2f'))
-    else:
-        return describe[b]
-
 class DashboardThread(QtCore.QThread):
     """
         在背景定期呼叫 MainWindow.dashboard_vaule()，
@@ -282,8 +245,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # 建立趨勢圖元件並加入版面配置
         self.trend_chart = TrendChartCanvas(self)
         setup_ui_behavior(self)
-        # self.tabWidget.setTabVisible(3,False)
-        # -self.actionTrend_Chart.triggered.connect()
 
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
@@ -306,6 +267,20 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         start_datetime = rounded_current_datetime.addSecs(-7200)  # 前兩小時
         self.dateTimeEdit_3.setDateTime(start_datetime)
         self.dateTimeEdit_5.setDateTime(rounded_current_datetime.addSecs(-900))
+
+        self.develop_option.triggered.connect(self.develop_option_event)
+
+    def develop_option_event(self):
+        """
+        menu_bar 的開發測試功能被 trigger 時的動作
+        """
+        if self.develop_option.isChecked():
+            self.tabWidget.setTabVisible(3, True)
+            self.tabWidget.setTabVisible(4, True)
+
+        else:
+            self.tabWidget.setTabVisible(3, False)
+            self.tabWidget.setTabVisible(4, False)
 
     def real_time_hsm_cycle(self):
         """
@@ -404,11 +379,11 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             )
             return
         # 結果正常，存起來
-        key = str(tags) # 將接收到的tags 強制轉成str 型別指定給key, 以利後續的issubset 的比對
+        key = tuple(tags) # 將接收到的tags 強制轉成str 型別指定給key, 以利後續的issubset 的比對
         self._history_results[key] = result
 
         # 等到兩組都拿到，才做後續處理
-        needed = {self.thread1.key, self.thread2.key}
+        needed = {tuple(self.thread1.key), tuple(self.thread2.key)}
         if needed.issubset(self._history_results):
             # -------- 計算特定週期，各設備群組(分類)的平均值 -----------
             df1 = self._history_results[tuple(self.thread1.key)]
@@ -1004,7 +979,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         wx = wx_grouped.loc[(slice('W2','WA')),'B']      # 6
         wx.index = wx.index.get_level_values(0)
         c_values = pd.concat([c_values, wx],axis=0)  # 7
-        self.tws_update(c_values)
+        self.realtime_update_to_tws(c_values)
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
 
         # 更新hsm 目前速率及每卷需量
@@ -1264,29 +1239,29 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         :return:
         """
         w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
-        self.tw1.topLevelItem(0).setText(2, pre_check2(w2_total))
-        self.tw1.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H180':'1H350'].sum()))
-        self.tw1.topLevelItem(0).child(0).child(0).setText(2, pre_check2(current_p['2H180']))
-        self.tw1.topLevelItem(0).child(0).child(1).setText(2, pre_check2(current_p['2H280']))
-        self.tw1.topLevelItem(0).child(0).child(2).setText(2, pre_check2(current_p['1H350']))
-        self.tw1.topLevelItem(0).child(1).setText(2, pre_check2(current_p['4KA19']))
-        self.tw1.topLevelItem(0).child(2).setText(2, pre_check2(current_p['4KB19':'4KB29'].sum()))
-        self.tw1.topLevelItem(0).child(2).child(0).setText(2, pre_check2(current_p['4KB19']))
-        self.tw1.topLevelItem(0).child(2).child(1).setText(2, pre_check2(current_p['4KB29']))
-        self.tw1.topLevelItem(0).child(3).setText(1, pre_check2(current_p['2KA41':'2KB41'].sum()))
-        self.tw1.topLevelItem(0).child(3).child(0).setText(2, pre_check2(current_p['2KA41']))
-        self.tw1.topLevelItem(0).child(3).child(1).setText(2, pre_check2(current_p['2KB41']))
-        self.tw1.topLevelItem(0).child(4).setText(2, pre_check2(current_p['W2']))
+        self.tw1.topLevelItem(0).setText(2, self.pre_check2(w2_total))
+        self.tw1.topLevelItem(0).child(0).setText(2, self.pre_check2(current_p['2H180':'1H350'].sum()))
+        self.tw1.topLevelItem(0).child(0).child(0).setText(2, self.pre_check2(current_p['2H180']))
+        self.tw1.topLevelItem(0).child(0).child(1).setText(2, self.pre_check2(current_p['2H280']))
+        self.tw1.topLevelItem(0).child(0).child(2).setText(2, self.pre_check2(current_p['1H350']))
+        self.tw1.topLevelItem(0).child(1).setText(2, self.pre_check2(current_p['4KA19']))
+        self.tw1.topLevelItem(0).child(2).setText(2, self.pre_check2(current_p['4KB19':'4KB29'].sum()))
+        self.tw1.topLevelItem(0).child(2).child(0).setText(2, self.pre_check2(current_p['4KB19']))
+        self.tw1.topLevelItem(0).child(2).child(1).setText(2, self.pre_check2(current_p['4KB29']))
+        self.tw1.topLevelItem(0).child(3).setText(1, self.pre_check2(current_p['2KA41':'2KB41'].sum()))
+        self.tw1.topLevelItem(0).child(3).child(0).setText(2, self.pre_check2(current_p['2KA41']))
+        self.tw1.topLevelItem(0).child(3).child(1).setText(2, self.pre_check2(current_p['2KB41']))
+        self.tw1.topLevelItem(0).child(4).setText(2, self.pre_check2(current_p['W2']))
 
         w3_total = current_p['AJ320':'5KB28'].sum() + current_p['W3']
-        self.tw1.topLevelItem(1).setText(2, pre_check2(w3_total))
-        self.tw1.topLevelItem(1).child(0).setText(2, pre_check2(current_p['AJ320']))
-        self.tw1.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KA18':'5KB28'].sum()))
-        self.tw1.topLevelItem(1).child(1).child(0).setText(2, pre_check2(current_p['5KA18']))
-        self.tw1.topLevelItem(1).child(1).child(1).setText(2, pre_check2(current_p['5KA28']))
-        self.tw1.topLevelItem(1).child(1).child(2).setText(2, pre_check2(current_p['5KB18']))
-        self.tw1.topLevelItem(1).child(1).child(3).setText(2, pre_check2(current_p['5KB28']))
-        self.tw1.topLevelItem(1).child(2).setText(2, pre_check2(current_p['W3']))
+        self.tw1.topLevelItem(1).setText(2, self.pre_check2(w3_total))
+        self.tw1.topLevelItem(1).child(0).setText(2, self.pre_check2(current_p['AJ320']))
+        self.tw1.topLevelItem(1).child(1).setText(2, self.pre_check2(current_p['5KA18':'5KB28'].sum()))
+        self.tw1.topLevelItem(1).child(1).child(0).setText(2, self.pre_check2(current_p['5KA18']))
+        self.tw1.topLevelItem(1).child(1).child(1).setText(2, self.pre_check2(current_p['5KA28']))
+        self.tw1.topLevelItem(1).child(1).child(2).setText(2, self.pre_check2(current_p['5KB18']))
+        self.tw1.topLevelItem(1).child(1).child(3).setText(2, self.pre_check2(current_p['5KB28']))
+        self.tw1.topLevelItem(1).child(2).setText(2, self.pre_check2(current_p['W3']))
 
         w41_utility = current_p['W4']
         w42_utility = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
@@ -1294,58 +1269,58 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         w41_main = current_p['AJ130':'AJ170'].sum()
         w4_total = w41_main + w4_utility
 
-        self.tw1.topLevelItem(2).setText(2, pre_check2(w4_total, b=0))
-        self.tw1.topLevelItem(2).child(0).setText(2, pre_check2(w41_main,b=0))
-        self.tw1.topLevelItem(2).child(1).setText(2, pre_check2(w4_utility,b=0))
+        self.tw1.topLevelItem(2).setText(2, self.pre_check2(w4_total, b=0))
+        self.tw1.topLevelItem(2).child(0).setText(2, self.pre_check2(w41_main,b=0))
+        self.tw1.topLevelItem(2).child(1).setText(2, self.pre_check2(w4_utility,b=0))
 
         w5_subtotal = current_p['3KA14':'2KB29'].sum() + current_p['W5']
-        # self.tw1.topLevelItem(3).setText(2,pre_check2(w5_total))
-        self.tw1.topLevelItem(3).child(0).setText(2, pre_check2(current_p['3KA14':'3KA15'].sum()))
-        self.tw1.topLevelItem(3).child(0).child(0).setText(2, pre_check2(current_p['3KA14']))
-        self.tw1.topLevelItem(3).child(0).child(1).setText(2, pre_check2(current_p['3KA15']))
-        self.tw1.topLevelItem(3).child(1).setText(2, pre_check2(current_p['3KA24':'3KA25'].sum()))
-        self.tw1.topLevelItem(3).child(1).child(0).setText(2, pre_check2(current_p['3KA24']))
-        self.tw1.topLevelItem(3).child(1).child(1).setText(2, pre_check2(current_p['3KA25']))
-        self.tw1.topLevelItem(3).child(2).setText(2, pre_check2(current_p['3KB12':'3KB28'].sum()))
-        self.tw1.topLevelItem(3).child(2).child(0).setText(2, pre_check2(current_p['3KB12']))
-        self.tw1.topLevelItem(3).child(2).child(1).setText(2, pre_check2(current_p['3KB22']))
-        self.tw1.topLevelItem(3).child(2).child(2).setText(2, pre_check2(current_p['3KB28']))
-        self.tw1.topLevelItem(3).child(3).setText(2, pre_check2(current_p['3KA16':'3KB27'].sum()))
-        self.tw1.topLevelItem(3).child(3).child(0).setText(2, pre_check2(current_p['3KA16']))
-        self.tw1.topLevelItem(3).child(3).child(1).setText(2, pre_check2(current_p['3KA26']))
-        self.tw1.topLevelItem(3).child(3).child(2).setText(2, pre_check2(current_p['3KA17']))
-        self.tw1.topLevelItem(3).child(3).child(3).setText(2, pre_check2(current_p['3KA27']))
-        self.tw1.topLevelItem(3).child(3).child(4).setText(2, pre_check2(current_p['3KB16']))
-        self.tw1.topLevelItem(3).child(3).child(5).setText(2, pre_check2(current_p['3KB26']))
-        self.tw1.topLevelItem(3).child(3).child(6).setText(2, pre_check2(current_p['3KB17']))
-        self.tw1.topLevelItem(3).child(3).child(7).setText(2, pre_check2(current_p['3KB27']))
-        self.tw1.topLevelItem(3).child(4).setText(2, pre_check2(current_p['2KA19':'2KB29'].sum()))
-        self.tw1.topLevelItem(3).child(4).child(0).setText(2, pre_check2(current_p['2KA19']))
-        self.tw1.topLevelItem(3).child(4).child(1).setText(2, pre_check2(current_p['2KA29']))
-        self.tw1.topLevelItem(3).child(4).child(2).setText(2, pre_check2(current_p['2KB19']))
-        self.tw1.topLevelItem(3).child(4).child(3).setText(2, pre_check2(current_p['2KB29']))
-        self.tw1.topLevelItem(3).child(5).setText(2, pre_check2(current_p['W5']))
-        self.tw1.topLevelItem(4).setText(2, pre_check2(current_p['WA']))
+        # self.tw1.topLevelItem(3).setText(2, self.pre_check2(w5_total))
+        self.tw1.topLevelItem(3).child(0).setText(2, self.pre_check2(current_p['3KA14':'3KA15'].sum()))
+        self.tw1.topLevelItem(3).child(0).child(0).setText(2, self.pre_check2(current_p['3KA14']))
+        self.tw1.topLevelItem(3).child(0).child(1).setText(2, self.pre_check2(current_p['3KA15']))
+        self.tw1.topLevelItem(3).child(1).setText(2, self.pre_check2(current_p['3KA24':'3KA25'].sum()))
+        self.tw1.topLevelItem(3).child(1).child(0).setText(2, self.pre_check2(current_p['3KA24']))
+        self.tw1.topLevelItem(3).child(1).child(1).setText(2, self.pre_check2(current_p['3KA25']))
+        self.tw1.topLevelItem(3).child(2).setText(2, self.pre_check2(current_p['3KB12':'3KB28'].sum()))
+        self.tw1.topLevelItem(3).child(2).child(0).setText(2, self.pre_check2(current_p['3KB12']))
+        self.tw1.topLevelItem(3).child(2).child(1).setText(2, self.pre_check2(current_p['3KB22']))
+        self.tw1.topLevelItem(3).child(2).child(2).setText(2, self.pre_check2(current_p['3KB28']))
+        self.tw1.topLevelItem(3).child(3).setText(2, self.pre_check2(current_p['3KA16':'3KB27'].sum()))
+        self.tw1.topLevelItem(3).child(3).child(0).setText(2, self.pre_check2(current_p['3KA16']))
+        self.tw1.topLevelItem(3).child(3).child(1).setText(2, self.pre_check2(current_p['3KA26']))
+        self.tw1.topLevelItem(3).child(3).child(2).setText(2, self.pre_check2(current_p['3KA17']))
+        self.tw1.topLevelItem(3).child(3).child(3).setText(2, self.pre_check2(current_p['3KA27']))
+        self.tw1.topLevelItem(3).child(3).child(4).setText(2, self.pre_check2(current_p['3KB16']))
+        self.tw1.topLevelItem(3).child(3).child(5).setText(2, self.pre_check2(current_p['3KB26']))
+        self.tw1.topLevelItem(3).child(3).child(6).setText(2, self.pre_check2(current_p['3KB17']))
+        self.tw1.topLevelItem(3).child(3).child(7).setText(2, self.pre_check2(current_p['3KB27']))
+        self.tw1.topLevelItem(3).child(4).setText(2, self.pre_check2(current_p['2KA19':'2KB29'].sum()))
+        self.tw1.topLevelItem(3).child(4).child(0).setText(2, self.pre_check2(current_p['2KA19']))
+        self.tw1.topLevelItem(3).child(4).child(1).setText(2, self.pre_check2(current_p['2KA29']))
+        self.tw1.topLevelItem(3).child(4).child(2).setText(2, self.pre_check2(current_p['2KB19']))
+        self.tw1.topLevelItem(3).child(4).child(3).setText(2, self.pre_check2(current_p['2KB29']))
+        self.tw1.topLevelItem(3).child(5).setText(2, self.pre_check2(current_p['W5']))
+        self.tw1.topLevelItem(4).setText(2, self.pre_check2(current_p['WA']))
 
-        self.tw2.topLevelItem(0).setText(2, pre_check2(current_p['9H140':'9KB33'].sum(),b=0))
-        self.tw2.topLevelItem(1).setText(2, pre_check2(current_p['AH120'],b=0))
-        self.tw2.topLevelItem(2).setText(2, pre_check2(current_p['AH190'],b=0))
-        self.tw2.topLevelItem(3).setText(2, pre_check2(current_p['AH130'],b=0))
-        self.tw2.topLevelItem(4).setText(2, pre_check2(current_p['1H450'],b=0))
-        self.tw2.topLevelItem(5).setText(2, pre_check2(current_p['1H360'],b=0))
+        self.tw2.topLevelItem(0).setText(2, self.pre_check2(current_p['9H140':'9KB33'].sum(),b=0))
+        self.tw2.topLevelItem(1).setText(2, self.pre_check2(current_p['AH120'],b=0))
+        self.tw2.topLevelItem(2).setText(2, self.pre_check2(current_p['AH190'],b=0))
+        self.tw2.topLevelItem(3).setText(2, self.pre_check2(current_p['AH130'],b=0))
+        self.tw2.topLevelItem(4).setText(2, self.pre_check2(current_p['1H450'],b=0))
+        self.tw2.topLevelItem(5).setText(2, self.pre_check2(current_p['1H360'],b=0))
 
-        self.tw3.topLevelItem(0).setText(2, pre_check2(current_p['2H120':'1H420'].sum()))
-        self.tw3.topLevelItem(0).child(0).setText(2, pre_check2(current_p['2H120':'2H220'].sum()))
-        self.tw3.topLevelItem(0).child(1).setText(2, pre_check2(current_p['5H120':'5H220'].sum()))
-        self.tw3.topLevelItem(0).child(2).setText(2, pre_check2(current_p['1H120':'1H220'].sum()))
-        self.tw3.topLevelItem(0).child(3).setText(2, pre_check2(current_p['1H320':'1H420'].sum()))
+        self.tw3.topLevelItem(0).setText(2, self.pre_check2(current_p['2H120':'1H420'].sum()))
+        self.tw3.topLevelItem(0).child(0).setText(2, self.pre_check2(current_p['2H120':'2H220'].sum()))
+        self.tw3.topLevelItem(0).child(1).setText(2, self.pre_check2(current_p['5H120':'5H220'].sum()))
+        self.tw3.topLevelItem(0).child(2).setText(2, self.pre_check2(current_p['1H120':'1H220'].sum()))
+        self.tw3.topLevelItem(0).child(3).setText(2, self.pre_check2(current_p['1H320':'1H420'].sum()))
 
-        self.tw3.topLevelItem(1).setText(2, pre_check2(current_p['4KA18':'5KB19'].sum()))
-        self.tw3.topLevelItem(1).child(0).setText(2, pre_check2(current_p['4KA18']))
-        self.tw3.topLevelItem(1).child(1).setText(2, pre_check2(current_p['5KB19']))
-        self.tw3.topLevelItem(2).setText(2, pre_check2(current_p['4H120':'4H220'].sum()))
-        self.tw3.topLevelItem(2).child(0).setText(2, pre_check2(current_p['4H120']))
-        self.tw3.topLevelItem(2).child(1).setText(2, pre_check2(current_p['4H220']))
+        self.tw3.topLevelItem(1).setText(2, self.pre_check2(current_p['4KA18':'5KB19'].sum()))
+        self.tw3.topLevelItem(1).child(0).setText(2, self.pre_check2(current_p['4KA18']))
+        self.tw3.topLevelItem(1).child(1).setText(2, self.pre_check2(current_p['5KB19']))
+        self.tw3.topLevelItem(2).setText(2, self.pre_check2(current_p['4H120':'4H220'].sum()))
+        self.tw3.topLevelItem(2).child(0).setText(2, self.pre_check2(current_p['4H120']))
+        self.tw3.topLevelItem(2).child(1).setText(2, self.pre_check2(current_p['4H220']))
 
         sun_power = current_p['9KB25-4_2':'3KA12-1_2'].sum()
         tai_power_demand = current_p['feeder 1510':'feeder 1520'].sum()
@@ -1353,10 +1328,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         full_load = tai_power_demand - reversed_power + current_p['2H120':'5KB19'].sum() - sun_power
 
 
-        self.update_table_item(0, 2, pre_check2(full_load), self.average_back, self.average_text, bold=True)
-        self.update_table_item(1, 2, pre_check2(current_p['2H120':'5KB19'].sum()), self.average_back,
+        self.update_table_item(0, 2, self.pre_check2(full_load), self.average_back, self.average_text, bold=True)
+        self.update_table_item(1, 2, self.pre_check2(current_p['2H120':'5KB19'].sum()), self.average_back,
                                self.average_text, bold=True)
-        self.update_table_item(2, 2, pre_check2(sun_power, b=5), self.average_back,
+        self.update_table_item(2, 2, self.pre_check2(sun_power, b=5), self.average_back,
                                self.average_text, bold=True)
         self.update_table_item(3, 2, str(format(round(tai_power_demand,2))), self.average_back,
                                self.average_text, bold=True)
@@ -1366,38 +1341,53 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         error_value = (full_load -w2_total - w3_total -w4_total - w5_subtotal - dynamic_load - current_p['WA'])
         self.tw1.topLevelItem(3).child(6).setText(2, str(format(round(error_value, 2), '.2f')))
         w5_total = w5_subtotal + error_value
-        self.tw1.topLevelItem(3).setText(2, pre_check2(w5_total))
+        self.tw1.topLevelItem(3).setText(2, self.pre_check2(w5_total))
 
-    def tws_update(self, current_p):
+    def realtime_update_to_tws(self, current_p):
         """
-        更新樹狀結構(tree widget)、表格結構(table widget) 裡的資料
+        將電力系統的即時資訊，更新至對應的樹狀結構(tree widget)、表格結構(table widget)
         :param current_p: 即時用電量。pd.Series
         :return:
         """
         w2_total = current_p['2H180':'2KB41'].sum() + current_p['W2']
-        self.tw1.topLevelItem(0).setText(1, pre_check(w2_total))
-        self.tw1.topLevelItem(0).child(0).setText(1, pre_check(current_p['2H180':'1H350'].sum()))
-        self.tw1.topLevelItem(0).child(0).child(0).setText(1, pre_check(current_p['2H180']))
-        self.tw1.topLevelItem(0).child(0).child(1).setText(1, pre_check(current_p['2H280']))
-        self.tw1.topLevelItem(0).child(0).child(2).setText(1, pre_check(current_p['1H350']))
-        self.tw1.topLevelItem(0).child(1).setText(1, pre_check(current_p['4KA19']))
-        self.tw1.topLevelItem(0).child(2).setText(1, pre_check(current_p['4KB19':'4KB29'].sum()))
-        self.tw1.topLevelItem(0).child(2).child(0).setText(1, pre_check(current_p['4KB19']))
-        self.tw1.topLevelItem(0).child(2).child(1).setText(1, pre_check(current_p['4KB29']))
-        self.tw1.topLevelItem(0).child(3).setText(1, pre_check(current_p['2KA41':'2KB41'].sum()))
-        self.tw1.topLevelItem(0).child(3).child(0).setText(1, pre_check(current_p['2KA41']))
-        self.tw1.topLevelItem(0).child(3).child(1).setText(1, pre_check(current_p['2KB41']))
-        self.tw1.topLevelItem(0).child(4).setText(1, pre_check(current_p['W2']))
+        self.tw1.topLevelItem(0).setText(1, self.pre_check(w2_total))
+        self.tw1.topLevelItem(0).child(0).setText(1, self.pre_check(current_p['2H180':'1H350'].sum()))
+        self.tw1.topLevelItem(0).child(0).child(0).setText(1, self.pre_check(current_p['2H180']))
+        self.tw1.topLevelItem(0).child(0).child(1).setText(1, self.pre_check(current_p['2H280']))
+        self.tw1.topLevelItem(0).child(0).child(2).setText(1, self.pre_check(current_p['1H350']))
+        self.tw1.topLevelItem(0).child(1).setText(1, self.pre_check(current_p['4KA19']))
+        self.tw1.topLevelItem(0).child(2).setText(1, self.pre_check(current_p['4KB19':'4KB29'].sum()))
+        self.tw1.topLevelItem(0).child(2).child(0).setText(1, self.pre_check(current_p['4KB19']))
+        self.tw1.topLevelItem(0).child(2).child(1).setText(1, self.pre_check(current_p['4KB29']))
+        self.tw1.topLevelItem(0).child(3).setText(1, self.pre_check(current_p['2KA41':'2KB41'].sum()))
+        self.tw1.topLevelItem(0).child(3).child(0).setText(1, self.pre_check(current_p['2KA41']))
+        self.tw1.topLevelItem(0).child(3).child(1).setText(1, self.pre_check(current_p['2KB41']))
+        self.tw1.topLevelItem(0).child(4).setText(1, self.pre_check(current_p['W2']))
+
+        self.tw1_2.topLevelItem(0).setText(1, self.pre_check(w2_total))
+        self.tw1_2.topLevelItem(0).child(0).setText(1, self.pre_check(current_p['2H180':'1H350'].sum()))
+        self.tw1_2.topLevelItem(0).child(0).child(0).setText(1, self.pre_check(current_p['2H180']))
+        self.tw1_2.topLevelItem(0).child(0).child(1).setText(1, self.pre_check(current_p['2H280']))
+        self.tw1_2.topLevelItem(0).child(0).child(2).setText(1, self.pre_check(current_p['1H350']))
+        self.tw1_2.topLevelItem(0).child(1).setText(1, self.pre_check(current_p['4KA19']))
+        self.tw1_2.topLevelItem(0).child(2).setText(1, self.pre_check(current_p['4KB19':'4KB29'].sum()))
+        self.tw1_2.topLevelItem(0).child(2).child(0).setText(1, self.pre_check(current_p['4KB19']))
+        self.tw1_2.topLevelItem(0).child(2).child(1).setText(1, self.pre_check(current_p['4KB29']))
+        self.tw1_2.topLevelItem(0).child(3).setText(1, self.pre_check(current_p['2KA41':'2KB41'].sum()))
+        self.tw1_2.topLevelItem(0).child(3).child(0).setText(1, self.pre_check(current_p['2KA41']))
+        self.tw1_2.topLevelItem(0).child(3).child(1).setText(1, self.pre_check(current_p['2KB41']))
+        self.tw1_2.topLevelItem(0).child(4).setText(1, self.pre_check(current_p['W2']))
+
 
         w3_total = current_p['AJ320':'5KB28'].sum() + current_p['W3']
-        self.tw1.topLevelItem(1).setText(1, pre_check(w3_total))
-        self.tw1.topLevelItem(1).child(0).setText(1, pre_check(current_p['AJ320']))
-        self.tw1.topLevelItem(1).child(1).setText(1, pre_check(current_p['5KA18':'5KB28'].sum()))
-        self.tw1.topLevelItem(1).child(1).child(0).setText(1, pre_check(current_p['5KA18']))
-        self.tw1.topLevelItem(1).child(1).child(1).setText(1, pre_check(current_p['5KA28']))
-        self.tw1.topLevelItem(1).child(1).child(2).setText(1, pre_check(current_p['5KB18']))
-        self.tw1.topLevelItem(1).child(1).child(3).setText(1, pre_check(current_p['5KB28']))
-        self.tw1.topLevelItem(1).child(2).setText(1, pre_check(current_p['W3']))
+        self.tw1.topLevelItem(1).setText(1, self.pre_check(w3_total))
+        self.tw1.topLevelItem(1).child(0).setText(1, self.pre_check(current_p['AJ320']))
+        self.tw1.topLevelItem(1).child(1).setText(1, self.pre_check(current_p['5KA18':'5KB28'].sum()))
+        self.tw1.topLevelItem(1).child(1).child(0).setText(1, self.pre_check(current_p['5KA18']))
+        self.tw1.topLevelItem(1).child(1).child(1).setText(1, self.pre_check(current_p['5KA28']))
+        self.tw1.topLevelItem(1).child(1).child(2).setText(1, self.pre_check(current_p['5KB18']))
+        self.tw1.topLevelItem(1).child(1).child(3).setText(1, self.pre_check(current_p['5KB28']))
+        self.tw1.topLevelItem(1).child(2).setText(1, self.pre_check(current_p['W3']))
 
         w41_utility = current_p['W4']
         w42_utility = current_p['9H110':'9H210'].sum() - current_p['9H140':'9KB33'].sum()
@@ -1405,60 +1395,60 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         w41_main = current_p['AJ130':'AJ170'].sum()
         w4_total = w41_main + w4_utility
 
-        self.tw1.topLevelItem(2).setText(1, pre_check(w4_total))
-        self.tw1.topLevelItem(2).child(0).setText(1, pre_check(w41_main, b=4))
-        self.tw1.topLevelItem(2).child(1).setText(1, pre_check(w4_utility))
+        self.tw1.topLevelItem(2).setText(1, self.pre_check(w4_total))
+        self.tw1.topLevelItem(2).child(0).setText(1, self.pre_check(w41_main, b=4))
+        self.tw1.topLevelItem(2).child(1).setText(1, self.pre_check(w4_utility))
 
         w5_subtotal = current_p['3KA14':'2KB29'].sum() + current_p['W5']
-        self.tw1.topLevelItem(3).setText(1,pre_check(w5_subtotal))
-        self.tw1.topLevelItem(3).child(0).setText(1, pre_check(current_p['3KA14':'3KA15'].sum()))
-        self.tw1.topLevelItem(3).child(0).child(0).setText(1, pre_check(current_p['3KA14']))
-        self.tw1.topLevelItem(3).child(0).child(1).setText(1, pre_check(current_p['3KA15']))
-        self.tw1.topLevelItem(3).child(1).setText(1, pre_check(current_p['3KA24':'3KA25'].sum()))
-        self.tw1.topLevelItem(3).child(1).child(0).setText(1, pre_check(current_p['3KA24']))
-        self.tw1.topLevelItem(3).child(1).child(1).setText(1, pre_check(current_p['3KA25']))
-        self.tw1.topLevelItem(3).child(2).setText(1, pre_check(current_p['3KB12':'3KB28'].sum()))
-        self.tw1.topLevelItem(3).child(2).child(0).setText(1, pre_check(current_p['3KB12']))
-        self.tw1.topLevelItem(3).child(2).child(1).setText(1, pre_check(current_p['3KB22']))
-        self.tw1.topLevelItem(3).child(2).child(2).setText(1, pre_check(current_p['3KB28']))
-        self.tw1.topLevelItem(3).child(3).setText(1, pre_check(current_p['3KA16':'3KB27'].sum()))
-        self.tw1.topLevelItem(3).child(3).child(0).setText(1, pre_check(current_p['3KA16']))
-        self.tw1.topLevelItem(3).child(3).child(1).setText(1, pre_check(current_p['3KA26']))
-        self.tw1.topLevelItem(3).child(3).child(2).setText(1, pre_check(current_p['3KA17']))
-        self.tw1.topLevelItem(3).child(3).child(3).setText(1, pre_check(current_p['3KA27']))
-        self.tw1.topLevelItem(3).child(3).child(4).setText(1, pre_check(current_p['3KB16']))
-        self.tw1.topLevelItem(3).child(3).child(5).setText(1, pre_check(current_p['3KB26']))
-        self.tw1.topLevelItem(3).child(3).child(6).setText(1, pre_check(current_p['3KB17']))
-        self.tw1.topLevelItem(3).child(3).child(7).setText(1, pre_check(current_p['3KB27']))
-        self.tw1.topLevelItem(3).child(4).setText(1, pre_check(current_p['2KA19':'2KB29'].sum()))
-        self.tw1.topLevelItem(3).child(4).child(0).setText(1, pre_check(current_p['2KA19']))
-        self.tw1.topLevelItem(3).child(4).child(1).setText(1, pre_check(current_p['2KA29']))
-        self.tw1.topLevelItem(3).child(4).child(2).setText(1, pre_check(current_p['2KB19']))
-        self.tw1.topLevelItem(3).child(4).child(3).setText(1, pre_check(current_p['2KB29']))
-        self.tw1.topLevelItem(3).child(5).setText(1, pre_check(current_p['W5']))
-        self.tw1.topLevelItem(4).setText(1, pre_check(current_p['WA']))
+        self.tw1.topLevelItem(3).setText(1, self.pre_check(w5_subtotal))
+        self.tw1.topLevelItem(3).child(0).setText(1, self.pre_check(current_p['3KA14':'3KA15'].sum()))
+        self.tw1.topLevelItem(3).child(0).child(0).setText(1, self.pre_check(current_p['3KA14']))
+        self.tw1.topLevelItem(3).child(0).child(1).setText(1, self.pre_check(current_p['3KA15']))
+        self.tw1.topLevelItem(3).child(1).setText(1, self.pre_check(current_p['3KA24':'3KA25'].sum()))
+        self.tw1.topLevelItem(3).child(1).child(0).setText(1, self.pre_check(current_p['3KA24']))
+        self.tw1.topLevelItem(3).child(1).child(1).setText(1, self.pre_check(current_p['3KA25']))
+        self.tw1.topLevelItem(3).child(2).setText(1, self.pre_check(current_p['3KB12':'3KB28'].sum()))
+        self.tw1.topLevelItem(3).child(2).child(0).setText(1, self.pre_check(current_p['3KB12']))
+        self.tw1.topLevelItem(3).child(2).child(1).setText(1, self.pre_check(current_p['3KB22']))
+        self.tw1.topLevelItem(3).child(2).child(2).setText(1, self.pre_check(current_p['3KB28']))
+        self.tw1.topLevelItem(3).child(3).setText(1, self.pre_check(current_p['3KA16':'3KB27'].sum()))
+        self.tw1.topLevelItem(3).child(3).child(0).setText(1, self.pre_check(current_p['3KA16']))
+        self.tw1.topLevelItem(3).child(3).child(1).setText(1, self.pre_check(current_p['3KA26']))
+        self.tw1.topLevelItem(3).child(3).child(2).setText(1, self.pre_check(current_p['3KA17']))
+        self.tw1.topLevelItem(3).child(3).child(3).setText(1, self.pre_check(current_p['3KA27']))
+        self.tw1.topLevelItem(3).child(3).child(4).setText(1, self.pre_check(current_p['3KB16']))
+        self.tw1.topLevelItem(3).child(3).child(5).setText(1, self.pre_check(current_p['3KB26']))
+        self.tw1.topLevelItem(3).child(3).child(6).setText(1, self.pre_check(current_p['3KB17']))
+        self.tw1.topLevelItem(3).child(3).child(7).setText(1, self.pre_check(current_p['3KB27']))
+        self.tw1.topLevelItem(3).child(4).setText(1, self.pre_check(current_p['2KA19':'2KB29'].sum()))
+        self.tw1.topLevelItem(3).child(4).child(0).setText(1, self.pre_check(current_p['2KA19']))
+        self.tw1.topLevelItem(3).child(4).child(1).setText(1, self.pre_check(current_p['2KA29']))
+        self.tw1.topLevelItem(3).child(4).child(2).setText(1, self.pre_check(current_p['2KB19']))
+        self.tw1.topLevelItem(3).child(4).child(3).setText(1, self.pre_check(current_p['2KB29']))
+        self.tw1.topLevelItem(3).child(5).setText(1, self.pre_check(current_p['W5']))
+        self.tw1.topLevelItem(4).setText(1, self.pre_check(current_p['WA']))
 
-        self.tw2.topLevelItem(0).setText(1, pre_check(current_p['9H140':'9KB33'].sum(), 0))
-        self.tw2.topLevelItem(1).setText(1, pre_check(current_p['AH120'], 0))
-        self.tw2.topLevelItem(2).setText(1, pre_check(current_p['AH190'], 0))
-        self.tw2.topLevelItem(3).setText(1, pre_check(current_p['AH130'],0))
-        self.tw2.topLevelItem(4).setText(1, pre_check(current_p['1H450'], 0))
-        self.tw2.topLevelItem(5).setText(1, pre_check(current_p['1H360'], 0))
+        self.tw2.topLevelItem(0).setText(1, self.pre_check(current_p['9H140':'9KB33'].sum(), 0))
+        self.tw2.topLevelItem(1).setText(1, self.pre_check(current_p['AH120'], 0))
+        self.tw2.topLevelItem(2).setText(1, self.pre_check(current_p['AH190'], 0))
+        self.tw2.topLevelItem(3).setText(1, self.pre_check(current_p['AH130'],0))
+        self.tw2.topLevelItem(4).setText(1, self.pre_check(current_p['1H450'], 0))
+        self.tw2.topLevelItem(5).setText(1, self.pre_check(current_p['1H360'], 0))
 
         ng_to_power = get_ng_generation_cost_v2(self.unit_prices).get("convertible_power")
         #ng_to_power = self.unit_prices.loc['可轉換電力', 'current']
 
-        self.tw3.topLevelItem(0).setText(1, pre_check(current_p['2H120':'1H420'].sum()))
-        self.tw3.topLevelItem(0).child(0).setText(1, pre_check(current_p['2H120':'2H220'].sum()))
-        self.tw3.topLevelItem(0).child(1).setText(1, pre_check(current_p['5H120':'5H220'].sum()))
-        self.tw3.topLevelItem(0).child(2).setText(1, pre_check(current_p['1H120':'1H220'].sum()))
-        self.tw3.topLevelItem(0).child(3).setText(1, pre_check(current_p['1H320':'1H420'].sum()))
-        self.tw3.topLevelItem(1).setText(1, pre_check(current_p['4KA18':'5KB19'].sum()))
-        self.tw3.topLevelItem(1).child(0).setText(1, pre_check(current_p['4KA18']))
-        self.tw3.topLevelItem(1).child(1).setText(1, pre_check(current_p['5KB19']))
-        self.tw3.topLevelItem(2).setText(1, pre_check(current_p['4H120':'4H220'].sum()))
-        self.tw3.topLevelItem(2).child(0).setText(1, pre_check(current_p['4H120']))
-        self.tw3.topLevelItem(2).child(1).setText(1, pre_check(current_p['4H220']))
+        self.tw3.topLevelItem(0).setText(1, self.pre_check(current_p['2H120':'1H420'].sum()))
+        self.tw3.topLevelItem(0).child(0).setText(1, self.pre_check(current_p['2H120':'2H220'].sum()))
+        self.tw3.topLevelItem(0).child(1).setText(1, self.pre_check(current_p['5H120':'5H220'].sum()))
+        self.tw3.topLevelItem(0).child(2).setText(1, self.pre_check(current_p['1H120':'1H220'].sum()))
+        self.tw3.topLevelItem(0).child(3).setText(1, self.pre_check(current_p['1H320':'1H420'].sum()))
+        self.tw3.topLevelItem(1).setText(1, self.pre_check(current_p['4KA18':'5KB19'].sum()))
+        self.tw3.topLevelItem(1).child(0).setText(1, self.pre_check(current_p['4KA18']))
+        self.tw3.topLevelItem(1).child(1).setText(1, self.pre_check(current_p['5KB19']))
+        self.tw3.topLevelItem(2).setText(1, self.pre_check(current_p['4H120':'4H220'].sum()))
+        self.tw3.topLevelItem(2).child(0).setText(1, self.pre_check(current_p['4H120']))
+        self.tw3.topLevelItem(2).child(1).setText(1, self.pre_check(current_p['4H220']))
 
         # tw3 的TGs 及其子節點 TG1~TG4 的 NG貢獻電量、使用量，從原本顯示在最後兩個column，改為顯示在3rd 的tip
         ng = pd.Series([current_p['TG1 NG':'TG4 NG'].sum(), current_p['TG1 NG'], current_p['TG2 NG'],
@@ -1470,9 +1460,9 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     - current_p['sp_real_time']
         tai_power_demand = str(format(round(current_p['feeder 1510':'feeder 1520'].sum(), 2), '.2f')) + ' MW'
 
-        self.update_table_item(0, 1, pre_check(full_load), self.real_time_back, self.real_time_text)
-        self.update_table_item(1, 1, pre_check(current_p['2H120':'5KB19'].sum()), self.real_time_back, self.real_time_text)  # 即時量
-        self.update_table_item(2, 1, pre_check(current_p['sp_real_time'], b=5), self.real_time_back, self.real_time_text)
+        self.update_table_item(0, 1, self.pre_check(full_load), self.real_time_back, self.real_time_text)
+        self.update_table_item(1, 1, self.pre_check(current_p['2H120':'5KB19'].sum()), self.real_time_back, self.real_time_text)  # 即時量
+        self.update_table_item(2, 1, self.pre_check(current_p['sp_real_time'], b=5), self.real_time_back, self.real_time_text)
         self.update_table_item(3, 1, tai_power_demand , self.real_time_back, self.real_time_text)
 
         # error_value & w5_total correction
@@ -1480,7 +1470,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         error_value = (full_load -w2_total - w3_total -w4_total - w5_subtotal - dynamic_load - current_p['WA'])
         self.tw1.topLevelItem(3).child(6).setText(1, str(format(round(error_value, 2), '.2f'))+ ' MW')
         w5_total = w5_subtotal + error_value
-        self.tw1.topLevelItem(3).setText(1, pre_check(w5_total))
+        self.tw1.topLevelItem(3).setText(1, self.pre_check(w5_total))
 
     def update_table_item(self, row, column, text, background_color, text_color, bold=False):
         """
@@ -2532,6 +2522,42 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         else:
             total_h = table.verticalHeader().length() + table.horizontalHeader().height() + 2 * frame + scroll_h
             table.setFixedHeight(total_h)
+
+    def pre_check(self, pending_data, b=1, c='power'):
+        """
+        此函式用來判顯示在tree,table widget  的即時資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
+        :param c: 用來判斷是燃氣或電力的類別
+        :param pending_data:要判斷的數值。
+        :param b:若數值接近 0，預設回傳'停機'的述述。
+        :return: 回傳值為文字型態。
+        """
+        describe = ['--', '停機', '資料異常', '未使用', '0 MW', '未發電']
+        if pd.isnull(pending_data):
+            return describe[2]
+        if pending_data > 0.1:
+            if c == 'gas':
+                return str(format(round(pending_data, 1), '.1f'))
+            elif c == 'h':
+                return str(format(round(pending_data, 2), '.2f'))
+            else:
+                return str(format(round(pending_data, 2), '.2f')) + ' MW'
+        else:
+            return describe[b]
+
+    def pre_check2(self, pending_data, b=1):
+        """
+        此函式用來判顯示在tree,table widget  的 "歷史" 資料，是否有資料異常、設備沒有運轉或停機的狀況 (數值接近 0)
+        :param b: 用來指定用那一個describe，預設為'停機'
+        :param pending_data:
+        :return:
+        """
+        describe = ['--', '停機', '資料異常', '未使用', '0 MW', '未發電']
+        if pd.isnull(pending_data):
+            return describe[2]
+        if pending_data > 0.1:
+            return str(format(round(pending_data, 2), '.2f'))
+        else:
+            return describe[b]
 
 if __name__ == "__main__":
     sys.excepthook = handle_uncaught
