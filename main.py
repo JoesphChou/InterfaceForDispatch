@@ -277,7 +277,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.develop_option.isChecked():
             self.tabWidget.setTabVisible(3, True)
             self.tabWidget.setTabVisible(4, True)
-
         else:
             self.tabWidget.setTabVisible(3, False)
             self.tabWidget.setTabVisible(4, False)
@@ -988,22 +987,20 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def update_tw4_schedule(self):
         """
-        ### 更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：###
+        更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：
         - 第一層：製程種類 (EAF, LF1-1, LF1-2)
         - 第二層："生產或等待中" (current + future) / "過去排程" (past)
         - 若無 "生產或等待中" 排程，仍增加此分類，但不增加子排程，並顯示 "目前無排程"
         - 若無 "過去排程" 資料，仍增加此分類，但不增加子排程，並顯示 "無相關排程"
         - **column 2 (狀態欄) 文字置中**
         """
-        past_df, current_df, future_df, status = scrape_schedule()
-        if status == "ERROR":
-            # showMessage(text, timeout_ms)：timeout_ms 單位是毫秒，
-            # 若 timeout_ms = 0，訊息就會一直停留，不會自動消失。
-            self.statusBar().showMessage("⚠ 撈取排程資料失敗, 無法連線製程管理資訊系統 (PMIS)", 10000)
-            # 以上讓訊息顯示 5 秒後自動消失。如果要一直顯示，第二個參數可改成 0。
-            # 例如： self.statusBar().showMessage("⚠ 排程撈取失敗", 0)
-        else:
-            self.statusBar().clearMessage()
+        res = scrape_schedule()
+        past_df = res.past
+        current_df = res.current
+        future_df = res.future
+
+        if not res.ok:
+            self.statusBar().showMessage(f"排程更新失敗:{res.reason}")
 
         self.tw4.clear()
 
@@ -1119,10 +1116,11 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # **確保所有節點展開**
         self.tw4.expandAll()  # ✅ 確保所有製程展開
+        self.statusBar().showMessage(f"排程已更新({res.fetched_at:%H:%M:%S})")
 
     def predict_demand(self):
         """
-        ### 計算預測的demand。目前預測需量的計算方式為， ###
+        計算預測的demand。目前預測需量的計算方式為，
         目前週期的累計需量值 + 近180秒的平均需量 / 180 x 該剩期剩餘秒數
         :return:
         """

@@ -80,3 +80,6 @@ def setup_ui_behavior(ui):
     # ===== 初始化效益分析表格（需要手動設定表格樣式） =====
     if hasattr(ui, 'initialize_cost_benefit_widgets'):
         ui.initialize_cost_benefit_widgets()
+
+    # ====== QAction 綁定棤的設定 =======
+    ui.actionExit.triggered.connect(ui.close)
