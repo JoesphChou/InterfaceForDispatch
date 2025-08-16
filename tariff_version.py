@@ -271,9 +271,13 @@ def get_ng_generation_cost_v2(
 
     try:
         ng_heat = df.at["NG 熱值", heat_col]
+        cog_heat = df.at["COG 熱值", heat_col]
+        ldg_heat = df.at["LDG 熱值", heat_col]
+        bfg_heat = df.at["BFG 熱值", heat_col]
         steam_power = df.at["蒸氣轉換電力", heat_col]
+        mg_heat = df.at["MG 熱值", heat_col]
     except Exception:
-        ng_heat, steam_power = None, None
+        ng_heat, steam_power, cog_heat, ldg_heat, bfg_heat, mg_heat = None, None, None, None, None, None
 
     try:
         tg_cost = df.at[maintain_field, maintain_col]
@@ -302,7 +306,11 @@ def get_ng_generation_cost_v2(
         "ng_price_ver_end": ng_ver_end,
         "ng_price_range_text": format_range(ng_ver_start, ng_ver_end),
         "ng_heat": ng_heat,
+        "cog_heat": cog_heat,
+        "ldg_heat": ldg_heat,
+        "bfg_heat": bfg_heat,
         "steam_power": steam_power,
+        "mg_heat": mg_heat,
         "heat_ver_start": heat_ver_start,
         "heat_ver_end": heat_ver_end,
         "heat_range_text": format_range(heat_ver_start, heat_ver_end),

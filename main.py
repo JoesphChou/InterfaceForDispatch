@@ -11,11 +11,14 @@ from PyQt6.QtGui import QLinearGradient
 from UI import Ui_MainWindow
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from make_item import make_item
-from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends # 引入數據可視化模組
+from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
+
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+import matplotlib.pyplot as plt
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -31,17 +34,25 @@ class DashboardThread(QtCore.QThread):
         在背景定期呼叫 MainWindow.dashboard_vaule()，
         並支援中斷與例外捕捉
     """
+    # 新增把資料送回主執行緒的 signal
+    sig_pie_series = QtCore.pyqtSignal(object)      # 用來傳 pd.Series (shape=226)
+
     def __init__(self, main_win, interval: float = 11.0):
         super().__init__(main_win)
         self.main_win = main_win
         self.interval = interval
 
-    def run(self):
+    def run(self) -> None:
         # 只要沒有被 requestInterruption() 就持續執行
         while not self.isInterruptionRequested():
             try:
-                self.main_win.dashboard_value()
-                self.main_win.statusBar().clearMessage()
+                c_values: pd.Series = self.main_win.dashboard_value()
+
+                # 正常才發射給主執行緒
+                if isinstance(c_values, pd.Series):
+                    self.sig_pie_series.emit(c_values)
+
+                # self.main_win.statusBar().clearMessage()
             except Exception:
                 logger.error("DashboardThread 未捕捉例外", exc_info=True)
                 self.main_win.statusBar().showMessage("⚠ 更新即時值失敗，請檢查 PI Server 連線", 0)
@@ -249,6 +260,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
         self.pushButton_9.clicked.connect(self.on_show_trend)
+        self.pushButton_7.clicked.connect(self.real_time_hsm_cycle)
+
         self.listWidget_2.addItems(['HSM 軋延機組'])
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
         self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
@@ -268,7 +281,78 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.dateTimeEdit_3.setDateTime(start_datetime)
         self.dateTimeEdit_5.setDateTime(rounded_current_datetime.addSecs(-900))
 
-        self.develop_option.triggered.connect(self.develop_option_event)
+        # 開發測試功能區域初始狀態
+        self.develop_option.setChecked(False)
+        self.tabWidget.setTabVisible(3, False)
+        self.tabWidget.setTabVisible(4, False)
+        self.dashboard_thread.sig_pie_series.connect(self._on_pie_series,
+                                                     QtCore.Qt.ConnectionType.QueuedConnection)
+
+    @QtCore.pyqtSlot(object)
+    def _on_pie_series(self, c_values: pd.Series):
+        m = self.compute_pie_metrics(c_values)
+        self.pie.update_from_metrics(
+            flows=m["flows"],
+            est_power=m["est_power"],
+            real_total=m["real_total"],
+            order=('NG', 'MG', 'COG'),
+            show_diff_ring=True,
+            # colors={'NG':'#F5A623','MG':'#6BBF59','COG':'#4A90E2'},  # 想改色再開
+            # title="TGs 燃氣→發電量估算（內圈）與實際差額（外圈）",
+        )
+
+    def compute_pie_metrics(self, value: pd.Series) -> dict:
+        """把 dashboard_value() 回來的 c_values 轉成 pie 圖要用的數字。"""
+
+        def get_sum(idx_or_slice):
+            try:
+                sub = value.loc[idx_or_slice]
+            except Exception:
+                return 0.0
+            if isinstance(sub, pd.Series):
+                return float(pd.to_numeric(sub, errors="coerce").fillna(0).sum())
+            return float(sub) if pd.notna(sub) else 0.0
+
+        cal = get_ng_generation_cost_v2(self.unit_prices)
+        ng_heat = float(cal.get("ng_heat", 0.0))
+        cog_heat = float(cal.get("cog_heat", 0.0))
+        ldg_heat = float(cal.get("ldg_heat", 0.0))
+        bfg_heat = float(cal.get("bfg_heat", 0.0))
+        steam_pw = float(cal.get("steam_power", 1.0)) or 1.0
+
+        # 動態 MG 熱值
+        bfg_total = get_sum(slice('BFG#1', 'BFG#2'))
+        ldg_in = get_sum('LDG Input')
+        mg_in = bfg_total + ldg_in
+        mix_heat = (bfg_total * bfg_heat + ldg_in * ldg_heat) / mg_in if mg_in > 0 else 0.0
+
+        # Nm³/h -> MW（已含熱值，不要再乘熱值）
+        ng_factor = ng_heat / steam_pw / 1000.0
+        cog_factor = cog_heat / steam_pw / 1000.0
+        mg_factor = mix_heat / steam_pw / 1000.0
+
+        # 三種燃氣流量合計（Nm³/h）
+        flows = {
+            "NG": get_sum(slice('TG1 NG', 'TG4 NG')),
+            "COG": get_sum(slice('TG1 COG', 'TG4 COG')),
+            "MG": get_sum(slice('TG1 Mix', 'TG4 Mix')),
+        }
+
+        # 估算 MW
+        est_power = {
+            "NG": max(0.0, flows["NG"] * ng_factor),
+            "COG": max(0.0, flows["COG"] * cog_factor),
+            "MG": max(0.0, flows["MG"] * mg_factor),
+        }
+
+        # 實際總 MW
+        tg1_real = get_sum(slice('2H120', '2H220'))
+        tg2_real = get_sum(slice('5H120', '5H220'))
+        tg3_real = get_sum(slice('1H120', '1H220'))
+        tg4_real = get_sum(slice('1H320', '1H420'))
+        real_total = tg1_real + tg2_real + tg3_real + tg4_real
+
+        return {"flows": flows, "est_power": est_power, "real_total": real_total}
 
     def develop_option_event(self):
         """
@@ -442,9 +526,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             # 清除 pending，避免重複
             self._pending_column = None
 
-
     @log_exceptions()
-    @timeit(level=20)
     def history_demand_of_groups(self, st, et):
         """
             查詢特定週期，各設備群組(分類)的平均值
@@ -983,7 +1065,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # 更新hsm 目前速率及每卷需量
         self.real_time_hsm_cycle()
-
+        return c_values
 
     def update_tw4_schedule(self):
         """
