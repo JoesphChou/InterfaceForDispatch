@@ -31,8 +31,14 @@ def handle_uncaught(exc_type, exc_value, exc_traceback):
 
 class DashboardThread(QtCore.QThread):
     """
-        在背景定期呼叫 MainWindow.dashboard_vaule()，
-        並支援中斷與例外捕捉
+    在背景固定頻率（預設每 11 秒）呼叫 MainWindow.dashboard_value() 以抓取即時值，
+    並透過 sig_pie_series(pd.Series) 把 c_values 發送回 **主執行緒**。
+
+    特性
+    ------
+    - 支援 requestInterruption() 平滑中斷
+    - 內建例外處理與狀態列（statusBar）訊息
+    - 每次循環將 dashboard_value() 的 pd.Series(shape≈226) 發出，用於 pie 圖繪製
     """
     # 新增把資料送回主執行緒的 signal
     sig_pie_series = QtCore.pyqtSignal(object)      # 用來傳 pd.Series (shape=226)
@@ -290,6 +296,32 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     @QtCore.pyqtSlot(object)
     def _on_pie_series(self, c_values: pd.Series):
+        """
+        接收 DashboardThread 以 sig_pie_series 傳回的即時資料（單筆 pd.Series），
+        於 **主執行緒** 計算 pie 圖所需指標並重繪圖表。
+
+        Parameters
+        ----------
+        c_values : pandas.Series
+            由 dashboard_value() 組成的單筆即時資料。索引需至少包含：
+            - 燃氣來源流量（Nm³/h）：
+                'TG1 NG'~'TG4 NG'、'TG1 COG'~'TG4 COG'、'TG1 Mix'~'TG4 Mix'
+            - 動態混氣熱值來源（Nm³/h）：
+                'BFG#1'~'BFG#2'、'LDG Input'
+            - 四台 TG 的實際發電量（MW）：
+                '2H120'~'2H220'、'5H120'~'5H220'、'1H120'~'1H220'、'1H320'~'1H420'
+
+        Notes
+        -----
+        - 這個槽以 QueuedConnection 連結，會在 **GUI 主執行緒** 執行；
+          請勿在背景執行緒直接操作 PieChartArea 或任何 Qt 元件。
+        - compute_pie_metrics() 僅做加總與四則運算（輕量），
+          以目前 11 秒一次、約 226 欄位的負載在主執行緒執行是安全的。
+
+        Side Effects
+        ------------
+        會呼叫 self.pie.update_from_metrics(...) 重繪 verticalLayout_2 裡的甜甜圈圖。
+        """
         m = self.compute_pie_metrics(c_values)
         self.pie.update_from_metrics(
             flows=m["flows"],
@@ -302,7 +334,52 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         )
 
     def compute_pie_metrics(self, value: pd.Series) -> dict:
-        """把 dashboard_value() 回來的 c_values 轉成 pie 圖要用的數字。"""
+        """
+        將 dashboard_value() 產生的單筆即時資料（pandas.Series）轉為 pie 圖所需三組數據：
+        1) 三種燃氣的總流量（flows, Nm³/h）
+        2) 三種燃氣推估的發電量（est_power, MW）
+        3) 四台 TG 的實際總發電量（real_total, MW）
+
+        Parameters
+        ----------
+        value : pandas.Series
+            由 dashboard_value() 整併的即時資料，索引需包含（缺值會當作 0 處理）：
+            - 混氣熱值來源（Nm³/h）：
+                'BFG#1'~'BFG#2'、'LDG Input'
+            - 各 TG 之燃氣流量（Nm³/h）：
+                'TG1 NG'~'TG4 NG'、'TG1 COG'~'TG4 COG'、'TG1 Mix'~'TG4 Mix'
+            - 各 TG 的實際發電量（MW）：
+                '2H120'~'2H220'、'5H120'~'5H220'、'1H120'~'1H220'、'1H320'~'1H420'
+
+        Returns
+        -------
+        dict
+            - flows : Dict[str, float]
+                三種燃氣（'NG','COG','MG'）的總流量（Nm³/h）。
+            - est_power : Dict[str, float]
+                依流量與熱值/轉換電力推估的各燃氣發電量（MW）。
+            - real_total : float
+                四台 TG 的實際總發電量（MW）。
+
+        Formulas
+        --------
+        - 動態混氣熱值（kJ/Nm³）：
+            mix_heat = (BFG_total*bfg_heat + LDG_in*ldg_heat) / (BFG_total + LDG_in)
+            若分母為 0，則 mix_heat = 0。
+        - 流量換算係數（Nm³/h → MW）：
+            factor = heat / steam_power / 1000
+            （注意：`factor` 已含「熱值」，**後續不可再乘熱值一次**）
+        - 推估發電量（MW）：
+            est_power[k] = max(0, flows[k] * factor_k)
+        - 實際總發電量（MW）：
+            real_total = sum(TG1..TG4 的實際量)
+
+        Notes
+        -----
+        - 熱值與蒸氣轉換電力由 get_ng_generation_cost_v2(self.unit_prices) 取得，
+          需包含鍵：'ng_heat','cog_heat','ldg_heat','bfg_heat','steam_power'。
+        - 缺少的索引或 NaN 會視為 0，不會拋例外，方便即時更新流程。
+        """
 
         def get_sum(idx_or_slice):
             try:

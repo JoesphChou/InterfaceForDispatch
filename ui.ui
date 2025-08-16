@@ -3186,11 +3186,24 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
        </property>
       </item>
      </widget>
+     <widget class="QLabel" name="label_42">
+      <property name="geometry">
+       <rect>
+        <x>370</x>
+        <y>230</y>
+        <width>111</width>
+        <height>21</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>HSM目前速率</string>
+      </property>
+     </widget>
      <widget class="QLabel" name="label_43">
       <property name="geometry">
        <rect>
         <x>370</x>
-        <y>250</y>
+        <y>260</y>
         <width>111</width>
         <height>21</height>
        </rect>
@@ -3203,7 +3216,7 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
       <property name="geometry">
        <rect>
         <x>480</x>
-        <y>220</y>
+        <y>230</y>
         <width>111</width>
         <height>21</height>
        </rect>
@@ -3212,24 +3225,11 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
        <string>MW</string>
       </property>
      </widget>
-     <widget class="QLabel" name="label_42">
-      <property name="geometry">
-       <rect>
-        <x>370</x>
-        <y>220</y>
-        <width>111</width>
-        <height>21</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>HSM目前速率</string>
-      </property>
-     </widget>
      <widget class="QLabel" name="label_45">
       <property name="geometry">
        <rect>
         <x>480</x>
-        <y>250</y>
+        <y>260</y>
         <width>111</width>
         <height>21</height>
        </rect>
@@ -5200,7 +5200,7 @@ Runner</string>
       <property name="geometry">
        <rect>
         <x>20</x>
-        <y>430</y>
+        <y>240</y>
         <width>285</width>
         <height>141</height>
        </rect>
@@ -5479,6 +5479,17 @@ Runner</string>
         </property>
        </item>
       </item>
+     </widget>
+     <widget class="QWidget" name="verticalLayoutWidget_2">
+      <property name="geometry">
+       <rect>
+        <x>310</x>
+        <y>350</y>
+        <width>511</width>
+        <height>401</height>
+       </rect>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_2"/>
      </widget>
     </widget>
    </widget>

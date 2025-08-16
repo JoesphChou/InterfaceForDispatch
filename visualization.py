@@ -1,11 +1,13 @@
-"""
-visualization.py
+"""visualization.py
 
-提供繪製趨勢圖與互動工具的功能，包含:
-  - plot_tag_trends: 在單圖中疊多條時序曲線
-  - CustomToolbar: 延伸 NavigationToolbar2QT 以修正儲存對話框行為
-  - TrendWindow: 簡易 QMainWindow 包裝 matplotlib Figure
-  - TrendChartCanvas: 支援滑鼠互動提示的 FigureCanvas
+提供圖表與互動元件：
+- PieChartArea：可嵌入任意 Qt 版面的甜甜圈圖（內圈為估算發電量佔比，外圈顯示與實際差額），支援 auto/full/compact/mini 標籤模式與可選工具列。
+- plot_tag_trends：在單圖中疊多條時間序列曲線。
+- CustomToolbar：延伸 NavigationToolbar2QT 以修正儲存對話框行為。
+- TrendWindow：簡易 QMainWindow 包裝 matplotlib Figure。
+- TrendChartCanvas：支援滑鼠互動提示的 FigureCanvas。
+
+此模組不處理商業邏輯；建議外部先計算，再用 PieChartArea.update_from_metrics() 餵資料重繪。
 """
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -247,7 +249,8 @@ class PieChartArea(QtCore.QObject):
                colors: Optional[Dict[str, str]] = None,
                show_diff_ring: Optional[bool] = None,
                title: Optional[str] = None) -> None:
-        """相容舊版：在視圖內部自行計算後再畫圖。
+        """
+        相容舊版：在視圖內部自行計算後再畫圖。
         不建議在高更新頻率下使用；較建議外部先算好再用 update_from_metrics()。
         """
         # 取得成本/熱值參數
