@@ -17,9 +17,6 @@ from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
 
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-import matplotlib.pyplot as plt
-
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
     # 如果是 Ctrl+C 等 KeyboardInterrupt，就交還給預設行為
@@ -255,6 +252,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self._isFetching = False            # 用來防止重復觸發 history_demand_of_groups 的Guard flag
         self.scheduler_thread: Optional[ScheduleThread] = None      # 當作ScheduleThread 的實例，作為背景排程
         self.dashboard_thread: Optional[DashboardThread] = None     # 當作DashboardThread 的實例，作為背景排程
+        self.pie: Optional["PieChartArea"] = None       # 和 pie chart 有關
 
         self.loader = LoadingOverlay(self)  # 彈出半透明loading 的
 
@@ -291,8 +289,12 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.develop_option.setChecked(False)
         self.tabWidget.setTabVisible(3, False)
         self.tabWidget.setTabVisible(4, False)
-        self.dashboard_thread.sig_pie_series.connect(self._on_pie_series,
-                                                     QtCore.Qt.ConnectionType.QueuedConnection)
+
+        # ===== 建立 pie 區域，嵌進 verticalLayout_2 ===
+        self.pie = PieChartArea(self.verticalLayout_2, with_toolbar=False)
+        # 可選：自訂顏色或順序
+        # self.pie.set_colors({'NG':'#F5A623', 'MG':'#6BBF59', 'COG':'#4A90E2'})
+        # self.pie.set_order(('NG','MG','COG'))
 
     @QtCore.pyqtSlot(object)
     def _on_pie_series(self, c_values: pd.Series):
@@ -322,15 +324,24 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         ------------
         會呼叫 self.pie.update_from_metrics(...) 重繪 verticalLayout_2 裡的甜甜圈圖。
         """
-        m = self.compute_pie_metrics(c_values)
+        if not isinstance(c_values, pd.Series):
+            return
+        if self.checkBox_4.isChecked():
+            show_ring = True
+        else:
+            show_ring = False
+
+        metrics = self.compute_pie_metrics(c_values)
         self.pie.update_from_metrics(
-            flows=m["flows"],
-            est_power=m["est_power"],
-            real_total=m["real_total"],
+            flows=metrics["flows"],
+            est_power=metrics["est_power"],
+            real_total=metrics["real_total"],
+            tg_count=metrics["tg_count"],
             order=('NG', 'MG', 'COG'),
-            show_diff_ring=True,
-            # colors={'NG':'#F5A623','MG':'#6BBF59','COG':'#4A90E2'},  # 想改色再開
-            # title="TGs 燃氣→發電量估算（內圈）與實際差額（外圈）",
+            colors={'NG': '#F5A623', 'MG': '#6BBF59', 'COG': '#4A90E2'},
+            show_diff_ring=show_ring,
+            # 如需自訂顏色可加上：
+            # colors={'NG':'#F5A623','MG':'#6BBF59','COG':'#4A90E2'},
         )
 
     def compute_pie_metrics(self, value: pd.Series) -> dict:
@@ -410,8 +421,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # 三種燃氣流量合計（Nm³/h）
         flows = {
-            "NG": get_sum(slice('TG1 NG', 'TG4 NG')),
-            "COG": get_sum(slice('TG1 COG', 'TG4 COG')),
+            "NG": get_sum(slice('TG1 NG', 'TG4 sNG')),
+            "COG": get_sum(slice('TG1 COG', 'TG4 sCOG')),
             "MG": get_sum(slice('TG1 Mix', 'TG4 Mix')),
         }
 
@@ -429,7 +440,16 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         tg4_real = get_sum(slice('1H320', '1H420'))
         real_total = tg1_real + tg2_real + tg3_real + tg4_real
 
-        return {"flows": flows, "est_power": est_power, "real_total": real_total}
+        # ★ 估算目前運轉的 TG 數量（>1.0 MW 視為運轉中，可自行調門檻）
+        tg_vals = [tg1_real, tg2_real, tg3_real, tg4_real]
+        tg_count = int(sum(1 for v in tg_vals if float(v) > 1.0))
+
+        return {
+            "flows": flows,
+            "est_power": est_power,
+            "real_total": real_total,
+            "tg_count": tg_count,  # ★ 新增
+        }
 
     def develop_option_event(self):
         """

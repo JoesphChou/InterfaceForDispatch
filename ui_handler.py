@@ -1,11 +1,8 @@
-from typing import Optional
 
 from PyQt6 import QtCore
 from PyQt6 import QtWidgets
-
 from logging_utils import get_logger
 from visualization import PieChartArea
-
 logger = get_logger(__name__)
 
 def setup_ui_behavior(ui):
@@ -74,13 +71,6 @@ def setup_ui_behavior(ui):
     # ===== TrendChart 嵌入設定（如果需要） =====
     if hasattr(ui, 'trend_chart'):
         ui.verticalLayout.addWidget(ui.trend_chart)
-
-    # ===== 建立 pie 區域，嵌進 verticalLayout_2 ===
-    ui.pie = PieChartArea(ui.verticalLayout_2, with_toolbar=False)
-    ui.pie.set_label_mode('mini')   # 依容器大小自動切換 full/compact/min
-    # 可選：自訂顏色或順序
-    # self.pie.set_colors({'NG':'#F5A623', 'MG':'#6BBF59', 'COG':'#4A90E2'})
-    # self.pie.set_order(('NG','MG','COG'))
 
     # ===== 啟動 QThread 開始背景任務 (連續更新即時值、產線排程） =====
     ui.start_schedule_thread()
