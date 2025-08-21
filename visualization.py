@@ -24,17 +24,31 @@ logger = get_logger(__name__)
 
 class PieChartArea(QtCore.QObject):
     """
-    Mini-only 甜甜圈視圖（嵌入到 Qt Layout）。
+    用於顯示燃氣發電比例的甜甜圈圖表。
 
-    - 僅支援 'mini' 模式：以甜甜圈呈現。
-    - 中央顯示：
-        * show_diff_ring=True  → 三行（估算/實際/誤差）
-        * show_diff_ring=False → 單行（實際發電量）
-    - 扇區內顯示各燃氣之發電量：
-        * show_diff_ring=True  → 推估發電量
-        * show_diff_ring=False → 估算佔比 × 實際總發電量
-    - 左下 legend 顯示：NG/COG/MG 目前流量/安全上限 Nm3/h (xx%)；僅列 flow>0。
-    - 背景透明，與父層 widget 顏色一致。
+    功能特色:
+        - 以甜甜圈形式顯示，中央可切換顯示「實際/估算」發電量摘要。
+        - 支援差額環 (show_diff_ring=True)：在甜甜圈外圈顯示估算與實際發電量的差異。
+        - 可動態更新數據，包括各燃氣的流量、估算發電量與實際發電量。
+        - 在燃氣總量為零或 TG 未運轉時，會自動顯示「未運轉 / 無資料」訊息。
+
+    Attributes:
+        _fig (matplotlib.figure.Figure): Matplotlib 圖表物件。
+        _ax (matplotlib.axes.Axes): 主要繪圖座標軸。
+        _show_diff_ring (bool): 是否啟用差額環顯示。
+        _colors (Dict[str, str]): 各燃氣扇區顏色。
+        _title (str): 圖表標題。
+
+    常見使用情境:
+        chart = PieChartArea(parent=some_layout)
+        chart.update_from_metrics(
+        ...     flows={"NG": 8000, "COG": 12000, "MG": 50000},
+        ...     est_power={"NG": 50, "COG": 20, "MG": 10},
+        ...     real_total=90.0,
+        ...     tg_count=2,
+        ...     show_diff_ring=True,
+        ...     title="TG1 燃料發電比例"
+        ... )
     """
 
     def __init__(
@@ -192,7 +206,7 @@ class PieChartArea(QtCore.QObject):
                 return
         t.set_fontsize(7)
 
-    # ------------------------------ rendering ------------------------------
+    # -----------------------------up- rendering ------------------------------
     def update_from_metrics(
         self,
         *,
@@ -205,6 +219,24 @@ class PieChartArea(QtCore.QObject):
         title: Optional[str] = None,
         tg_count: Optional[int] = None,
     ) -> None:
+        """
+        根據輸入的指標數據更新甜甜圈圖。
+
+        Args:
+            flows (Dict[str, float]): 各燃氣種類的流量 (Nm3/h)，例如 {"NG": 8000, "COG": 12000, "MG": 50000}。
+            est_power (Dict[str, float]): 各燃氣估算發電量 (MW)，例如 {"NG": 50, "COG": 20, "MG": 10}。
+            real_total (float): 實際總發電量 (MW)。
+            order (Iterable[str], optional): 扇區順序，例如 ("NG","COG","MG")。
+            colors (Dict[str, str], optional): 各燃氣的顏色設定。
+            show_diff_ring (bool, optional): 是否顯示外圈差額環，預設沿用內部設定。
+            title (str, optional): 圖表標題。
+            tg_count (int, optional): TG 數量，用於計算流量上限比例。
+
+        Notes:
+            - 若估算與實際總發電量皆為零，將自動呼叫 render_inactive() 以顯示「未運轉 / 無資料」訊息。
+            - 若 show_diff_ring=True，中央文字會同時顯示估算值、實際值與誤差。
+        """
+
         if colors:
             self.set_colors(colors)
         if order:
@@ -219,6 +251,13 @@ class PieChartArea(QtCore.QObject):
             disp_power = {k: (float(est_power.get(k, 0.0))/est_total)*float(real_total) if est_total > 1e-9 else 0.0 for k in self._order}
         else:
             disp_power = {k: float(est_power.get(k, 0.0)) for k in self._order}
+
+        # ---- 避免資料直接傳全0的資料時，呼叫繪圖而拋錯 ----
+        total = sum(float(disp_power.get(k, 0.0)) for k in self._order)
+        if total <= 1e-9:
+            msg = "未運轉 / 無資料"
+            self.render_inactive(title=title or self._title, message=msg)
+            return
 
         self._ax.clear()
         vals = [float(disp_power.get(k, 0.0)) for k in self._order]
@@ -275,9 +314,49 @@ class PieChartArea(QtCore.QObject):
         # 左下 legend：流量/上限
         self._build_mini_flow_legend(flows=flows, tg_count=tg_count or 4)
 
+        if self._title:
+            self._ax.set_title(self._title, fontsize=11, pad=16)
+
         self._ax.axis("equal")
         self._fig.canvas.draw_idle()
 
+    def render_inactive(self, *, title: str = None, message: str = "未運轉 / 無資料") -> None:
+        """
+        在沒有有效數據時安全顯示「未運轉 / 無資料」狀態。
+
+        Args:
+            title (str, optional): 圖表標題，若提供則會更新標題。
+            message (str, optional): 中央顯示的訊息，預設為「未運轉 / 無資料」。
+
+        Notes:
+            - 不繪製任何燃氣扇區，只顯示一個淡灰色甜甜圈底環。
+            - 中央文字會自動縮放至適合甜甜圈內的大小。
+            - 不會顯示 legend。
+        """
+        import matplotlib.patches as mpatches
+
+        self._ax.clear()
+
+        # 更新顏色/標題（若有）
+        if title is not None:
+            self._title = title  # 你若有上方 QLabel，可無視這行；保留不影響
+        # 畫一個淡淡的甜甜圈底環當占位（可選）
+        ring = mpatches.Wedge(center=(0, 0), r=1.0, theta1=0, theta2=360,
+                              width=self._donut_width, facecolor="#e6e6e6", edgecolor="white", linewidth=1.0)
+        self._ax.add_patch(ring)
+
+        # 中央文字（自動縮字到甜甜圈內）
+        self._fit_center_text(str(message))
+
+        # 不顯示 legend
+        leg = self._ax.get_legend()
+        if leg is not None:
+            leg.remove()
+
+        if self._title:
+            self._ax.set_title(self._title, fontsize=11, pad=16)
+        self._ax.axis("equal")
+        self._fig.canvas.draw_idle()
 
 def plot_tag_trends(
     df: pd.DataFrame,

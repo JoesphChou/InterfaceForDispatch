@@ -2,7 +2,7 @@
 from PyQt6 import QtCore
 from PyQt6 import QtWidgets
 from logging_utils import get_logger
-from visualization import PieChartArea
+
 logger = get_logger(__name__)
 
 def setup_ui_behavior(ui):

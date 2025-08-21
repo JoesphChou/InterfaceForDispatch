@@ -50,12 +50,10 @@ class DashboardThread(QtCore.QThread):
         while not self.isInterruptionRequested():
             try:
                 c_values: pd.Series = self.main_win.dashboard_value()
-
                 # 正常才發射給主執行緒
                 if isinstance(c_values, pd.Series):
                     self.sig_pie_series.emit(c_values)
 
-                # self.main_win.statusBar().clearMessage()
             except Exception:
                 logger.error("DashboardThread 未捕捉例外", exc_info=True)
                 self.main_win.statusBar().showMessage("⚠ 更新即時值失敗，請檢查 PI Server 連線", 0)
@@ -253,7 +251,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.scheduler_thread: Optional[ScheduleThread] = None      # 當作ScheduleThread 的實例，作為背景排程
         self.dashboard_thread: Optional[DashboardThread] = None     # 當作DashboardThread 的實例，作為背景排程
         self.pie: Optional["PieChartArea"] = None       # 和 pie chart 有關
-
         self.loader = LoadingOverlay(self)  # 彈出半透明loading 的
 
         self.dashboard_value()
@@ -287,14 +284,13 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # 開發測試功能區域初始狀態
         self.develop_option.setChecked(False)
-        self.tabWidget.setTabVisible(3, False)
         self.tabWidget.setTabVisible(4, False)
 
-        # ===== 建立 pie 區域，嵌進 verticalLayout_2 ===
+        # ===== 燃氣發電佔比的 pie chart 相關初始化 ===
         self.pie = PieChartArea(self.verticalLayout_2, with_toolbar=False)
-        # 可選：自訂顏色或順序
-        # self.pie.set_colors({'NG':'#F5A623', 'MG':'#6BBF59', 'COG':'#4A90E2'})
-        # self.pie.set_order(('NG','MG','COG'))
+        self._last_pie_series: Optional[pd.Series] = None   # 用來暫存最後一筆要給pie chart 用的資料
+        self.comboBox.currentIndexChanged.connect(self._on_tg_switch)
+        self.tw3_2.itemSelectionChanged.connect(self._on_tw3_2_select) #tw3_2 點選 TG 節點切換
 
     @QtCore.pyqtSlot(object)
     def _on_pie_series(self, c_values: pd.Series):
@@ -307,7 +303,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         c_values : pandas.Series
             由 dashboard_value() 組成的單筆即時資料。索引需至少包含：
             - 燃氣來源流量（Nm³/h）：
-                'TG1 NG'~'TG4 NG'、'TG1 COG'~'TG4 COG'、'TG1 Mix'~'TG4 Mix'
+                'TG1 NG'~'TG4 sNG'、'TG1 COG'~'TG4 sCOG'、'TG1 Mix'~'TG4 Mix'
             - 動態混氣熱值來源（Nm³/h）：
                 'BFG#1'~'BFG#2'、'LDG Input'
             - 四台 TG 的實際發電量（MW）：
@@ -317,32 +313,123 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         -----
         - 這個槽以 QueuedConnection 連結，會在 **GUI 主執行緒** 執行；
           請勿在背景執行緒直接操作 PieChartArea 或任何 Qt 元件。
-        - compute_pie_metrics() 僅做加總與四則運算（輕量），
-          以目前 11 秒一次、約 226 欄位的負載在主執行緒執行是安全的。
+        - _on_tg_switch() 中的 compute_pie_metrics() 僅做加總與四則運算（輕量），
+          以目前 11 秒一次、約 234 欄位的負載在主執行緒執行是安全的。
 
         Side Effects
         ------------
-        會呼叫 self.pie.update_from_metrics(...) 重繪 verticalLayout_2 裡的甜甜圈圖。
+        透過comboBox 的 index tw3_2 的點選，指定要顯示的範圍 (TG1~TG4、TG1、TG2、TG3、TG4)
+        最終呼叫 self.pie.update_from_metrics(...) 重繪 verticalLayout_2 裡的甜甜圈圖。
         """
         if not isinstance(c_values, pd.Series):
             return
+
+        # 將接收到的即時資料存在 self._last_pie_series，供其圖表切換時使用。
+        self._last_pie_series = c_values
+        self._on_tg_switch(idx = self.comboBox.currentIndex())
+
+    def _on_tg_switch(self, idx: int):
+        """
+        接收 comboBox 的 index 計算 pie 圖所需指標，
+        呼叫 self.pie.update_from_metrics(...) 重繪 verticalLayout_2 裡的甜甜圈圖。
+
+        Parameters
+        ----------
+        idx : int
+            - 0:
+                TG1 ~ TG4 加總
+            - 1~4:
+                分別對應TG1、TG2、TG3、TG4
+        """
+        #
         if self.checkBox_4.isChecked():
             show_ring = True
         else:
             show_ring = False
+        
+        if idx == 0:
+            metrics = self.compute_pie_metrics(self._last_pie_series)
+            self.pie.update_from_metrics(
+                flows=metrics["flows"],
+                est_power=metrics["est_power"],
+                real_total=metrics["real_total"],
+                tg_count=metrics["tg_count"],
+                order=('NG', 'MG', 'COG'),
+                show_diff_ring=show_ring,
+                title=f"TG1~TG4 燃料發電比例",
+            )
+        else:
+            tg_no = idx
+            if not hasattr(self, "_last_pie_series"):
+                return
+            title = f'TG{tg_no} 燃料發電比例'
+            metrics = self.compute_pie_metrics_by_tg(self._last_pie_series, tg_no)
+            if metrics.get('inactive'):
+                self.pie.render_inactive(title=title, message="未運轉 / 無資料")
+            else:
+                self.pie.set_show_diff_ring(show_ring) # 這個部份後續可能會有選項勾選與否，與現況未即時同步的情況
+                self.pie.update_from_metrics(flows = metrics['flows'],
+                                             est_power = metrics['mw_est'],
+                                             real_total = metrics ['mw_real'],
+                                             tg_count = 1,
+                                             title = title,)
 
-        metrics = self.compute_pie_metrics(c_values)
-        self.pie.update_from_metrics(
-            flows=metrics["flows"],
-            est_power=metrics["est_power"],
-            real_total=metrics["real_total"],
-            tg_count=metrics["tg_count"],
-            order=('NG', 'MG', 'COG'),
-            colors={'NG': '#F5A623', 'MG': '#6BBF59', 'COG': '#4A90E2'},
-            show_diff_ring=show_ring,
-            # 如需自訂顏色可加上：
-            # colors={'NG':'#F5A623','MG':'#6BBF59','COG':'#4A90E2'},
-        )
+    def _on_tw3_2_select(self):
+        """
+        當使用者在 QTreeWidget (tw3_2) 中選取節點時觸發的槽函式。
+        ** 後續依UI 介面調整，視情況新增內容 **
+        功能：
+            - 取得使用者點選的文字（例如 "TG2"）。
+            - 驗證文字是否符合 "TG" + 數字 的格式。
+            - 若為有效的 TG 編號 (1~4)，則根據最後一次接收到的即時數據
+              (self._last_pie_series)，計算該台 TG 的燃料發電比例。
+            - 更新 PieChartArea 圖表的標題與內容。
+
+        條件：
+            - 必須已經存在屬性 self._last_pie_series，否則不執行更新。
+            - 僅接受 "TGs" ~ "TG4" 的選項。
+
+        UI 效果：
+            - 圖表標題會顯示為 "TGx 燃料發電比例"。
+            - 圖表內容則更新為對應 TG 的燃料發電比例。
+        """
+
+        items = self.tw3_2.selectedItems()
+        if not items:
+            return
+        text = items[0].text(0).strip().upper()  # 例如 "TG2"
+        if text.startswith("TG"):
+            if self.checkBox_4.isChecked():
+                show_ring = True
+            else:
+                show_ring = False
+            self.pie.set_show_diff_ring(show_ring)  # 這個部份後續可能會有選項勾選與否，與現況未即時同步的情況
+
+            if text[2:].isdigit():
+                tg_no = int(text[2:])
+                if 1 <= tg_no <= 4 and hasattr(self, "_last_pie_series"):
+                    metrics = self.compute_pie_metrics_by_tg(self._last_pie_series, tg_no)
+                    title = f"TG{tg_no} 燃料發電比例"
+                    if metrics.get('inactive'):
+                        self.pie.render_inactive(title=title, message="未運轉 / 無資料")
+                    self.pie.set_title(title) if hasattr(self, "pie") else None
+                    self.pie.update_from_metrics(flows = metrics['flows'],
+                                                 est_power = metrics['mw_est'],
+                                                 real_total = metrics ['mw_real'],
+                                                 tg_count = 1,
+                                                 title = title,
+                                                 )
+            else:
+                metrics = self.compute_pie_metrics(self._last_pie_series)
+                self.pie.update_from_metrics(
+                    flows=metrics["flows"],
+                    est_power=metrics["est_power"],
+                    real_total=metrics["real_total"],
+                    tg_count=metrics["tg_count"],
+                    order=('NG', 'MG', 'COG'),
+                    show_diff_ring=show_ring,
+                    title=f"TG1~TG4 燃料發電比例",
+                )
 
     def compute_pie_metrics(self, value: pd.Series) -> dict:
         """
@@ -351,17 +438,21 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         2) 三種燃氣推估的發電量（est_power, MW）
         3) 四台 TG 的實際總發電量（real_total, MW）
 
+        Formulas
+        --------
+        - 推估發電量（MW）：
+            est_power[k] = max(0, flows[k] * factor_k)
+        - 實際總發電量（MW）：
+            real_total = sum(TG1..TG4 的實際量)
+
         Parameters
         ----------
         value : pandas.Series
             由 dashboard_value() 整併的即時資料，索引需包含（缺值會當作 0 處理）：
-            - 混氣熱值來源（Nm³/h）：
-                'BFG#1'~'BFG#2'、'LDG Input'
             - 各 TG 之燃氣流量（Nm³/h）：
-                'TG1 NG'~'TG4 NG'、'TG1 COG'~'TG4 COG'、'TG1 Mix'~'TG4 Mix'
+                'TG1 NG'~'TG4 sNG'、'TG1 COG'~'TG4 sCOG'、'TG1 Mix'~'TG4 Mix'
             - 各 TG 的實際發電量（MW）：
                 '2H120'~'2H220'、'5H120'~'5H220'、'1H120'~'1H220'、'1H320'~'1H420'
-
         Returns
         -------
         dict
@@ -371,25 +462,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 依流量與熱值/轉換電力推估的各燃氣發電量（MW）。
             - real_total : float
                 四台 TG 的實際總發電量（MW）。
-
-        Formulas
-        --------
-        - 動態混氣熱值（kJ/Nm³）：
-            mix_heat = (BFG_total*bfg_heat + LDG_in*ldg_heat) / (BFG_total + LDG_in)
-            若分母為 0，則 mix_heat = 0。
-        - 流量換算係數（Nm³/h → MW）：
-            factor = heat / steam_power / 1000
-            （注意：`factor` 已含「熱值」，**後續不可再乘熱值一次**）
-        - 推估發電量（MW）：
-            est_power[k] = max(0, flows[k] * factor_k)
-        - 實際總發電量（MW）：
-            real_total = sum(TG1..TG4 的實際量)
-
-        Notes
-        -----
-        - 熱值與蒸氣轉換電力由 get_ng_generation_cost_v2(self.unit_prices) 取得，
-          需包含鍵：'ng_heat','cog_heat','ldg_heat','bfg_heat','steam_power'。
-        - 缺少的索引或 NaN 會視為 0，不會拋例外，方便即時更新流程。
         """
 
         def get_sum(idx_or_slice):
@@ -401,23 +473,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 return float(pd.to_numeric(sub, errors="coerce").fillna(0).sum())
             return float(sub) if pd.notna(sub) else 0.0
 
-        cal = get_ng_generation_cost_v2(self.unit_prices)
-        ng_heat = float(cal.get("ng_heat", 0.0))
-        cog_heat = float(cal.get("cog_heat", 0.0))
-        ldg_heat = float(cal.get("ldg_heat", 0.0))
-        bfg_heat = float(cal.get("bfg_heat", 0.0))
-        steam_pw = float(cal.get("steam_power", 1.0)) or 1.0
-
-        # 動態 MG 熱值
-        bfg_total = get_sum(slice('BFG#1', 'BFG#2'))
-        ldg_in = get_sum('LDG Input')
-        mg_in = bfg_total + ldg_in
-        mix_heat = (bfg_total * bfg_heat + ldg_in * ldg_heat) / mg_in if mg_in > 0 else 0.0
-
-        # Nm³/h -> MW（已含熱值，不要再乘熱值）
-        ng_factor = ng_heat / steam_pw / 1000.0
-        cog_factor = cog_heat / steam_pw / 1000.0
-        mg_factor = mix_heat / steam_pw / 1000.0
+        dynamic_mix_heat, ng_k, mg_k, cog_k, calorics = self._pie_common_factors(value)
 
         # 三種燃氣流量合計（Nm³/h）
         flows = {
@@ -428,9 +484,9 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # 估算 MW
         est_power = {
-            "NG": max(0.0, flows["NG"] * ng_factor),
-            "COG": max(0.0, flows["COG"] * cog_factor),
-            "MG": max(0.0, flows["MG"] * mg_factor),
+            "NG": max(0.0, flows["NG"] * ng_k),
+            "COG": max(0.0, flows["COG"] * cog_k),
+            "MG": max(0.0, flows["MG"] * mg_k),
         }
 
         # 實際總 MW
@@ -448,7 +504,113 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             "flows": flows,
             "est_power": est_power,
             "real_total": real_total,
-            "tg_count": tg_count,  # ★ 新增
+            "tg_count": tg_count,
+        }
+
+    def _pie_common_factors(self, value: pd.Series):
+        """
+        計算換算係數與動態混氣熱質，供 compute_pie_metrics()、compute_pie_metrics_by_tg() 計算熱值時使用
+        Formulas
+        --------
+        - 動態混氣熱值（kJ/Nm³）：
+            mix_heat = (BFG_total*bfg_heat + LDG_in*ldg_heat) / (BFG_total + LDG_in)
+            若分母為 0，則 mix_heat = 0。
+        - 流量換算係數（Nm³/h → MW）：
+            factor = heat / steam_power / 1000
+            （注意：`factor` 已含「熱值」，**後續不可再乘熱值一次**）
+        Notes
+        -----
+        - 熱值與蒸氣轉換電力由 get_ng_generation_cost_v2(self.unit_prices) 取得，
+          需包含鍵：'ng_heat','cog_heat','ldg_heat','bfg_heat','steam_power'。
+        - 缺少的索引或 NaN 會視為 0，不會拋例外，方便即時更新流程。
+
+        Parameters
+        ----------
+        value : pandas.Series
+            由 dashboard_value() 整併的即時資料，索引需包含（缺值會當作 0 處理）：
+            - 混氣熱值來源（Nm³/h）：
+                'BFG#1'~'BFG#2'、'LDG Input'
+        Returns
+        -------
+          dynamic_mix_heat      : 依 BFG/LDG 動態估的混氣熱質
+          ng_to_power_factor    : NG 流量 -> MW 的係數
+          mg_to_power_factor    : MG 流量 -> MW 的係數（含 dynamic_mix_heat）
+          cog_to_power_factor   : COG 流量 -> MW 的係數
+          calorics              : 原 get_ng_generation_cost_v2(self.unit_prices) 結果（日後若要取其它欄位會用到）
+        """
+        calorics = get_ng_generation_cost_v2(self.unit_prices)
+
+        # 動態 MG 熱質（
+        bfg_sum = value.loc['BFG#1':'BFG#2'].sum()
+        ldg_in = value.loc['LDG Input']
+        denom = value.loc['BFG#1': 'LDG Input'].sum()
+        dynamic_mix_heat = (bfg_sum * calorics['bfg_heat'] + ldg_in * calorics['ldg_heat']) / max(denom, 1e-9)
+
+        ng_to_power_factor = calorics['ng_heat'] / calorics['steam_power'] / 1000.0
+        mg_to_power_factor = dynamic_mix_heat / calorics['steam_power'] / 1000.0
+        cog_to_power_factor = calorics['cog_heat'] / calorics['steam_power'] / 1000.0
+
+        return dynamic_mix_heat, ng_to_power_factor, mg_to_power_factor, cog_to_power_factor, calorics
+
+    def compute_pie_metrics_by_tg(self, value: pd.Series, tg_no: int) -> dict:
+        """
+        依 TG 編號（1~4）回傳該 TG 的三種燃氣發電量與流量、以及「實際發電量」（該 TG 的實績）。
+        Parameters
+        ----------
+        value : pandas.Series
+            - 各 TG 之燃氣流量（Nm³/h）：
+                'TG1 NG'~'TG4 sNG'、'TG1 COG'~'TG4 sCOG'、'TG1 Mix'~'TG4 Mix'
+            - 各 TG 的實際發電量（MW）：
+                '2H120'~'2H220'、'5H120'~'5H220'、'1H120'~'1H220'、'1H320'~'1H420'
+        Returns
+        -------
+        {
+            'flows': {'NG': float, 'COG': float, 'MG': float},
+            'mw_est': {'NG': float, 'COG': float, 'MG': float},
+            'mw_real': float
+            'inactive': boolen, 用來判斷該TG是否否有運轉
+        }
+        """
+        if tg_no not in (1, 2, 3, 4):
+            raise ValueError(f"tg_no must be 1~4, got {tg_no}")
+
+        # 共用係數
+        dynamic_mix_heat, ng_k, mg_k, cog_k, _ = self._pie_common_factors(value)
+
+        # --- 該 TG 的三種氣體流量 ---
+        ng_flow = float(value.loc[slice(f'TG{tg_no} NG', f'TG{tg_no} sNG')].sum())
+        cog_flow = float(value.loc[slice(f'TG{tg_no} COG', f'TG{tg_no} sCOG')].sum())
+        mg_flow = float(value.loc[f'TG{tg_no} Mix'])
+
+        # --- 流量 -> 估算 MW ---
+        ng_mw = ng_flow * ng_k
+        cog_mw = cog_flow * cog_k
+        # MG 需乘動態熱質
+        mg_mw = mg_flow * mg_k
+
+        # --- 實際發電量（該 TG 的實測） ---
+        real_map = {
+            1: ('2H120', '2H220'),
+            2: ('5H120', '5H220'),
+            3: ('1H120', '1H220'),
+            4: ('1H320', '1H420'),
+        }
+        a, b = real_map[tg_no]
+        mw_real = float(value.loc[a:b].sum())
+        
+        eps = 1e-6
+        inactive = (
+                float(ng_flow) <= eps and
+                float(cog_flow) <= eps and
+                float(mg_flow) <= eps and
+                float(mw_real) <= eps
+        )
+       
+        return {
+            'flows': {'NG': ng_flow, 'COG': cog_flow, 'MG': mg_flow},
+            'mw_est': {'NG': ng_mw, 'COG': cog_mw, 'MG': mg_mw},
+            'mw_real': mw_real,
+            'inactive': inactive,
         }
 
     def develop_option_event(self):
@@ -456,10 +618,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         menu_bar 的開發測試功能被 trigger 時的動作
         """
         if self.develop_option.isChecked():
-            self.tabWidget.setTabVisible(3, True)
             self.tabWidget.setTabVisible(4, True)
         else:
-            self.tabWidget.setTabVisible(3, False)
             self.tabWidget.setTabVisible(4, False)
 
     def real_time_hsm_cycle(self):
