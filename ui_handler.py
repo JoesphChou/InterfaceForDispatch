@@ -7,11 +7,38 @@ logger = get_logger(__name__)
 
 def setup_ui_behavior(ui):
     """
-    將 PyQt UI 中的事件綁定與元件初始化統一管理，包含：
-    - 按鈕連結
-    - Tree/Table 樣式設定
-    - Thread 初始化
-    - 預設值設定
+    初始化並綁定主視窗的 UI 行為與預設狀態。
+
+    功能總覽
+    --------
+    - 事件連結：
+      * 主要按鈕：查詢、加入/移除清單、需求查詢、效益評估…等
+      * Tree/Table：雙擊、選取變更、展開/收合等
+      * 控制元件：捲動條、日期/時間編輯器、CheckBox 狀態切換
+      * QAction：離開、開發者選單
+    - 樣式初始化：
+      * TreeWidget / TableWidget 美化與欄寬/欄位設定
+      * 狀態列字體與多行訊息 Label（置於 statusBar）
+    - 預設值設定：
+      * 日期與時區、CheckBox 初值、SpinBox 預設
+    - 啟動預設查詢與背景緒：
+      * `define_cbl_date()`、`query_cbl()`、`query_demand()`
+      * 啟動 start_schedule_thread() 與 `start_dashboard_thread()`（即時值、排程）
+    - 其他可選：
+      * 若存在 `trend_chart`，插入預設容器
+      * 若存在 `initialize_cost_benefit_widgets()`，初始化效益分析表格
+
+    Parameters
+    ----------
+    ui : QMainWindow
+        主視窗實例；此函式內直接操作其屬性與成員方法（副作用性初始化）。
+
+    Notes
+    -----
+    - 本函式不回傳值，純粹以副作用設定 UI 與啟動必要的背景工作。
+    - 某些訊號（例如 DashboardThread → 主執行緒的圖表資料）可在主程式依需求以 QueuedConnection
+      額外連線，以確保跨執行緒安全。
+
     """
     # ===== 按鈕事件連結 =====
     ui.pushButton.clicked.connect(ui.query_cbl)
@@ -68,13 +95,13 @@ def setup_ui_behavior(ui):
     ui.query_cbl()
     ui.query_demand()
 
-    # ===== TrendChart 嵌入設定（如果需要） =====
-    if hasattr(ui, 'trend_chart'):
-        ui.verticalLayout.addWidget(ui.trend_chart)
-
     # ===== 啟動 QThread 開始背景任務 (連續更新即時值、產線排程） =====
     ui.start_schedule_thread()
     ui.start_dashboard_thread()
+
+    # ===== TrendChart 嵌入設定（如果需要） =====
+    if hasattr(ui, 'trend_chart'):
+        ui.verticalLayout.addWidget(ui.trend_chart)
 
     # ===== 初始化效益分析表格（需要手動設定表格樣式） =====
     if hasattr(ui, 'initialize_cost_benefit_widgets'):
@@ -86,8 +113,9 @@ def setup_ui_behavior(ui):
 
     # ==== 連接 signal -> slot (主執行緒)
     # 連接 signal → slot（主執行緒）
-    if ui.dashboard_thread is not None:
-        ui.dashboard_thread.sig_pie_series.connect(
-            ui._on_pie_series,
-            QtCore.Qt.ConnectionType.QueuedConnection
-        )
+    #if ui.dashboard_thread is not None:
+    #    ui.dashboard_thread.sig_pie_series.connect(
+    #        ui._on_pie_series,
+    #        QtCore.Qt.ConnectionType.QueuedConnection
+    #    )
+

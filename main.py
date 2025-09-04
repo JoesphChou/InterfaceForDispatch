@@ -4,18 +4,19 @@ setup_logging("logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
 import sys, re, math, time
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
 from UI import Ui_MainWindow
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from make_item import make_item
-from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea
+from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea, StackedAreaCanvas
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
+import numpy as np
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -29,7 +30,8 @@ def handle_uncaught(exc_type, exc_value, exc_traceback):
 class DashboardThread(QtCore.QThread):
     """
     在背景固定頻率（預設每 11 秒）呼叫 MainWindow.dashboard_value() 以抓取即時值，
-    並透過 sig_pie_series(pd.Series) 把 c_values 發送回 **主執行緒**。
+    並透過 sig_pie_series(pd.Series) 把pie chart 要用的 c_values 發送回 **主執行緒**。
+    同時呼叫 main_win.make_stacked_frames()，丟回堆疊圖需要的 DataFrame
 
     特性
     ------
@@ -39,6 +41,7 @@ class DashboardThread(QtCore.QThread):
     """
     # 新增把資料送回主執行緒的 signal
     sig_pie_series = QtCore.pyqtSignal(object)      # 用來傳 pd.Series (shape=226)
+    sig_stack_df = QtCore.pyqtSignal(object)        # 堆疊圖, payload 會是dict
 
     def __init__(self, main_win, interval: float = 11.0):
         super().__init__(main_win)
@@ -48,15 +51,53 @@ class DashboardThread(QtCore.QThread):
     def run(self) -> None:
         # 只要沒有被 requestInterruption() 就持續執行
         while not self.isInterruptionRequested():
+            """
+            try:
+                if self._show_pie:
+                    c_values: pd.Series = self.main_win.dashboard_value()
+                    # 正常才發射給主執行緒
+                    if isinstance(c_values, pd.Series):
+                        self.sig_pie_series.emit(c_values)
+                if self._show_stack:
+                    df_raw = self.main_win.fetch_stack_raw_df()
+                    frames = self.main_win.make_stacked_frames(df_raw)  # 產出 by_unit / by_fuel / by_unit_detail
+                    if self._stack_mode == "unit":
+                        self.sig_stack_df.emit({"by": "unit", "df": frames["by_unit"]})
+                    else:
+                        self.sig_stack_df.emit({"by": "unit", "df": frames["by_fuel"]})
+                        #frames = self.main_win.make_stacked_frames(df_raw)
+                        #by_fuel = by_fuel[["NG", "COG", "MG"]]
+                        #self.sig_stack_df.emit({"by": "fuel", "df": by_fuel})
+            except Exception:
+                logger.error("DashboardThread 未捕捉例外", exc_info=True)
+                self.main_win.statusBar().showMessage("⚠ 更新即時值失敗，請檢查 PI Server 連線", 0)
+            """
             try:
                 c_values: pd.Series = self.main_win.dashboard_value()
                 # 正常才發射給主執行緒
                 if isinstance(c_values, pd.Series):
                     self.sig_pie_series.emit(c_values)
-
             except Exception:
                 logger.error("DashboardThread 未捕捉例外", exc_info=True)
                 self.main_win.statusBar().showMessage("⚠ 更新即時值失敗，請檢查 PI Server 連線", 0)
+
+            # 2) 新增堆疊圖資料（單位 & 燃料）
+            try:
+                df_raw = self.main_win.fetch_stack_raw_df()
+                frames = self.main_win.make_stacked_frames(df_raw)  # 產出 by_unit / by_fuel / by_unit_detail
+                by_unit = frames["by_unit"]
+                by_fuel = frames["by_fuel"]  # 已是「NG 固定公式，其餘按剩餘量比例」結果
+
+                # 固定燃料堆疊順序（NG 底、COG 中、MG 上），避免平均值排序
+                by_fuel = by_fuel[["NG", "COG", "MG"]]
+
+                # 丟回 UI：你已經有 on_stack_df(payload) 插槽
+                self.sig_stack_df.emit({"by": "unit", "df": by_unit})
+                self.sig_stack_df.emit({"by": "fuel", "df": by_fuel})
+
+            except Exception:
+                logger.error("DashboardThread 產生堆疊圖資料失敗", exc_info=True)
+
             # 分段 sleep，以便快速響應中斷
             slept = 0.0
             while slept < self.interval and not self.isInterruptionRequested():
@@ -261,7 +302,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
         self.pushButton_9.clicked.connect(self.on_show_trend)
-        self.pushButton_7.clicked.connect(self.real_time_hsm_cycle)
+        self.pushButton_7.clicked.connect(self.compute_stack_area_metrics)
 
         self.listWidget_2.addItems(['HSM 軋延機組'])
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
@@ -286,12 +327,475 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.develop_option.setChecked(False)
         self.tabWidget.setTabVisible(4, False)
 
-        # ===== 燃氣發電佔比的 pie chart 相關初始化 ===
+        # ===== 燃氣發電佔比的 pie chart 相關初始化 =====
         self.pie = PieChartArea(self.verticalLayout_2, with_toolbar=False)
         self._last_pie_series: Optional[pd.Series] = None   # 用來暫存最後一筆要給pie chart 用的資料
         self.comboBox.currentIndexChanged.connect(self._on_tg_switch)
         self.tw3_2.itemSelectionChanged.connect(self._on_tw3_2_select) #tw3_2 點選 TG 節點切換
 
+        # ===== stack chart (發電量 by unit 或 by fuel) 相關初始化 =====
+        self.canvas_unit = None
+        self.canvas_fuel = None
+
+        #
+        self.checkBox_5.stateChanged.connect(self._apply_chart_mode)    # 是否顯示圖表的選項
+        self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
+        self.checkBox_5.setChecked(True)
+
+    def _apply_chart_mode(self):
+        """
+        依目前 UI 狀態（checkBox_5、comboBox_3）切換圖表顯示的容器頁籤。
+
+        邏輯
+        ----
+        - 當 checkBox_5 未勾選時，隱藏整個圖表 Host 與種類下拉（僅 return）。
+        - 勾選時顯示 Host 與下拉，並依 comboBox_3 的 index 切換 chartHost 的頁面：
+          0=第一頁、1=第二頁、其他=第三頁。
+
+        Notes
+        -----
+        此函式只負責「顯示/切換哪一個 chart 容器頁籤」，實際資料繪製與更新
+        由其他 slot（例如 `on_stack_df`）處理。
+        """
+        if not self.checkBox_5.isChecked():
+            self.chartHost.setVisible(False)
+            self.comboBox_3.setVisible(False)
+            return
+        self.chartHost.setVisible(True)
+        self.comboBox_3.setVisible(True)
+
+        mode = self.comboBox_3.currentIndex()
+        if mode == 0:
+            self.chartHost.setCurrentIndex(0)
+        elif mode == 1:
+            self.chartHost.setCurrentIndex(1)
+        else:
+            self.chartHost.setCurrentIndex(2)
+
+    def fetch_stack_raw_df(self) -> pd.DataFrame:
+        """
+        從 PI 系統撈取堆疊圖所需的「原始時間序列資料」，並將欄名轉為迴路名稱。
+
+        流程
+        ----
+        1) 依 tag_list 取得發電機與燃氣相關的 tag  名單。
+        2) 設定查詢區間（目前為「現在回推 120 分鐘」到「現在」，8 秒取樣、平均值、前值補）。
+        3) 透過 self.pi_client.query(...) 取得資料。
+        4) 將回傳 DataFrame 的 columns 從 actual tag 名稱，轉換成後續
+           make_stacked_frames() 會使用的「迴路名稱」（例如 2H120、TG1 sCOG 等）。
+
+        Returns
+        -------
+        pandas.DataFrame
+            時間索引為 DatetimeIndex，欄為「迴路名稱」；適合作為 make_stacked_frames() 的輸入。
+        """
+        tag_reference = self.tag_list.set_index('name').copy()
+        generator_tag = tag_reference.loc['2H120':'5KB19', 'tag_name']
+        gas_tag = tag_reference.loc['BFG#1':'TG4 sCOG', 'tag_name']
+        tags = pd.concat([generator_tag, gas_tag]).tolist()
+
+        et = pd.Timestamp.now().floor('S')
+        st = et - pd.offsets.Minute(120)
+
+        df = self.pi_client.query(st=st, et=et, tags=tags,
+                                  summary='AVERAGE', interval='8s', fillna_method='ffill')
+
+        # 把 columns 從 tag 轉成你在 make_stacked_frames 會使用的「迴路名稱」
+        mask = tag_reference['tag_name'].isin(tags)
+        idx = tag_reference.index[mask]
+        df.columns = idx.tolist()
+        return df
+
+    @QtCore.pyqtSlot(object)
+    def on_stack_df(self, payload: dict):
+        """
+        接收背景執行緒（DashboardThread）送回的堆疊圖資料，負責在主執行緒建立/更新圖表。
+
+        Parameters
+        ----------
+        payload : dict
+            必含鍵值：
+            - "by": str
+                "unit" 或 "fuel"。決定繪製「依機組」或「依燃料」的堆疊圖。
+            - "df": pandas.DataFrame
+                時間索引（DatetimeIndex）＋對應欄位（依 "by" 不同而異）。
+                * by == "unit": 欄位預期含 ["TRT", "CDQ", "TG"]
+                * by == "fuel": 欄位預期含 ["NG", "COG", "MG"]
+
+        Behavior
+        --------
+        - 僅在第一次收到資料時，於對應的容器建立一個 StackedAreaCanvas 並加入版面配置：
+            * "unit" → 加到 verticalLayout_3
+            * "fuel" → 加到 verticalLayout_4
+          後續同類型更新只呼叫 .plot(df) 重畫，不再重複建 canvas。
+        - 根據 "by" 設定 self.canvas_unit / self.canvas_fuel 的 mode 與 `colors`，並以固定欄位順序過濾 DataFrame 後繪圖。
+
+        Side Effects
+        ------------
+        - 可能建立/保存屬性：`self.canvas_unit`、`self.canvas_fuel`
+        - 將 FigureCanvas 動態插入對應的 QVBoxLayout
+
+        Notes
+        -----
+        - 此 slot 會在 GUI 主執行緒執行（建議以 QueuedConnection 連線），避免跨緒 UI 操作。
+        - 欄位順序固定（by_unit: TRT→CDQ→TG；by_fuel: NG→COG→MG），缺欄位時自動略過。
+
+        """
+        by = payload.get("by")
+        df = payload.get("df")
+        if df is None or df.empty:
+            return
+
+        # —— by_unit —— (固定順序：TRT、CDQ、TGs)
+        if by == "unit":
+            # 第一次才建立，之後只 .plot(df)
+            if not hasattr(self, "canvas_unit") or self.canvas_unit is None:
+                from visualization import StackedAreaCanvas
+                self.canvas_unit = StackedAreaCanvas()  # ← 不傳 mode/colors
+                self.verticalLayout_3.addWidget(self.canvas_unit)
+
+            # 建立後設定屬性，再重畫
+            self.canvas_unit.mode = "by_unit"
+            self.canvas_unit.colors = {"TRT": "#7e57c2", "CDQ": "#26a69a", "TG": "#ef5350"}
+            cols = [c for c in ["TRT", "CDQ", "TG"] if c in df.columns]
+            self.canvas_unit.plot(df[cols])
+
+        # —— by_fuel —— (固定順序：NG、COG、MG)
+        elif by == "fuel":
+            if not hasattr(self, "canvas_fuel") or self.canvas_fuel is None:
+                from visualization import StackedAreaCanvas
+                self.canvas_fuel = StackedAreaCanvas()  # ← 不傳 mode/colors
+                self.verticalLayout_4.addWidget(self.canvas_fuel)
+
+            self.canvas_fuel.mode = "by_fuel"
+            self.canvas_fuel.colors = {"NG": "#4E79A7", "COG": "#F28E2B", "MG": "#59A14F"}
+            cols = [c for c in ["NG", "COG", "MG"] if c in df.columns]
+            self.canvas_fuel.plot(df[cols])
+
+    @log_exceptions()
+    @timeit(level=20)
+    def compute_stack_area_metrics(self, *_):
+        """
+        即時查詢 PI 系統近段時間資料，轉成堆疊圖所需三組 DataFrame，並依 UI 狀態繪製。
+
+        Pipeline
+        --------
+        1) 讀原始資料：
+           - 呼叫 self.fetch_stack_raw_df() 取得最近區間（目前為 ~120 分鐘、8 秒粒度）之平均值序列。
+           - 以參照表（self.tag_list）將回傳之 tag 欄位轉成後續計算會用的「迴路名稱」。  # 例如 2H120, 4KA18 等
+        2) 組裝堆疊框架：
+           - frames = self.make_stacked_frames(df) 產生：
+             * by_unit_detail : 各 TG、CDQ#、TRT# 的明細功率
+             * by_unit        : 彙整後的 ["TG", "CDQ", "TRT"]
+             * by_fuel        : 先依（NG 固定公式）計出各 TG 的 NG 發電量；其餘（COG/MG）按 (總發電量−NG) 以自身占比回配
+        3) 繪圖（依 UI 下拉選單 comboBox_3）：
+           - index == 0 → 建立 `StackedAreaCanvas()`，使用 by_unit，設定建議色票與 tooltip 格式，加入 verticalLayout_3
+           - index == 1 → 建立 `StackedAreaCanvas()`，使用 by_fuel，設定建議色票與 tooltip 格式，加入 verticalLayout_4
+
+        Side Effects
+        ------------
+        - 視 UI 選擇建立並插入新的 FigureCanvas 到對應 layout
+        - 不回傳值，結果以 UI 呈現
+
+        See Also
+        --------
+        - `fetch_stack_raw_df()`：查詢時間區間與欄位轉名
+        - `make_stacked_frames()`：by_unit / by_fuel 的計算細節
+        """
+        df = self.fetch_stack_raw_df()
+
+        # colors 建議
+        UNIT_COLORS = {
+            "TG": "#6FB1FF",
+            "TRT": "#81C784",
+            "CDQ": "#FFB74D",
+        }
+        FUEL_COLORS = {
+            "NG": "#64B5F6",
+            "COG": "#BA68C8",
+            "MG": "#E57373",
+        }
+
+        frames = self.make_stacked_frames(df)  # df 為你 query 回來的 30 分鐘資料
+        df_unit = frames["by_unit"]
+        df_unit_det = frames["by_unit_detail"]
+        df_fuel = frames["by_fuel"]
+
+        if self.comboBox_3.currentIndex() == 0:
+            # (A) 機組別堆疊
+            canvas_unit = StackedAreaCanvas()
+
+            def fmt_unit(ts, series_dict, total_val):
+                # 白字＋白框；背景色由最大項自動套用，不需在這裡指定
+                lines = [f"{ts:%H:%M}"]
+                lines += [f"{k}: {v:,.1f}" for k, v in series_dict.items()]
+                lines.append(f"總發電量: {total_val:,.1f}")
+                return "\n".join(lines)
+
+            canvas_unit.plot(
+                df_unit,
+                colors=UNIT_COLORS,
+                legend_title="發電機組類別",
+                tooltip_fmt=fmt_unit,
+            )
+            self.verticalLayout_3.addWidget(canvas_unit)
+        else:
+            # (B) 燃氣別堆疊
+            canvas_fuel = StackedAreaCanvas()
+
+            def fmt_fuel(ts, series_dict, total_val):
+                lines = [f"{ts:%H:%M}"]
+                lines += [f"{k}: {v:,.1f}" for k, v in series_dict.items()]
+                lines.append(f"（總計以 TG 加總）: {total_val:,.1f}")
+                return "\n".join(lines)
+
+            canvas_fuel.plot(
+                df_fuel,
+                colors=FUEL_COLORS,
+                legend_title="燃氣別",
+                tooltip_fmt=fmt_fuel,
+            )
+            self.verticalLayout_4.addWidget(canvas_fuel)
+
+    def make_stacked_frames(self, df: pd.DataFrame) -> dict:
+        """
+        由原始迴路資料組裝堆疊圖所需三種資料集：
+        - by_unit_detail：每台 TG 與各 CDQ/TRT 單獨欄位（明細）
+        - by_unit：依機組類別彙總（TGs、CDQ、TRT）
+        - by_fuel：依燃料彙總（NG / COG / MG；已依規則先轉成發電量後等比縮放）
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            由 fetch_stack_raw_df() 取得、且欄名為迴路名稱的時間序列資料。
+
+        Returns
+        -------
+        dict
+            {
+              "by_unit_detail": DataFrame,  # 欄位：TG1~TG4、CDQ#1~#2、TRT#1~#2
+              "by_unit": DataFrame,         # 欄位：TG、CDQ、TRT
+              "by_fuel": DataFrame          # 欄位：NG、COG、MG（單位 MW）
+            }
+
+        Notes
+        -----
+        - by_fuel 係呼叫 compute_by_fuel_power() 依「先轉電力、再以 remain 等比縮放」規則計算。
+        - 缺失欄位以 0.0 補齊，確保可穩定相加。
+        """
+        idx = df.index
+
+        # ---- 機組單位 ----
+        tg1 = self._safe_col(df, "2H120") + self._safe_col(df, "2H220")
+        tg2 = self._safe_col(df, "5H120") + self._safe_col(df, "5H220")
+        tg3 = self._safe_col(df, "1H120") + self._safe_col(df, "1H220")
+        tg4 = self._safe_col(df, "1H320") + self._safe_col(df, "1H420")
+        cdq1 = self._safe_col(df, "4H120")
+        cdq2 = self._safe_col(df, "4H220")
+        trt1 = self._safe_col(df, "4KA18")
+        trt2 = self._safe_col(df, "5KB19")
+
+        by_unit_detail = pd.DataFrame({
+            "TG1": tg1, "TG2": tg2, "TG3": tg3, "TG4": tg4,
+            "CDQ#1": cdq1, "CDQ#2": cdq2,
+            "TRT#1": trt1, "TRT#2": trt2,
+        }, index=idx).fillna(0.0)
+
+        by_unit = pd.DataFrame(index=idx)
+        by_unit["TG"] = by_unit_detail[["TG1", "TG2", "TG3", "TG4"]].sum(axis=1, min_count=1)
+        by_unit["CDQ"] = by_unit_detail[["CDQ#1", "CDQ#2"]].sum(axis=1, min_count=1)
+        by_unit["TRT"] = by_unit_detail[["TRT#1", "TRT#2"]].sum(axis=1, min_count=1)
+        by_unit = by_unit.fillna(0.0)
+
+        # ★ 以發電量比例換算的燃料堆疊
+        by_fuel = self.compute_by_fuel_power(df, by_unit_detail)
+
+        return {
+            "by_unit_detail": by_unit_detail,
+            "by_unit": by_unit,
+            "by_fuel": by_fuel,  # ← 這個就是你要「先轉成發電量再堆疊」的結果
+        }
+
+    def _safe_col(self, df: pd.DataFrame, name: str) -> pd.Series:
+        """
+        以安全方式取出指定欄位；若欄位不存在，回傳對齊 index 的 0.0 Series。
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            來源資料表。
+        name : str
+            欲擷取之欄名。
+
+        Returns
+        -------
+        pandas.Series
+            若欄位存在則為原欄位資料；否則回傳與 df.index 對齊、值為 0.0 的 Series。
+        """
+        return df[name] if name in df.columns else pd.Series(0.0, index=df.index)
+
+    def _sum_known_cols(self, df: pd.DataFrame, cols: List[str]) -> pd.Series:
+        """
+        將 df 中存在於 cols 清單裡的欄位逐一轉 float 後相加；若沒有任何存在欄位，回傳 0.0 Series。
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            來源資料表。
+        cols : List[str]
+            欲相加之欄名清單（可能含不存在欄）。
+
+        Returns
+        -------
+        pandas.Series
+            加總結果；若 cols 都不存在於 df.columns，回傳 0.0 Series（index 與 df 對齊）。
+        """
+        found = [df[c].astype(float) for c in cols if c in df.columns]
+        return sum(found, start=pd.Series(0.0, index=df.index)) if found else pd.Series(0.0, index=df.index)
+
+    def _fuel_flow_sum(self, df: pd.DataFrame, tg_no: int, fuel: str) -> pd.Series:
+        """
+        依統一命名規則彙總單一 TG 的燃氣流量/熱量欄位（大小寫、空白、黏寫都予以兼容）。
+
+        規則
+        ----
+        - NG : `sNG + NG`（容許 "TGx sNG" / "TGxSNG" / "TGx NG" / "TGxNG"）
+        - COG: sCOG + COG
+        - MG : `Mix + sMG + MG`（包含 "TGx Mix/MIX", "TGx sMG/SMG", "TGx MG/MG"）
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            來源資料表。
+        tg_no : int
+            TG 編號（1~4）。
+        fuel : str
+            "NG"、"COG"、"MG" 其一（大小寫不拘）。
+
+        Returns
+        -------
+        pandas.Series
+            指定 TG + fuel 的總流量/熱量序列；若 fuel 無法辨識，回傳 0.0 Series。
+        """
+        fn = fuel.upper()
+        if fn == "NG":
+            variants = [f"TG{tg_no} sNG", f"TG{tg_no}SNG", f"TG{tg_no} NG", f"TG{tg_no}NG"]
+        elif fn == "COG":
+            variants = [f"TG{tg_no} sCOG", f"TG{tg_no}SCOG", f"TG{tg_no} COG", f"TG{tg_no}COG"]
+        elif fn == "MG":
+            variants = [
+                f"TG{tg_no} Mix", f"TG{tg_no}MIX",
+                f"TG{tg_no} sMG", f"TG{tg_no}SMG",
+                f"TG{tg_no} MG", f"TG{tg_no}MG",
+            ]
+        else:
+            return pd.Series(0.0, index=df.index)
+        return self._sum_known_cols(df, variants)
+
+    def compute_by_fuel_power(self, df: pd.DataFrame, by_unit_detail: pd.DataFrame) -> pd.DataFrame:
+        """
+        依「先換算成電力、再等比縮放」規則，將各燃氣（NG/COG/MG）的使用量轉成對應發電量。
+
+        規則簡述
+        --------
+        1) 依 _pie_common_factors 同源參數（熱值、steam_power 等）推導「流量→MW」係數。
+           - NG/COG：使用固定熱值
+           - MG    ：用動態混氣熱值（由 BFG 與 LDG 當下比例計算）
+        2) 先個別換算：`ng_power = ng_flow * ng_k`、`cog_raw = cog_flow * cog_k`、`mg_raw = mg_flow * mg_k`
+        3) 計算 `remain = TG_total(MW) - ng_power`（<0 視為 0）
+        4) COG/MG 以「各自原始電力占比」縮放到 `remain`：
+           - `scale = remain / (cog_raw + mg_raw)`（分母=0 時令 scale=0）
+           - `cog = cog_raw * scale`、`mg = mg_raw * scale`
+        5) 回傳 DataFrame 欄固定為 `['NG', 'COG', 'MG']`（單位：MW）。
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            原始迴路資料（含各 TG 的 sNG/NG、sCOG/COG、Mix/sMG/MG、以及 BFG#?、LDG Input 等欄）。
+        by_unit_detail : pandas.DataFrame
+            機組明細功率（欄：TG1~TG4、CDQ#1~#2、TRT#1~#2），用來取得 `TG_total(MW)`。
+
+        Returns
+        -------
+        pandas.DataFrame
+            index 與 df 對齊；欄位為 `['NG', 'COG', 'MG']`，值為各時點的發電量（MW）。
+
+        Notes
+        -----
+        - 本實作符合你「NG 固定公式；COG/MG 依 (總發電量 − NG發電量) 後的比例換算」的最新需求。
+        - 內部對於缺失欄位會以 0.0 補齊，並避免除以 0 所致的 NaN/Inf。
+        """
+        idx = df.index
+
+        # --- 0) 熱值/轉換參數（與 _pie_common_factors 相同來源） ---
+        calorics = get_ng_generation_cost_v2(self.unit_prices)
+        # 常數（kJ/Nm³、kW per (kJ/s) → 你的專案封裝為 steam_power）
+        ng_heat = float(calorics.get('ng_heat', 0.0))
+        cog_heat = float(calorics.get('cog_heat', 0.0))
+        bfg_heat = float(calorics.get('bfg_heat', 0.0))
+        ldg_heat = float(calorics.get('ldg_heat', 0.0))
+        steam_pw = float(calorics.get('steam_power', 1.0))  # 避免除 0
+
+        # --- 1) 各燃氣流量（Nm³/h）---
+        # NG = Σ(TGx sNG + TGx NG)；COG = Σ(TGx sCOG + TGx COG)；MG = Σ(TGx Mix/MG/sMG)
+        def fuel_sum(fuel):
+            s = pd.Series(0.0, index=idx)
+            for tg_no in (1, 2, 3, 4):
+                s = s.add(self._fuel_flow_sum(df, tg_no, fuel).astype(float), fill_value=0.0)
+            return s
+
+        ng_flow = fuel_sum("NG")
+        cog_flow = fuel_sum("COG")
+        mg_flow = fuel_sum("MG")
+
+        # --- 2) 逐時點的動態 Mix 熱值：mix_heat = (BFG_sum*bfg_heat + LDG*ldg_heat) / (BFG_sum + LDG) ---
+        # 欄位若缺失就當 0（比照你程式一貫風格）
+        bfg_cols = [c for c in df.columns if c.startswith('BFG#')]
+        bfg_sum = df[bfg_cols].astype(float).sum(axis=1) if bfg_cols else pd.Series(0.0, index=idx)
+        ldg_in = df['LDG Input'].astype(float) if 'LDG Input' in df.columns else pd.Series(0.0, index=idx)
+        denom = (bfg_sum + ldg_in).replace(0.0, np.nan)  # 先設 NaN 以便除法，稍後再填回 0
+        mix_heat = (bfg_sum * bfg_heat + ldg_in * ldg_heat) / denom
+        mix_heat = mix_heat.fillna(0.0)
+
+        # --- 3) 依 _pie_common_factors 的換算公式取得「流量→MW」係數（Nm³/h → MW）---
+        # factor = heat / steam_power / 1000   （注意：factor 已含熱值，不可再乘熱值）  ← 這段來自原註解
+        # NG/COG 是固定熱值；MG 用動態混氣熱值
+        ng_k = ng_heat / steam_pw / 1000.0
+        cog_k = cog_heat / steam_pw / 1000.0
+        mg_k = mix_heat / steam_pw / 1000.0  # 這是「Series」，每個時間點不同
+
+        # --- 4) 先各自換 MW ---
+        ng_power = (ng_flow * ng_k)  # Series
+        cog_raw = (cog_flow * cog_k)  # Series
+        mg_raw = (mg_flow * mg_k)  # Series
+
+        # --- 5) remain 與等比縮放 ---
+        tg_total_power = (
+            by_unit_detail[["TG1", "TG2", "TG3", "TG4"]]
+            .sum(axis=1, min_count=1).astype(float)
+            .reindex(idx).fillna(0.0)
+        )
+        remain = (tg_total_power - ng_power).clip(lower=0.0)
+        denom2 = (cog_raw + mg_raw)
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            scale = np.where(denom2 > 0, remain / denom2, 0.0)
+        scale = pd.Series(scale, index=idx)
+
+        cog_power = (cog_raw * scale).fillna(0.0)
+        mg_power = (mg_raw * scale).fillna(0.0)
+
+        out = pd.DataFrame({
+            "NG": ng_power.clip(lower=0.0).astype(float),
+            "COG": cog_power.clip(lower=0.0).astype(float),
+            "MG": mg_power.clip(lower=0.0).astype(float),
+        }, index=idx)
+
+        # 固定堆疊順序：NG(下) → COG(中) → MG(上)
+        cols = [c for c in ["NG", "COG", "MG"] if c in out.columns]
+        return out[cols]
+
+    @log_exceptions()
     @QtCore.pyqtSlot(object)
     def _on_pie_series(self, c_values: pd.Series):
         """
@@ -621,6 +1125,42 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.tabWidget.setTabVisible(4, True)
         else:
             self.tabWidget.setTabVisible(4, False)
+
+    def start_dashboard_thread(self):
+        """
+        用來建立繼承自 QThread 的 DashboardThread 的實例。
+        並定期執行 dashboard_value() 從PI 系統讀取即時值，並更新到指定表格
+        Returns:
+            None
+        """
+        # 若已存在先關掉（避免重複連線）
+        if getattr(self, "dashboard_thread", None) and self.dashboard_thread.isRunning():
+            self.dashboard_thread.requestInterruption()
+            self.dashboard_thread.wait(2000)
+
+        # 建立並儲存 DashboardThread 的實例
+        self.dashboard_thread = DashboardThread(self, interval=11.0)
+        self.dashboard_thread.setObjectName("DashboardThread")
+        # 連線都在 start() 之前做，且一次連齊
+        self.dashboard_thread.sig_pie_series.connect(self._on_pie_series,
+                                                     QtCore.Qt.ConnectionType.QueuedConnection)
+        self.dashboard_thread.sig_stack_df.connect(self.on_stack_df, QtCore.Qt.ConnectionType.UniqueConnection)
+
+        # 啟動執行緒
+        self.dashboard_thread.start()
+
+    def start_schedule_thread(self):
+        """
+        用來建立繼承自 QThread 的ScheduleThread 的實例。
+        並每隔一段時間執行 update_tw4_schedule() 爬取 PMIS 和更新產線排程訊息
+        Returns:
+            None
+        """
+        # 建立並儲存 ScheduleThread 實例
+        self.scheduler_thread = ScheduleThread(self, interval=30.0)
+        self.scheduler_thread.setObjectName("SchedulerThread")
+        # 啟動執行緒
+        self.scheduler_thread.start()
 
     def real_time_hsm_cycle(self):
         """
@@ -1943,32 +2483,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
             # 變更字體顏色
             tg_child.setForeground(1, QtGui.QBrush(highlight_color if ng_contribution > 0 else default_color))
-
-    def start_dashboard_thread(self):
-        """
-        用來建立繼承自 QThread 的 DashboardThread 的實例。
-        並定期執行 dashboard_value() 從PI 系統讀取即時值，並更新到指定表格
-        Returns:
-            None
-        """
-        # 建立並儲存 DashboardThread 的實例
-        self.dashboard_thread = DashboardThread(self, interval=11.0)
-        self.dashboard_thread.setObjectName("DashboardThread")
-        # 啟動執行緒
-        self.dashboard_thread.start()
-
-    def start_schedule_thread(self):
-        """
-        用來建立繼承自 QThread 的ScheduleThread 的實例。
-        並每隔一段時間執行 update_tw4_schedule() 爬取 PMIS 和更新產線排程訊息
-        Returns:
-            None
-        """
-        # 建立並儲存 ScheduleThread 實例
-        self.scheduler_thread = ScheduleThread(self, interval=30.0)
-        self.scheduler_thread.setObjectName("SchedulerThread")
-        # 啟動執行緒
-        self.scheduler_thread.start()
 
     def tw3_expanded_event(self):
         """
