@@ -10,7 +10,7 @@
 此模組不處理商業邏輯；建議外部先計算，再用 PieChartArea.update_from_metrics() 餵資料重繪。
 """
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5 import NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
@@ -335,8 +335,6 @@ class PieChartArea(QtCore.QObject):
             - 中央文字會自動縮放至適合甜甜圈內的大小。
             - 不會顯示 legend。
         """
-        import matplotlib.patches as mpatches
-
         self._ax.clear()
 
         # 更新顏色/標題（若有）
@@ -645,6 +643,12 @@ class StackedAreaCanvas(FigureCanvas):
         parent : Optional[QWidget]
             外層 Qt 容器。若提供，畫布背景會維持透明以貼合容器底色。
 
+        Attributes:
+            self._ys (np.ndarray): shape=(n_series, n_points)
+            self._y_cum (np.ndarray): 同上，逐層累加結果
+            self._total (np.ndarray): shape=(n_points,)，各時點總量
+            self._legend_texts (Dict[str, matplotlib.text.Text]): 由 label 對應到底部 legend 的 Text 節點
+
         初始化內容
         ----------
         - 建立 Figure 與單一 Axes，預設關閉 Figure/Axes 的不透明背景以利融入外層底色。
@@ -654,31 +658,34 @@ class StackedAreaCanvas(FigureCanvas):
         """
         fig = Figure(figsize=(8, 4), dpi=100)
         self.ax = fig.add_subplot(111)
-        fig.patch.set_alpha(0.0)    # Figure 背景透明
-        self.ax.patch.set_alpha(0.0)    # Axes 背景透明
+        fig.patch.set_alpha(0.0)
+        self.ax.patch.set_alpha(0.0)
         super().__init__(fig)
         self.setParent(parent)
 
         # 狀態
-        self._labels = None            # type: Optional[List[str]]
-        self._colors = None            # type: Optional[List[str]]
-        self._ys = None                # type: Optional[List[np.ndarray]]
-        self._y_cum = None             # type: Optional[np.ndarray]
-        self._times = None             # type: Optional[np.ndarray]
-        self._total = None             # type: Optional[np.ndarray]
+        self._labels = None
+        self._colors = None
+        self._ys = None
+        self._y_cum = None
+        self._times = None
+        self._total = None
+        self._total_series = None
         self._mode = "by_unit"
 
         # 互動物件
-        self._vline = None             # 紅線
-        self._time_badge = None        # 時間徽章
-        self._dots = []                # 各層圓點
-        self._tips = []                # 各層 tooltip（Annotation）
+        self._vline = None
+        self._time_badge = None
+        self._dots = []
+        self._tips = []
 
         # 事件 id
         self._move_cid = None
-        fig = Figure(figsize=(8, 4), dpi=100, constrained_layout=False)  # 建議關閉 tight/constrained 混用
-        self._pad = dict(left=0.08, right=0.98, top=0.94, bottom=0.32)  # 固定邊界（下方預留給 legend）
-        fig.subplots_adjust(**self._pad)
+        self._last_idx = -1
+
+        # ✅ 固定邊界（下方給 legend）
+        self._pad = dict(left=0.08, right=0.98, top=0.94, bottom=0.32)
+        self.figure.subplots_adjust(**self._pad)
 
     def plot(self,
              df: pd.DataFrame,
@@ -760,10 +767,10 @@ class StackedAreaCanvas(FigureCanvas):
             return
 
         df = df[labels]
-        x_times = df.index.to_pydatetime()
-        x_num = mdates.date2num(x_times)
+        x_num = mdates.date2num(df.index.to_pydatetime())
         y_stack = [df[c].to_numpy(dtype=float) for c in labels]
-        y_arr = np.vstack(y_stack)  # (n_series, n_points)
+        y_arr = np.vstack([df[c].to_numpy(dtype=float) for c in labels])
+        #y_arr = [np.asarray(s, dtype=float) for s in y_stack]
         y_cum = np.cumsum(y_arr, axis=0)  # 累積
         total = y_arr.sum(axis=0)
 
@@ -791,7 +798,7 @@ class StackedAreaCanvas(FigureCanvas):
 
         # 先確保 renderer 可用
         self.draw()
-        renderer = self.get_renderer()
+        self.renderer = self.get_renderer()
 
         # 以外層容器寬度為基準（不要乘 DPR）
         host = self.parentWidget()
@@ -805,7 +812,7 @@ class StackedAreaCanvas(FigureCanvas):
         else:
             avail_px_container = float(self.figure.canvas.get_width_height()[0])
 
-        ax_bbox = self.ax.get_window_extent(renderer=renderer)
+        ax_bbox = self.ax.get_window_extent(renderer=self.renderer)
         avail_px_axes = float(ax_bbox.width)
 
         avail_px = min(avail_px_container, avail_px_axes) * 0.92  # ← 真正可用寬度（與 x 軸對齊的 legend 一致）
@@ -813,7 +820,7 @@ class StackedAreaCanvas(FigureCanvas):
         # ---- 2) 以「名稱 + 佔位字串」估最壞寬度，先完成兩行換行（第一行至少 2 個）----
         def _text_px(txt: str) -> float:
             t = self.ax.text(0, 0, txt, transform=self.ax.transAxes, alpha=0.0)
-            bb = t.get_window_extent(renderer=renderer)
+            bb = t.get_window_extent(renderer=self.renderer)
             t.remove()
             return float(bb.width)
 
@@ -829,7 +836,7 @@ class StackedAreaCanvas(FigureCanvas):
         for i, w in enumerate(item_px):
             # ✅ 第一行至少放 2 個
             if used + w <= avail_px or len(row1_idx) < 2:
-                row1_idx.append(i);
+                row1_idx.append(i)
                 used += w
             else:
                 break
@@ -882,9 +889,9 @@ class StackedAreaCanvas(FigureCanvas):
         # 緩存 legend 物件與文字（給之後 on_mouse_move 更新）
         self._leg_row1 = leg_row1
         self._leg_row2 = leg_row2
-        self._legend_texts = {lab: text for lab, text in zip(row1_labels, leg_row1.get_texts())}
-        if leg_row2 is not None:
-            self._legend_texts.update({lab: text for lab, text in zip(row2_labels, leg_row2.get_texts())})
+
+        # 先重置，避免重畫殘留
+        self._legend_texts ={}
 
         # ---- 4) 若“兩行換好”後仍超界 → 才縮字（一次收斂到不超界或到最小字體）----
         def _legend_width(leg) -> float:
@@ -920,13 +927,18 @@ class StackedAreaCanvas(FigureCanvas):
         if leg_row2 is not None:
             self._legend_texts.update({lab: text for lab, text in zip(row2_labels, leg_row2.get_texts())})
 
+        # 把原本在 _on_mouse_move() 結尾呼叫縮字體的功能改來這邊執行，降低計算量
+        self._shrink_legends_to_fit()
+
         # 儲存互動資料（後續 tooltip/legend 更新用）
         self._labels = labels
         self._colors = facecolors
-        self._ys = y_stack
+        self._facecolors = facecolors
+        self._ys = y_arr.astype(float)
         self._y_cum = y_cum
         self._times = df.index.values.astype("datetime64[ns]")
-        self._total = total.astype(float)
+        self._total = total.astype(float)                   # 給 _on_mouse_move 用
+        self._total_series = self._total                    # 給 _update_bootom_legend 用
 
         # 建立紅線與時間徽章（徽章貼齊 x 軸，紅線覆蓋刻度）
         if self._vline is not None:
@@ -973,44 +985,6 @@ class StackedAreaCanvas(FigureCanvas):
                 pass
         self._move_cid = self.mpl_connect('motion_notify_event', self._on_mouse_move)
 
-    def _build_bottom_legend(self):
-        """
-        在 x 軸下方建立兩行 legend 佈局，並將 legend 的文字物件快取到 `_legend_texts`。
-
-        行為
-        ----
-        - 為每個系列建立顏色方塊（handle）與標籤。
-        - 另外建立「總計」的虛擬 handle，用以顯示當前總量文字。
-        - 兩行配置：第一行放主要分類，第二行可加上「總計」或放不下的分類。
-        - 將 legend 放置於 x 軸下方（使用 bbox_to_anchor 與 axes 座標系）。
-        - 把每個 legend 的 Text 節點以「標籤文字」為 key 緩存到 `_legend_texts`，之後 _on_mouse_move() 會即時覆寫。
-
-        備註
-        ----
-        - 這裡只負責建立與快取，實際的數值/百分比更新由 _update_bottom_legend(idx) 在滑鼠事件中負責呼叫。
-        """
-        self._legend_texts = {}  # label -> Text instance
-        handles, labels = [], []
-
-        for i, lab in enumerate(self._labels):
-            patch = mpatches.Patch(color=self._facecolors[i], label=lab)
-            handles.append(patch)
-            labels.append(lab)
-
-        # 總計的假 handle（用細線色）
-        total_patch = mpatches.Patch(color="#90CAF9", label="總計")
-        handles.append(total_patch)
-        labels.append("總計")
-
-        leg = self.ax.legend(
-            handles, labels,
-            loc="lower center", bbox_to_anchor=(0.5, -0.02),
-            ncol=min(len(labels), 4), frameon=False, handlelength=1.8, columnspacing=1.6
-        )
-        # 把每個 Text 存起來，方便更新
-        for txt in leg.get_texts():
-            self._legend_texts[txt.get_text()] = txt
-
     def _update_bottom_legend(self, idx: int):
         """
         依目前滑鼠對應的時間索引 `idx`，即時更新底部 legend 的顯示內容。
@@ -1031,10 +1005,17 @@ class StackedAreaCanvas(FigureCanvas):
         - 需先由 plot() 設定好 `self._ys`、`self._total`（或 `_total_series`）以及 `_legend_texts`。
         """
         # 依目前 idx 更新 legend 文字（當下值與百分比）
-        total = float(self._total_series[idx]) if hasattr(self, "_total_series") else 0.0
+        try:
+            total = float(self._total[idx])  # ← 改用 self._total
+        except Exception:
+            total = 0.0
+
         # 各層
         for i, lab in enumerate(self._labels):
-            val = float(self._ys[i, idx])
+            try:
+                val = float(self._ys[i, idx])  # 2D ndarray：行=系列、列=時間
+            except Exception:
+                val = 0.0
             share = (val / total * 100.0) if total > 0 else 0.0
             text = f"{lab}：{val:.1f} MW ({share:.1f}%)"
             if lab in self._legend_texts:
@@ -1094,6 +1075,11 @@ class StackedAreaCanvas(FigureCanvas):
 
         # 找到最接近的索引
         idx = int(np.clip(np.searchsorted(x_num, event.xdata), 1, len(x_num) - 1))
+
+        # 只在「索引變了」才更新圖 (節流)
+        if idx == getattr(self, "_last_idx", -1):
+            return
+
         xi = x_num[idx]
 
         # 畫紅線 + 時間徽章（貼齊 x 軸）
@@ -1105,9 +1091,9 @@ class StackedAreaCanvas(FigureCanvas):
             self._time_badge.set_text(t.strftime("%H:%M"))
 
         # 取當下值
-        vals = np.array([s[idx] for s in self._ys], dtype=float)  # 各層當下值
+        vals = self._ys[:, idx].astype(float)
         totals = self._y_cum[:, idx].astype(float)  # 各層上緣 y（累積）
-        total_sum = float(self._total[idx]) if hasattr(self, "_total") else float(totals[-1])
+        total_sum = float(self._total_series[idx])
 
         # 若總計為 0，隱藏 tooltip & dots，直接重繪
         if not np.isfinite(total_sum) or total_sum <= 0:
@@ -1126,7 +1112,6 @@ class StackedAreaCanvas(FigureCanvas):
         ha = "right" if place_left else "left"
 
         # 先全部顯示 / 設定基礎內容，並計算像素位置
-        renderer = self.get_renderer()
         min_gap_px = 18.0  # 層與層之間的最小像素間距（可再加大）
         floor_pad_px = 4.0  # 距 x 軸最小像素距離
         ypix_list = []
@@ -1159,7 +1144,7 @@ class StackedAreaCanvas(FigureCanvas):
                     ann.xy = (xi, y_top)
                     ann.set_ha(ha)
                     ann.set_position((x_off, 8))
-                    ann.set_text(self._format_tip_text(lab, vals[i]))
+                    ann.set_text(self._format_tip_text(lab, float(vals[i])))
                     # 記錄像素 y，稍後排不重疊
                     ypix = self.ax.transData.transform((xi, y_top))[1]
                     ypix_list.append(ypix)
@@ -1189,47 +1174,32 @@ class StackedAreaCanvas(FigureCanvas):
                 last_pix = cur_pix
 
         # 更新底部 legend 的即時數值
-        # 需要你在 plot() 畫 legend 後，把 Legend 的文字節點收在 self._legend_texts
-        if hasattr(self, "_legend_texts") and isinstance(self._legend_texts, dict):
-            # 分類（依現有 legend 文字鍵來更新）
-            for i, lab in enumerate(self._labels):
-                if lab in self._legend_texts:
-                    if total_sum > 0:
-                        pct = vals[i] / total_sum * 100.0
-                    else:
-                        pct = 0.0
-                    self._legend_texts[lab].set_text(f"{lab}：{vals[i]:.1f} MW ({pct:.1f}%)")
-            # 總計
-            if "總計" in self._legend_texts:
-                self._legend_texts["總計"].set_text(f"總計：{total_sum:.1f} MW")
-
+        self._update_bottom_legend(idx)
         # 觸發重繪
         self.figure.canvas.draw_idle()
-        QtCore.QTimer.singleShot(0, self._shrink_legends_to_fit)
 
     def _format_tip_text(self, col: str, value: float) -> str:
         """
-        產生滑鼠移動時每一層 tooltip 的顯示文字。
+        產生滑鼠移動時每層 tooltip 的顯示文字。
 
         規則
         ----
-        - 依情境（self._mode / self.mode）切換樣式：
-          * by_unit：顯示「<機組> 發電量: xx.x MW」
-            - TG 與 TGs 都視為「TG」
-          * by_fuel：顯示「<燃料> 發電量: xx.x MW」
-        - 數值轉型失敗時視為 0.0。
+        - 依 self._mode 切換樣式：
+            * "by_unit": 顯示「<機組> 發電量: xx.x MW」，其中 "TGs"/"TG" 一律顯示為「TG」。
+            * "by_fuel": 顯示「<燃料> 發電量: xx.x MW」。
+        - 非數值輸入會以 0.0 代入，輸出結尾固定包含「MW」。
 
         參數
         ----
         col : str
-            欲顯示的系列名稱（例如 "TGs"、"CDQ"、"TRT" 或 "NG"、"COG"、"MG"）。
+            系列名稱（例如 "TGs"、"CDQ"、"TRT" 或 "NG"、"COG"、"MG"）。
         value : float
-            該系列在目前時間點對應的數值（MW）。
+            該系列於目前時間點的數值（MW）。
 
         回傳
         ----
         str
-            依規則格式化後的字串，結尾固定包含「MW」單位。
+            已依模式與單位格式化的字串。
         """
         # 你的類別裡可能叫 self._mode（在 plot() 內設定），也可能叫 self.mode
         mode = getattr(self, "_mode", getattr(self, "mode", "by_unit"))
@@ -1252,29 +1222,26 @@ class StackedAreaCanvas(FigureCanvas):
 
     def _shrink_legends_to_fit(self, min_fs: float = 7.0, margin_ratio: float = 0.92) -> None:
         """
-        將底部「兩行」 legend 的字體在當前可用寬度下自動縮小，避免超出容器寬度。
+        將「底部兩行 legend」的字體在**當前可用寬度**下自動縮小（不更動換行），避免超出容器寬度。
 
         作法
         ----
-        1) 先以 renderer 量測：
-           - 外層容器（parentWidget）的有效寬度（扣掉左右內容邊距）
-           - 當前 Axes 的畫布寬度
-           取兩者較小者再乘上 margin_ratio 當作可用寬度。
-        2) 量測第一、二行 legend 目前字體大小下的實際像素寬度。
-        3) 只要任一行超過可用寬度，就同步將兩行的字體大小以 1pt 逐步遞減，
-           直到兩行都不再超出，或達到最小字體 min_fs 為止。
-        4) 不處理版面配置（換行）邏輯；只負責字體縮放。
+        1) 量測可用寬度：取外層容器（parentWidget）與當前 Axes 寬度的較小值，再乘上 margin_ratio。
+        2) 量測第一、二行 legend 在目前字體大小下的像素寬度。
+        3) 若任一行超寬，則同步把兩行字體大小每次遞減 1pt，直到兩行皆不超寬或達到 min_fs。
+        4) 本函式只負責**縮字**，不處理**換行**；換行在 plot() 內用「名稱 + 佔位字串」的寬度預估完成。
 
         參數
         ----
         min_fs : float, 預設 7.0
             允許縮小的最小字體大小（pt）。
         margin_ratio : float, 預設 0.92
-            為避免緊貼邊界的保守係數，乘上後當作可用寬度。
+            安全邊界係數；避免 legend 文字貼齊容器邊界而視覺擁擠。
 
-        回傳
+        備註
         ----
-        None
+        - 建議只在 plot() 完成 legend 佈局後呼叫一次，以降低互動時的負擔。
+        - 在 _on_mouse_move() **不應再呼叫**，避免造成效能下降。
         """
         # 沒 legend 就不用做
         leg1 = getattr(self, "_leg_row1", None)

@@ -365,12 +365,15 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.comboBox_3.setVisible(True)
 
         mode = self.comboBox_3.currentIndex()
+        self.chartHost.setCurrentIndex(mode)
+        """
         if mode == 0:
             self.chartHost.setCurrentIndex(0)
         elif mode == 1:
             self.chartHost.setCurrentIndex(1)
         else:
             self.chartHost.setCurrentIndex(2)
+        """
 
     def fetch_stack_raw_df(self) -> pd.DataFrame:
         """
@@ -422,11 +425,11 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 * by == "unit": 欄位預期含 ["TRT", "CDQ", "TG"]
                 * by == "fuel": 欄位預期含 ["NG", "COG", "MG"]
 
-        Behavior
+        Behavior:
         --------
         - 僅在第一次收到資料時，於對應的容器建立一個 StackedAreaCanvas 並加入版面配置：
-            * "unit" → 加到 verticalLayout_3
-            * "fuel" → 加到 verticalLayout_4
+            * "unit" → 加到 verticalLayout_4
+            * "fuel" → 加到 verticalLayout_3
           後續同類型更新只呼叫 .plot(df) 重畫，不再重複建 canvas。
         - 根據 "by" 設定 self.canvas_unit / self.canvas_fuel 的 mode 與 `colors`，並以固定欄位順序過濾 DataFrame 後繪圖。
 
@@ -452,7 +455,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             if not hasattr(self, "canvas_unit") or self.canvas_unit is None:
                 from visualization import StackedAreaCanvas
                 self.canvas_unit = StackedAreaCanvas()  # ← 不傳 mode/colors
-                self.verticalLayout_3.addWidget(self.canvas_unit)
+                self.verticalLayout_4.addWidget(self.canvas_unit)
 
             # 建立後設定屬性，再重畫
             self.canvas_unit.mode = "by_unit"
@@ -465,7 +468,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             if not hasattr(self, "canvas_fuel") or self.canvas_fuel is None:
                 from visualization import StackedAreaCanvas
                 self.canvas_fuel = StackedAreaCanvas()  # ← 不傳 mode/colors
-                self.verticalLayout_4.addWidget(self.canvas_fuel)
+                self.verticalLayout_3.addWidget(self.canvas_fuel)
 
             self.canvas_fuel.mode = "by_fuel"
             self.canvas_fuel.colors = {"NG": "#4E79A7", "COG": "#F28E2B", "MG": "#59A14F"}
@@ -489,8 +492,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
              * by_unit        : 彙整後的 ["TG", "CDQ", "TRT"]
              * by_fuel        : 先依（NG 固定公式）計出各 TG 的 NG 發電量；其餘（COG/MG）按 (總發電量−NG) 以自身占比回配
         3) 繪圖（依 UI 下拉選單 comboBox_3）：
-           - index == 0 → 建立 `StackedAreaCanvas()`，使用 by_unit，設定建議色票與 tooltip 格式，加入 verticalLayout_3
-           - index == 1 → 建立 `StackedAreaCanvas()`，使用 by_fuel，設定建議色票與 tooltip 格式，加入 verticalLayout_4
+           - index == 0 → 建立 `StackedAreaCanvas()`，使用 by_unit，設定建議色票與 tooltip 格式，加入 verticalLayout_4
+           - index == 1 → 建立 `StackedAreaCanvas()`，使用 by_fuel，設定建議色票與 tooltip 格式，加入 verticalLayout_3
 
         Side Effects
         ------------
@@ -538,7 +541,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 legend_title="發電機組類別",
                 tooltip_fmt=fmt_unit,
             )
-            self.verticalLayout_3.addWidget(canvas_unit)
+            self.verticalLayout_4.addWidget(canvas_unit)
         else:
             # (B) 燃氣別堆疊
             canvas_fuel = StackedAreaCanvas()
@@ -555,7 +558,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 legend_title="燃氣別",
                 tooltip_fmt=fmt_fuel,
             )
-            self.verticalLayout_4.addWidget(canvas_fuel)
+            self.verticalLayout_3.addWidget(canvas_fuel)
 
     def make_stacked_frames(self, df: pd.DataFrame) -> dict:
         """
