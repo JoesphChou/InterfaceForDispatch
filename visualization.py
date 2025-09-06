@@ -135,7 +135,37 @@ class PieChartArea(QtCore.QObject):
             min_frac_inside: float = 0.06,  # 建議區間 0.06 ~ 0.15
             force_outside: bool = False,
     ) -> None:
-        """大扇區內標；小扇區自動移到外側（或強制全部外側），並加導線。"""
+        """
+        在扇區內/外繪製雙行標籤；小扇區自動外移並加導線。
+
+        規則
+        ----
+        - 以 min_frac_inside 判斷扇區角度是否足夠容納文字：
+            * 若 force_outside=False 且扇區角度比例 >= min_frac_inside → 放「扇內」；
+            * 否則放「扇外」，在外側加一段導線並微移文字，減少與扇區的碰撞。
+        - 扇內標籤：放在內外半徑的中線位置（r = 1 - donut_width/2），
+          採粗體、白色描邊（path effects）強化在深色底上的可讀性。
+        - 扇外標籤：依扇區中心角的左右半平面決定對齊方向（left/right），
+          並略做水平位移，降低外標籤與扇區的重疊。
+
+        Parameters
+        ----------
+        wedges : List[matplotlib.patches.Wedge]
+            Axes.pie() 回傳的 wedge 物件列表。
+        labels : List[str]
+            與 wedge 一一對應的字串（可含換行）。
+        donut_width : float
+            甜甜圈寬度（0~1），用以計算扇內標籤的極座標半徑。
+        min_frac_inside : float, optional
+            扇內標籤的最小角度比例門檻，預設 0.06（約 21.6°）。
+        force_outside : bool, optional
+            若為 True，全部標籤強制置於扇外（除錯/試調時可用）。
+
+        Returns
+        -------
+        None
+            僅進行繪圖，無回傳值。
+        """
         if not labels:
             return
 
@@ -176,7 +206,26 @@ class PieChartArea(QtCore.QObject):
                 )
 
     def _build_mini_flow_legend(self, *, flows: Dict[str, float], tg_count: int, anchor: str = "ll") -> None:
-        from matplotlib.patches import Rectangle
+        """
+        於圖角落建立小型流量圖例：「目前流量/安全上限 Nm³/h (xx%)」。
+
+        邏輯
+        ----
+        - 以每台 TG 的安全上限：COG=24,000、MG=200,000、NG=10,000（Nm³/h），
+          乘上 tg_count 推得當前上限，並以 flows[k]/limit 計算百分比。
+        - 僅顯示流量大於 0 的燃氣鍵值；顏色沿用各扇區顏色。
+        - anchor 控制角落位置："ll"=左下、"lr"=右下；標籤字型採等寬以利數字對齊。
+        - 此 legend 透過 bbox_to_anchor 固定在圖視窗角落，與扇區標籤相互獨立。
+
+        Parameters
+        ----------
+        flows : Dict[str, float]
+            各燃氣流量（Nm³/h），為 0 的燃氣不顯示。
+        tg_count : int
+            目前運轉的 TG 台數，用於計算總安全上限。
+        anchor : str, optional
+            "ll" 或 "lr"；預設左下 ("ll")，可視扇區標籤分佈動態切換以減少重疊。
+        """
         per_tg_limit = {"COG": 24000, "MG": 200000, "NG": 10000}
         tg = tg_count if (tg_count and tg_count > 0) else 4
         handles, labels = [], []
@@ -188,7 +237,7 @@ class PieChartArea(QtCore.QObject):
                 continue
             limit = per_tg_limit.get(k, 0) * tg
             ratio = 0.0 if limit <= 0 else min(f / limit, 1.0)
-            handles.append(Rectangle((0, 0), 1, 1, facecolor=self._colors.get(k, "#999"), edgecolor="none"))
+            handles.append(mdates.Rectangle((0, 0), 1, 1, facecolor=self._colors.get(k, "#999"), edgecolor="none"))
             labels.append(f"{k}: {int(round(f)):,}/{limit:,} Nm3/h ({ratio * 100:.0f}%)")
 
         if not handles:
@@ -216,6 +265,21 @@ class PieChartArea(QtCore.QObject):
         leg.set_in_layout(False)
 
     def _fit_center_text(self, text: str) -> None:
+        """
+        將多行/可變長度的摘要文字自動縮放，確保其完整置於甜甜圈內徑範圍。
+
+        原理
+        ----
+        - 以目前設定的甜甜圈寬度 _donut_width 推得內徑半徑，換算為像素直徑。
+        - 由大到小嘗試一組字級 `_center_font_sizes`（最後退而求其次使用較小字級），
+          每次重繪並量測文字外框，直到寬高同時小於內徑 92% 為止。
+        - 成功後維持該字級；若仍無法滿足，使用保底小字級以避免溢出。
+
+        Parameters
+        ----------
+        text : str
+            要顯示於甜甜圈中央的（可能含換行符號的）文字。
+        """
         donut_width = self._donut_width
         inner_r = 1.0 - donut_width
         self._fig.canvas.draw()
@@ -248,21 +312,49 @@ class PieChartArea(QtCore.QObject):
         group_label: Optional[str] = None,
     ) -> None:
         """
-        根據輸入的指標數據更新甜甜圈圖。
+        依輸入指標重繪甜甜圈圖（含差額環、中心摘要與小型流量圖例）。
 
-        Args:
-            flows (Dict[str, float]): 各燃氣種類的流量 (Nm3/h)，例如 {"NG": 8000, "COG": 12000, "MG": 50000}。
-            est_power (Dict[str, float]): 各燃氣估算發電量 (MW)，例如 {"NG": 50, "COG": 20, "MG": 10}。
-            real_total (float): 實際總發電量 (MW)。
-            order (Iterable[str], optional): 扇區順序，例如 ("NG","COG","MG")。
-            colors (Dict[str, str], optional): 各燃氣的顏色設定。
-            show_diff_ring (bool, optional): 是否顯示外圈差額環，預設沿用內部設定。
-            title (str, optional): 圖表標題。
-            tg_count (int, optional): TG 數量，用於計算流量上限比例。
-            group_label (str, optional): 當 title = None 時，用來在中心顯示發電機名稱或積類。
-        Notes:
-            - 若估算與實際總發電量皆為零，將自動呼叫 render_inactive() 以顯示「未運轉 / 無資料」訊息。
-            - 若 show_diff_ring=True，中央文字會同時顯示估算值、實際值與誤差。
+        繪製邏輯（重點）
+        -------------
+        - 顏色與順序：若 `colors`/`order` 提供，會先更新內部狀態。
+        - 估算與顯示值：
+            * `show_diff_ring=True`：扇區採用 `est_power`（估算）直接繪製。
+            * `show_diff_ring=False`：將「實際總發電量」依估算佔比回配至各燃氣
+              （你目前版本採「NG 固定、COG/MG 依剩餘比例」的新版邏輯可在外部先算好再傳入）。
+        - 空資料防護：當分母為 0 或總量近似 0 時，改呼叫 render_inactive() 顯示「未運轉 / 無資料」。
+        - 標籤：大扇區內標，小扇區自動移到外側並加導線（由 _draw_in_wedge_labels() 決定）。
+        - 中央摘要：
+            * `show_diff_ring=True`：顯示「估算、實際、誤差」三行。
+            * `show_diff_ring=False`：顯示群組名稱（或 `group_label`）＋第二行為實際 MW。
+          摘要字級由 _fit_center_text() 自動縮放。
+        - 左下角 legend：呼叫 _build_mini_flow_legend() 以「目前流量/安全上限 Nm³/h (xx%)」樣式，
+          並依扇區方位自動選擇左下或右下角，盡量避開標籤重疊。
+
+        Parameters
+        ----------
+        flows : Dict[str, float]
+            各燃氣流量（Nm³/h），鍵通常為 "NG"/"COG"/"MG"。
+        est_power : Dict[str, float]
+            估算的各燃氣發電量（MW）。
+        real_total : float
+            實際總發電量（MW）。視 show_diff_ring 決定是否用於回配顯示。
+        order : Iterable[str], optional
+            扇區順序，預設使用內部順序（例如 ("NG","COG","MG")）。
+        colors : Dict[str, str], optional
+            各燃氣顏色表。
+        show_diff_ring : bool, optional
+            是否顯示差額外環（不提供則沿用現狀）。
+        title : str, optional
+            圖表標題；若外層以 QLabel 呈現標題，此參數可為 None。
+        tg_count : int, optional
+            目前運轉 TG 數量，供流量安全上限計算用。
+        group_label : str, optional
+            當 title 未使用時，可在中心摘要第一行顯示的群組/機組名稱（例如 "TG1"、"TGs"）。
+
+        Notes
+        -----
+        - 僅處理視覺化與健壯性檢查，不進行商業邏輯計算；建議於外部先規則化資料再傳入。
+        - 此函式需在 GUI 主執行緒執行（QThread 請透過 signal/slot 回到主執行緒）。
         """
 
         if colors:
