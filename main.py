@@ -863,13 +863,16 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 tg_count=metrics["tg_count"],
                 order=('NG', 'MG', 'COG'),
                 show_diff_ring=show_ring,
-                title=f"TG1~TG4 燃料發電比例",
+                title = None,
+                #title=f"TG1~TG4 燃料發電比例",
             )
         else:
             tg_no = idx
+            tg_name = f"TG{idx}"
             if not hasattr(self, "_last_pie_series"):
                 return
-            title = f'TG{tg_no} 燃料發電比例'
+            #title = f'TG{tg_no} 燃料發電比例'
+            title = None
             metrics = self.compute_pie_metrics_by_tg(self._last_pie_series, tg_no)
             if metrics.get('inactive'):
                 self.pie.render_inactive(title=title, message="未運轉 / 無資料")
@@ -879,7 +882,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                              est_power = metrics['mw_est'],
                                              real_total = metrics ['mw_real'],
                                              tg_count = 1,
-                                             title = title,)
+                                             title = title,
+                                             group_label = tg_name)
 
     def _on_tw3_2_select(self):
         """
@@ -916,7 +920,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 tg_no = int(text[2:])
                 if 1 <= tg_no <= 4 and hasattr(self, "_last_pie_series"):
                     metrics = self.compute_pie_metrics_by_tg(self._last_pie_series, tg_no)
-                    title = f"TG{tg_no} 燃料發電比例"
+                    #title = f"TG{tg_no} 燃料發電比例"
+                    title = None
                     if metrics.get('inactive'):
                         self.pie.render_inactive(title=title, message="未運轉 / 無資料")
                     self.pie.set_title(title) if hasattr(self, "pie") else None
@@ -925,6 +930,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                                  real_total = metrics ['mw_real'],
                                                  tg_count = 1,
                                                  title = title,
+                                                 group_label=text,
                                                  )
             else:
                 metrics = self.compute_pie_metrics(self._last_pie_series)
@@ -935,7 +941,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     tg_count=metrics["tg_count"],
                     order=('NG', 'MG', 'COG'),
                     show_diff_ring=show_ring,
-                    title=f"TG1~TG4 燃料發電比例",
+                    title=None,
+                    #title=f"TG1~TG4 燃料發電比例",
                 )
 
     def compute_pie_metrics(self, value: pd.Series) -> dict:

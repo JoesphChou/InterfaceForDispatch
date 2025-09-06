@@ -16,9 +16,11 @@ from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
+import matplotlib.patheffects as pe
 import numpy as np
-from logging_utils import get_logger
 import pandas as pd
+import math
+from logging_utils import get_logger
 from typing import List, Optional, Tuple, Dict, Iterable, Callable
 from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtWidgets import QFileDialog
@@ -124,9 +126,16 @@ class PieChartArea(QtCore.QObject):
         cb = (L+0.05)/0.05
         return "white" if cw > cb else "black"
 
-    def _draw_in_wedge_labels(self, wedges, labels, *, donut_width: float, min_frac_inside: float = 0.06) -> None:
-        """大扇區內標；小扇區自動移到外側，並加導線。"""
-        import math
+    def _draw_in_wedge_labels(
+            self,
+            wedges,
+            labels,
+            *,
+            donut_width: float,
+            min_frac_inside: float = 0.06,  # 建議區間 0.06 ~ 0.15
+            force_outside: bool = False,
+    ) -> None:
+        """大扇區內標；小扇區自動移到外側（或強制全部外側），並加導線。"""
         if not labels:
             return
 
@@ -140,28 +149,33 @@ class PieChartArea(QtCore.QObject):
             ang = math.radians((w.theta1 + w.theta2) / 2.0)
             frac = abs(w.theta2 - w.theta1) / 360.0
 
-            if frac >= min_frac_inside:
-                # 放扇區內
+            if (not force_outside) and (frac >= min_frac_inside):
+                # 扇內（兩行），黑字 + 白外框
                 x, y = r_mid * math.cos(ang), r_mid * math.sin(ang)
-                tc = self._get_contrast_text_color(w.get_facecolor())
-                self._ax.text(x, y, text, ha="center", va="center",
-                              fontsize=8, color=tc, fontweight="bold")
+                self._ax.text(
+                    x, y, text,
+                    ha="center", va="center",
+                    fontsize=8, fontweight="bold",
+                    color="black", linespacing=1.05, zorder=6,
+                    path_effects=[pe.withStroke(linewidth=1.2, foreground="white", alpha=0.95)],
+                )
             else:
-                # 放扇區外 + 導線
+                # 放扇區外 + 導線（兩行字）
                 r_out = 1.0
-                r_lab = 1.10
+                r_lab = 1.12  # 稍微再外一點，降低交疊
                 x0, y0 = r_out * math.cos(ang), r_out * math.sin(ang)
                 x1, y1 = r_lab * math.cos(ang), r_lab * math.sin(ang)
                 ha = "left" if math.cos(ang) >= 0 else "right"
-                x1 += 0.04 if ha == "left" else -0.04
+                x1 += 0.06 if ha == "left" else -0.06
                 self._ax.annotate(
                     text,
                     xy=(x0, y0), xytext=(x1, y1),
                     ha=ha, va="center", fontsize=8, fontweight="bold",
-                    arrowprops=dict(arrowstyle="-", lw=0.8, color="#666"),
+                    linespacing=1.05,
+                    arrowprops=dict(arrowstyle="-", lw=0.9, color="#666"),
                 )
 
-    def _build_mini_flow_legend(self, *, flows: Dict[str, float], tg_count: int) -> None:
+    def _build_mini_flow_legend(self, *, flows: Dict[str, float], tg_count: int, anchor: str = "ll") -> None:
         from matplotlib.patches import Rectangle
         per_tg_limit = {"COG": 24000, "MG": 200000, "NG": 10000}
         tg = tg_count if (tg_count and tg_count > 0) else 4
@@ -173,22 +187,33 @@ class PieChartArea(QtCore.QObject):
             if f <= 1e-9:
                 continue
             limit = per_tg_limit.get(k, 0) * tg
-            ratio = 0.0 if limit <= 0 else min(f/limit, 1.0)
+            ratio = 0.0 if limit <= 0 else min(f / limit, 1.0)
             handles.append(Rectangle((0, 0), 1, 1, facecolor=self._colors.get(k, "#999"), edgecolor="none"))
-            labels.append(f"{k}: {int(round(f)):,}/{limit:,} Nm3/h ({ratio*100:.0f}%)")
-        if handles:
-            leg = self._ax.legend(
-                handles, labels,
-                loc="lower left",
-                bbox_to_anchor=(0.02, 0.02),
-                bbox_transform=self._fig.transFigure,
-                frameon=False,
-                ncol=1,
-                prop={"family": "monospace", "size": 8},
-                handlelength=0.8, handletextpad=0.4, borderaxespad=0.0,
-                columnspacing=0.4, labelspacing=0.2,
-            )
-            leg.set_in_layout(False)
+            labels.append(f"{k}: {int(round(f)):,}/{limit:,} Nm3/h ({ratio * 100:.0f}%)")
+
+        if not handles:
+            return
+
+        # 動態角落：左下或右下
+        if anchor == "lr":
+            bta = (0.98, 0.02)  # 右下
+            loc = "lower right"
+        else:
+            bta = (0.02, 0.02)  # 左下
+            loc = "lower left"
+
+        leg = self._ax.legend(
+            handles, labels,
+            loc=loc,
+            bbox_to_anchor=bta,
+            bbox_transform=self._fig.transFigure,
+            frameon=False,
+            ncol=1,
+            prop={"family": "monospace", "size": 8},
+            handlelength=0.8, handletextpad=0.4, borderaxespad=0.0,
+            columnspacing=0.4, labelspacing=0.2,
+        )
+        leg.set_in_layout(False)
 
     def _fit_center_text(self, text: str) -> None:
         donut_width = self._donut_width
@@ -206,9 +231,9 @@ class PieChartArea(QtCore.QObject):
             bb = t.get_window_extent(renderer=renderer)
             if bb.width <= 0.92*px_diam and bb.height <= 0.92*px_diam:
                 return
-        t.set_fontsize(7)
+        t.set_fontsize(9)  # 調整中間文字的大小
 
-    # -----------------------------up- rendering ------------------------------
+    # -----------------------------up-rendering ------------------------------
     def update_from_metrics(
         self,
         *,
@@ -220,6 +245,7 @@ class PieChartArea(QtCore.QObject):
         show_diff_ring: Optional[bool] = None,
         title: Optional[str] = None,
         tg_count: Optional[int] = None,
+        group_label: Optional[str] = None,
     ) -> None:
         """
         根據輸入的指標數據更新甜甜圈圖。
@@ -233,7 +259,7 @@ class PieChartArea(QtCore.QObject):
             show_diff_ring (bool, optional): 是否顯示外圈差額環，預設沿用內部設定。
             title (str, optional): 圖表標題。
             tg_count (int, optional): TG 數量，用於計算流量上限比例。
-
+            group_label (str, optional): 當 title = None 時，用來在中心顯示發電機名稱或積類。
         Notes:
             - 若估算與實際總發電量皆為零，將自動呼叫 render_inactive() 以顯示「未運轉 / 無資料」訊息。
             - 若 show_diff_ring=True，中央文字會同時顯示估算值、實際值與誤差。
@@ -245,13 +271,51 @@ class PieChartArea(QtCore.QObject):
             self.set_order(order)
         if show_diff_ring is not None:
             self.set_show_diff_ring(show_diff_ring)
-        if title is not None:
-            self.set_title(title)
-
-        est_total = float(sum(est_power.values()))
-        if not self._show_diff_ring:
-            disp_power = {k: (float(est_power.get(k, 0.0))/est_total)*float(real_total) if est_total > 1e-9 else 0.0 for k in self._order}
+        # ----- 標題與上緣間距 -----
+        if self._title:
+            self._ax.set_title(self._title, fontsize=11, pad=14)
+            # 有標題：留一點頭部空間
+            try:
+                self._fig.subplots_adjust(top=0.88)
+            except Exception:
+                pass
         else:
+            # 無標題：不佔用上方空間
+            self._ax.set_title("")  # 確保不殘留舊標題
+            try:
+                self._fig.subplots_adjust(top=0.97)
+            except Exception:
+                pass
+
+        # --- 新版：show_diff_ring 決定扇區用電量的算法 ---
+        #   False：NG 維持估算；COG/MG 以剩餘 (real_total - NG估算) 按占比縮放
+        #   True ：維持原本顯示估算值
+        est_total = float(sum(float(est_power.get(k, 0.0)) for k in self._order))
+        ng_est = float(est_power.get("NG", 0.0))
+        cog_est = float(est_power.get("COG", 0.0))
+        mg_est = float(est_power.get("MG", 0.0))
+
+        if not self._show_diff_ring:
+            # NG 不變
+            ng_disp = max(0.0, ng_est)
+
+            # 剩餘要分配給 COG/MG 的實際電量
+            remain_real = max(0.0, float(real_total) - ng_disp)
+
+            # 兩者估算和
+            rem_est_sum = cog_est + mg_est
+            if rem_est_sum > 1e-9:
+                cog_disp = max(0.0, remain_real * (cog_est / rem_est_sum))
+                mg_disp = max(0.0, remain_real * (mg_est / rem_est_sum))
+            else:
+                cog_disp = 0.0
+                mg_disp = 0.0
+
+            # 依 self._order 輸出
+            base = {"NG": ng_disp, "COG": cog_disp, "MG": mg_disp}
+            disp_power = {k: float(base.get(k, 0.0)) for k in self._order}
+        else:
+            # 差額環模式：扇區顯示估算 MW
             disp_power = {k: float(est_power.get(k, 0.0)) for k in self._order}
 
         # ---- 避免資料直接傳全0的資料時，呼叫繪圖而拋錯 ----
@@ -275,12 +339,19 @@ class PieChartArea(QtCore.QObject):
             colors=facecolors,
         )
 
-        # 扇區內標註各燃氣發電量
+        # 扇區標籤（兩行：燃氣名 + 發電量）
         labels = []
         for k in self._order:
             v = float(disp_power.get(k, 0.0))
-            labels.append(None if v <= 1e-9 else f"{k} : {v:.2f} MW")
-        self._draw_in_wedge_labels(wedges, labels, donut_width=self._donut_width)
+            labels.append(None if v <= 1e-9 else f"{k}\n{v:.2f} MW")
+
+        # 盡量移到扇區外，降低重疊
+        self._draw_in_wedge_labels(
+            wedges, labels,
+            donut_width=self._donut_width,
+            min_frac_inside=0.1,  # 提高到 1.0，理論上全部都會走「外側」
+            force_outside=False,
+        )
 
         # 外圈差額環（僅在 show_diff_ring=True）
         if self._show_diff_ring:
@@ -300,21 +371,45 @@ class PieChartArea(QtCore.QObject):
             )
 
         # 中央文字：依 show_diff_ring 顯示不同內容
+        grp = (group_label or "").strip()
+        if not grp:
+            grp = "TGs"
+        if title:
+            head = str(title).strip().split()[0]
+            if head.upper().startswith("TG"):
+                grp = head
         if self._show_diff_ring:
+            # 解析群組標籤：優先 group_label（若你已有）；否則從 title 首字抓 "TGx"；最後預設 "TGs"
             gap = float(real_total - est_total)
             gap_sign = "＋" if gap >= 0 else "－"
-            gap_rate = (gap/real_total*100.0) if real_total > 1e-9 else 0.0
+            gap_rate = (gap / real_total * 100.0) if real_total > 1e-9 else 0.0
             center_text = (
+                f"{grp}\n"  # ★ 新增在最上面
                 f"估算：{est_total:.2f} MW\n"
                 f"實際：{real_total:.2f} MW\n"
                 f"誤差：{gap_sign}{abs(gap):.2f} MW ({gap_rate:.1f}%)"
             )
         else:
-            center_text = f"發電量：{real_total:.2f} MW"
+            center_text = f"{grp} 發電量\n{real_total:.2f} MW"
         self._fit_center_text(center_text)
 
-        # 左下 legend：流量/上限
-        self._build_mini_flow_legend(flows=flows, tg_count=tg_count or 4)
+        # ---- 外標籤預估落點（用扇區中線角度），若左下太擠就把 legend 放到右下 ----
+        mid_angles = [0.5 * (w.theta1 + w.theta2) for w in wedges]  # 角度 0~360，0 在 x+，逆時針
+
+        def quadrant(angle_deg):
+            a = (angle_deg % 360)
+            # 我們關心下半部：左下 ~225±45、右下 ~315±45
+            if 180 <= a < 270:  # 第三象限（左下）
+                return "LL"
+            if 270 <= a < 360:  # 第四象限（右下）
+                return "LR"
+            return "OTHER"
+
+        ll_count = sum(1 for a in mid_angles if quadrant(a) == "LL")
+        lr_count = sum(1 for a in mid_angles if quadrant(a) == "LR")
+        anchor = "ll" if ll_count <= lr_count else "lr"
+
+        self._build_mini_flow_legend(flows=flows, tg_count=tg_count or 4, anchor=anchor)
 
         if self._title:
             self._ax.set_title(self._title, fontsize=11, pad=16)
