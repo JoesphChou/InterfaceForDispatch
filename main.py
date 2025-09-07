@@ -342,6 +342,55 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
         self.checkBox_5.setChecked(True)
 
+    # 1) 放在類別裡
+    def _reapply_tree_header_styles(self):
+        """
+        重新套用 tw1、tw2、tw3 與 tw*_2 的表頭樣式。
+
+        - 於特定事件（如 StyleChange、PaletteChange）時呼叫，確保樣式不會因重建或覆寫而消失。
+        - 對每個 TreeWidget 檢查 objectName，若不存在則自動補上。
+        - 根據 tw3 / tw3_2（綠藍漸層）與其餘 tw*（藍色漸層）分別套用不同 header style。
+
+        Note:
+            搭配 eventFilter 使用，可在樣式被系統覆蓋時自動修復表頭背景。
+        """
+        widgets = [self.tw1, self.tw2, self.tw3,
+                   getattr(self, "tw1_2", None),
+                   getattr(self, "tw2_2", None),
+                   getattr(self, "tw3_2", None)]
+        for w in filter(None, widgets):
+            if not w.objectName():
+                # tw1/tw2/tw3 在 UI.py 內已有 objectName；*_2 若沒有，就補一個
+                w.setObjectName(w.objectName() or w.accessibleName() or f"tw_{id(w)}")
+            if w in (self.tw3, getattr(self, "tw3_2", None)):
+                w.setStyleSheet(f"#{w.objectName()} QHeaderView::section "
+                                "{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, "
+                                "stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}")
+            else:
+                w.setStyleSheet(f"#{w.objectName()} QHeaderView::section "
+                                "{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, "
+                                "stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
+
+    # 2) 事件過來時重套（如果你的類別沒有 eventFilter，可新增）
+    def eventFilter(self, obj, e):
+        """
+        事件過濾器，用於攔截樣式相關事件並重新套用表頭樣式。
+
+        - 當事件類型為 QEvent.StyleChange 或 QEvent.PaletteChange 時，
+          會呼叫 _reapply_tree_header_styles() 重新套用漸層表頭。
+        - 其他事件則交由父類別處理。
+
+        Args:
+            obj (QObject): 發生事件的物件。
+            e (QEvent): 事件實例。
+
+        Returns:
+            bool: True 若事件已處理，否則交給父類別。
+        """
+        if e.type() in (QtCore.QEvent.Type.StyleChange, QtCore.QEvent.Type.PaletteChange):
+            self._reapply_tree_header_styles()
+        return super().eventFilter(obj, e)
+
     def _apply_chart_mode(self):
         """
         依目前 UI 狀態（checkBox_5、comboBox_3）切換圖表顯示的容器頁籤。
@@ -1511,10 +1560,14 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def tws_init(self):
         """
-        1. 初始化所有treeWidget, tableWidget
-        2. 因為treeWidget 的item 文字對齊方式，不知道為何從ui.ui 轉成UI.py 時，預設值都跑掉，所以只能先暫時在這邊設置
+        初始化 tw1、tw2、tw3 以及 tw1_2、tw2_2、tw3_2 的樹狀表格內容格式。
 
-        :return:
+        - 遍歷每個 topLevelItem，呼叫 init_tree_item() 完成對齊與配色。
+        - tw1/tw1_2 的頂層即時量使用獨立顏色，tw2/tw2_2、tw3/tw3_2 則沿用一般規則。
+        - 新增對 *_2 TreeWidget 的支援，僅套用共有欄位（0、1）的樣式。
+
+        Note:
+            此方法集中處理所有 TreeWidget 的初始化，避免後續維護時需要個別設定。
         """
 
         # 定義顏色
@@ -1547,16 +1600,20 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def init_tree_item(self, item, level, level0_color=None, level_sub_color=None):
         """
-        遞迴初始化 TreeWidgetItem 的對齊方式與文字顏色。
+        初始化單一 QTreeWidgetItem 的外觀與對齊方式。
 
-        設定方式：
-          - 頂層 (level == 0)：
-              - 第 0 欄置中，第 1、2 欄置右
-              - tw1 頂層的即時量 (第 1 欄) 設定為 self.real_time_text
-          - 次層 (level == 1)：
-              - 第 0 欄置左，第 1、2 欄置右
-          - 更深層 (level ≥2)：
-              - 第 0 欄置中，第 1、2 欄置右，且即時量 (第 1 欄) 設定為 灰色
+        - 動態依據 columnCount 設定 alignment（避免部分 tree 沒有第 2 欄時拋錯）。
+        - 針對 level=0（頂層）與 level>=2（內層）的即時量欄位，套用不同前景色。
+        - 可用於 tw1/tw2/tw3 與 *_2 版本的 TreeWidget。
+
+        Args:
+            item (QTreeWidgetItem): 目標項目。
+            level (int): 階層深度（0=頂層）。
+            level0_color (QBrush, optional): 頂層即時量文字顏色。
+            level_sub_color (QBrush, optional): 內層即時量文字顏色。
+
+        Note:
+            只會針對實際存在的欄位進行處理，確保 tw*_2 的安全性。
         """
 
         # 設定欄位對齊方式
@@ -1586,9 +1643,17 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def beautify_tree_widgets(self):
         """
-            美化 tw1, tw2, tw3 的即時量與平均值欄位，並區分不同表頭顏色
-            (2025/09/07): 同步為tw1_2, tw2_2, tw3_2
-                          套用 header / 欄寬 / 即時量欄配色 (僅 col 0、1)
+        美化 tw1、tw2、tw3、tw4 以及 tw1_2、tw2_2、tw3_2 的表頭與欄位樣式。
+
+        - 設定表頭 (QHeaderView) 的漸層背景、字型、顏色。
+        - 固定各欄位的寬度與 SectionResizeMode，避免被拉伸覆蓋。
+        - tw1/tw2/tw3 額外處理「即時量（col=1）」與「平均值（col=2）」欄位的配色。
+        - tw*_2 則僅針對 col=0、1 套用相同的 header 樣式與即時量欄位配色。
+
+        Note:
+            - 使用 ID 選擇器（#objectName QHeaderView::section）強化樣式專一性，
+              避免多處 setStyleSheet() 覆寫造成表頭背景變白。
+            - 建議所有 tw* 在 UI 設計時皆設定 objectName，以利樣式套用。
         """
 
         if not self.tw1.objectName():
