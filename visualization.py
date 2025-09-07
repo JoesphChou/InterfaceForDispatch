@@ -226,6 +226,7 @@ class PieChartArea(QtCore.QObject):
         anchor : str, optional
             "ll" 或 "lr"；預設左下 ("ll")，可視扇區標籤分佈動態切換以減少重疊。
         """
+        # from matplotlib.patches import Rectangle
         per_tg_limit = {"COG": 24000, "MG": 200000, "NG": 10000}
         tg = tg_count if (tg_count and tg_count > 0) else 4
         handles, labels = [], []
@@ -237,7 +238,7 @@ class PieChartArea(QtCore.QObject):
                 continue
             limit = per_tg_limit.get(k, 0) * tg
             ratio = 0.0 if limit <= 0 else min(f / limit, 1.0)
-            handles.append(mdates.Rectangle((0, 0), 1, 1, facecolor=self._colors.get(k, "#999"), edgecolor="none"))
+            handles.append(mpatches.Rectangle((0, 0), 1, 1, facecolor=self._colors.get(k, "#999"), edgecolor="none"))
             labels.append(f"{k}: {int(round(f)):,}/{limit:,} Nm3/h ({ratio * 100:.0f}%)")
 
         if not handles:

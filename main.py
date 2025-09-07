@@ -1204,8 +1204,13 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         v1 = result.get('current_rate_items_per_15min')
         v2 = result.get('mw_per_item')
 
-        self.label_44.setText(f"{v1:.2f} 卷/15分鐘" if v1 is not None else "— 卷/15分鐘")
-        self.label_45.setText(f"{v2:.2f} MW" if v2 is not None else "— MW")
+        if v1 and v2:
+            hsm_status_text = (
+                f"{v1:.1f} 卷/15分鐘 (約 " f"{v2:.2f} MW/卷)"
+            )
+        else:
+            hsm_status_text = f"暫停生產中"
+        self._item_at(self.tw2_2, (0,)).setText(2, hsm_status_text)
 
     def remove_target_tag_from_list3(self, item: QtWidgets.QListWidgetItem):
         """
@@ -1527,6 +1532,19 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                level0_color=(brush_top if tree == self.tw1 else None),
                                level_sub_color=brush_sub)
 
+        # (2025/09/07): 初始化tw1_2, tw2_2, tw3_2, 但僅影響共有欄位(0、1)
+        for tree in [getattr(self, "tw1_2", None), getattr(self, "tw2_2", None), getattr(self, "tw3_2", None)]:
+            if tree is None:
+                continue
+            for i in range(tree.topLevelItemCount()):
+                # tw1_2 延續 tw1 的頂層顏色，其餘同tw2/3
+                self.init_tree_item(
+                    tree.topLevelItem(i),
+                    level=0,
+                    level0_color=(brush_top if tree is getattr(self, "tw1_2", None) else None),
+                    level_sub_color=brush_sub
+                )
+
     def init_tree_item(self, item, level, level0_color=None, level_sub_color=None):
         """
         遞迴初始化 TreeWidgetItem 的對齊方式與文字顏色。
@@ -1546,14 +1564,20 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         align1 = QtCore.Qt.AlignmentFlag.AlignRight
         align2 = QtCore.Qt.AlignmentFlag.AlignRight
 
-        item.setTextAlignment(0, align0)
-        item.setTextAlignment(1, align1)
-        item.setTextAlignment(2, align2)
+        # New (2025-09-07): 僅設定實際存在的欄位，避免新的QTreeWidget 可能沒有第2欄位，而產生例外
+        max_cols = item.treeWidget().columnCount()
+        if max_cols > 0:
+            item.setTextAlignment(0, align0)
+        if max_cols > 1:
+            item.setTextAlignment(1, align1)
+        if max_cols > 2:
+            item.setTextAlignment(2, align0)
 
         # 設定顏色
-        if level == 0 and level0_color is not None:
-            item.setForeground(1, level0_color)  # 頂層即時量顏色 (僅 tw1)
-        elif level >= 2 and level_sub_color is not None:
+        if level == 0 and level0_color is not None and item.treeWidget().columnCount() > 1:
+            item.setForeground(1, level0_color) # 頂層即時量顏色
+
+        elif level >= 2 and level_sub_color is not None and item.treeWidget().columnCount() > 1:
             item.setForeground(1, level_sub_color)  # 內層即時量顏色
 
         # 遞迴處理子節點
@@ -1561,13 +1585,21 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.init_tree_item(item.child(i), level + 1, level0_color, level_sub_color)
 
     def beautify_tree_widgets(self):
-        """ 美化 tw1, tw2, tw3 的即時量與平均值欄位，並區分不同表頭顏色 """
-        self.tw1.setStyleSheet(
-            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
-        self.tw2.setStyleSheet(
-            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
-        self.tw3.setStyleSheet(
-            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}")
+        """
+            美化 tw1, tw2, tw3 的即時量與平均值欄位，並區分不同表頭顏色
+            (2025/09/07): 同步為tw1_2, tw2_2, tw3_2
+                          套用 header / 欄寬 / 即時量欄配色 (僅 col 0、1)
+        """
+
+        if not self.tw1.objectName():
+            self.tw1.setObjectName("tw1")
+        self.tw1.setStyleSheet(f"#{self.tw1.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
+        if not self.tw2.objectName():
+            self.tw2.setObjectName("tw2")
+        self.tw2.setStyleSheet(f"#{self.tw2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
+        if not self.tw3.objectName():
+            self.tw3.setObjectName("tw3")
+        self.tw3.setStyleSheet(f"#{self.tw3.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}}")
         self.tw4.setStyleSheet(
             "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #fad7a1, stop:1 #e96d71); color: white; font-weight: bold;}")
 
@@ -1585,9 +1617,35 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             widget.setColumnWidth(1, column_widths[name][1])
             widget.setColumnWidth(2, column_widths[name][2])
 
+        # (2025/09/07): *_2 的 header 與欄寬
+        if hasattr(self, "tw1_2") and self.tw1_2:
+            # 與tw1/tw2 同款 header (藍色漸層)
+            if not self.tw1_2.objectName():
+                self.tw1_2.setObjectName("tw1_2")
+            self.tw1_2.setStyleSheet(f"#{self.tw1_2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
+            self.tw1_2.setColumnWidth(0, column_widths["tw1"][0])
+            if self.tw1_2.columnCount() > 1:
+                self.tw1_2.setColumnWidth(1, column_widths["tw1"][1])
+        if hasattr(self, "tw2_2") and self.tw2_2:
+            if not self.tw2_2.objectName():
+                self.tw2_2.setObjectName("tw2_2")
+            self.tw2_2.setStyleSheet(f"#{self.tw2_2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
+            self.tw2_2.setColumnWidth(0, 130)
+            self.tw2_2.setColumnWidth(1, column_widths["tw2"][1])
+            self.tw2_2.setColumnWidth(2, 270)
+
+        if hasattr(self, "tw3_2") and self.tw3_2:
+            # 與 tw3 同款 header (綠藍漸層)
+            if not self.tw3_2.objectName():
+                self.tw3_2.setObjectName("tw3_2")
+            self.tw3_2.setStyleSheet(f"#{self.tw3_2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}}")
+            self.tw3_2.setColumnWidth(0, column_widths["tw3"][0])
+            if self.tw3_2.columnCount() > 1:
+                self.tw3_2.setColumnWidth(1, column_widths["tw3"][1])
+
         # **設定 tw4 column 寬度，確保文字完整顯示**
         self.tw4.setColumnWidth(0, 190)  # **排程時間**
-        self.tw4.setColumnWidth(1, 200)  # **狀態**
+        self.tw4.setColumnWidth(1, 210)  # **狀態**
 
         # **固定 tw4 column 寬度，防止 tw4.clear() 影響**
         self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
@@ -1601,11 +1659,22 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             for row in range(widget.topLevelItemCount()):
                 item = widget.topLevelItem(row)
                 item.setFont(1, QtGui.QFont("微軟正黑體", 12))
-                item.setBackground(1, QtGui.QBrush(QtGui.QColor("#D5F5E3")))  # 淡綠色背景
-                item.setForeground(1, QtGui.QBrush(QtGui.QColor("#145A32")))  # 深綠色文字
+                item.setBackground(1, QtGui.QBrush(QtGui.QColor(self.real_time_back)))  # 淡綠色背景
+                item.setForeground(1, QtGui.QBrush(QtGui.QColor(self.real_time_text)))  # 深綠色文字
                 item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
 
-        # **美化平均值 (column 3)**
+        # (2025/09/07) tw1_2/ tw2_2 / tw3_2 設定『即時量(col=1)』的字型/底色/字色
+        for widget in [getattr(self, "tw1_2", None), getattr(self, "tw2_2", None), getattr(self, "tw3_2", None)]:
+            if widget is None or widget.columnCount() <=1:
+                continue
+            for row in range(widget.topLevelItemCount()):
+                item = widget.topLevelItem(row)
+                item.setFont(1, QtGui.QFont("微軟正黑體", 12))
+                item.setBackground(1, QtGui.QBrush(QtGui.QColor(self.real_time_back)))
+                item.setForeground(1, QtGui.QBrush(QtGui.QColor(self.real_time_text)))
+                item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+
+        # **美化平均值 (column 3) --> 僅 tw1/2/3, *_2 不處理 (依需求)**
         for widget in tree_widgets.values():
             for row in range(widget.topLevelItemCount()):
                 item = widget.topLevelItem(row)
