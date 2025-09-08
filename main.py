@@ -51,27 +51,6 @@ class DashboardThread(QtCore.QThread):
     def run(self) -> None:
         # 只要沒有被 requestInterruption() 就持續執行
         while not self.isInterruptionRequested():
-            """
-            try:
-                if self._show_pie:
-                    c_values: pd.Series = self.main_win.dashboard_value()
-                    # 正常才發射給主執行緒
-                    if isinstance(c_values, pd.Series):
-                        self.sig_pie_series.emit(c_values)
-                if self._show_stack:
-                    df_raw = self.main_win.fetch_stack_raw_df()
-                    frames = self.main_win.make_stacked_frames(df_raw)  # 產出 by_unit / by_fuel / by_unit_detail
-                    if self._stack_mode == "unit":
-                        self.sig_stack_df.emit({"by": "unit", "df": frames["by_unit"]})
-                    else:
-                        self.sig_stack_df.emit({"by": "unit", "df": frames["by_fuel"]})
-                        #frames = self.main_win.make_stacked_frames(df_raw)
-                        #by_fuel = by_fuel[["NG", "COG", "MG"]]
-                        #self.sig_stack_df.emit({"by": "fuel", "df": by_fuel})
-            except Exception:
-                logger.error("DashboardThread 未捕捉例外", exc_info=True)
-                self.main_win.statusBar().showMessage("⚠ 更新即時值失敗，請檢查 PI Server 連線", 0)
-            """
             try:
                 c_values: pd.Series = self.main_win.dashboard_value()
                 # 正常才發射給主執行緒
@@ -92,8 +71,16 @@ class DashboardThread(QtCore.QThread):
                 by_fuel = by_fuel[["NG", "COG", "MG"]]
 
                 # 丟回 UI：你已經有 on_stack_df(payload) 插槽
-                self.sig_stack_df.emit({"by": "unit", "df": by_unit})
-                self.sig_stack_df.emit({"by": "fuel", "df": by_fuel})
+                last_ts = getattr(self, "_last_stack_ts", None)
+                new_ts = None
+                if not by_unit.empty:
+                    new_ts = by_unit.index[-1]
+                if new_ts is not None and new_ts == last_ts:
+                    pass
+                else:
+                    self._last_stack_ts = new_ts
+                    self.sig_stack_df.emit({"by": "unit", "df": by_unit})
+                    self.sig_stack_df.emit({"by": "fuel", "df": by_fuel})
 
             except Exception:
                 logger.error("DashboardThread 產生堆疊圖資料失敗", exc_info=True)
@@ -617,27 +604,28 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if by == "unit":
             # 第一次才建立，之後只 .plot(df)
             if not hasattr(self, "canvas_unit") or self.canvas_unit is None:
-                from visualization import StackedAreaCanvas
                 self.canvas_unit = StackedAreaCanvas()  # ← 不傳 mode/colors
                 self.verticalLayout_4.addWidget(self.canvas_unit)
-
+            
             # 建立後設定屬性，再重畫
             self.canvas_unit.mode = "by_unit"
-            self.canvas_unit.colors = {"TRT": "#7e57c2", "CDQ": "#26a69a", "TG": "#ef5350"}
-            cols = [c for c in ["TRT", "CDQ", "TG"] if c in df.columns]
+            self.canvas_unit.colors = {"TRT": "#7e57c2", "CDQ": "#26a69a",
+                                       "TG": "#ef5350", "TGs": "#ef5350"}
+            cand = ["TRT", "CDQ", "TG", "TGs"]
+            cols = [c for c in cand if c in df.columns]
             self.canvas_unit.plot(df[cols])
-
+   
         # —— by_fuel —— (固定順序：NG、COG、MG)
         elif by == "fuel":
             if not hasattr(self, "canvas_fuel") or self.canvas_fuel is None:
-                from visualization import StackedAreaCanvas
                 self.canvas_fuel = StackedAreaCanvas()  # ← 不傳 mode/colors
                 self.verticalLayout_3.addWidget(self.canvas_fuel)
-
+ 
             self.canvas_fuel.mode = "by_fuel"
             self.canvas_fuel.colors = {"NG": "#4E79A7", "COG": "#F28E2B", "MG": "#59A14F"}
             cols = [c for c in ["NG", "COG", "MG"] if c in df.columns]
             self.canvas_fuel.plot(df[cols])
+
 
     @log_exceptions()
     @timeit(level=20)

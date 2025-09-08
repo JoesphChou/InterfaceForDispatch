@@ -958,7 +958,6 @@ class StackedAreaCanvas(FigureCanvas):
         x_num = mdates.date2num(df.index.to_pydatetime())
         y_stack = [df[c].to_numpy(dtype=float) for c in labels]
         y_arr = np.vstack([df[c].to_numpy(dtype=float) for c in labels])
-        #y_arr = [np.asarray(s, dtype=float) for s in y_stack]
         y_cum = np.cumsum(y_arr, axis=0)  # 累積
         total = y_arr.sum(axis=0)
 
@@ -1121,12 +1120,15 @@ class StackedAreaCanvas(FigureCanvas):
         # 儲存互動資料（後續 tooltip/legend 更新用）
         self._labels = labels
         self._colors = facecolors
-        self._facecolors = facecolors
-        self._ys = y_arr.astype(float)
+        self._ys = y_arr
         self._y_cum = y_cum
+        self._total = total                 # 給 _on_mouse_move 用
+
         self._times = df.index.values.astype("datetime64[ns]")
-        self._total = total.astype(float)                   # 給 _on_mouse_move 用
-        self._total_series = self._total                    # 給 _update_bootom_legend 用
+        self._times_num = None
+        self._last_idx = -1
+
+        self._total_series = self._total
 
         # 建立紅線與時間徽章（徽章貼齊 x 軸，紅線覆蓋刻度）
         if self._vline is not None:
@@ -1267,9 +1269,9 @@ class StackedAreaCanvas(FigureCanvas):
         # 只在「索引變了」才更新圖 (節流)
         if idx == getattr(self, "_last_idx", -1):
             return
+        self._last_idx = idx
 
         xi = x_num[idx]
-
         # 畫紅線 + 時間徽章（貼齊 x 軸）
         if self._vline is not None:
             self._vline.set_xdata([xi])
