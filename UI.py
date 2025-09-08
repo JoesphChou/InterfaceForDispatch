@@ -1848,7 +1848,7 @@ class Ui_MainWindow(object):
         self.menuBar.addAction(self.menu_2.menuAction())
 
         self.retranslateUi(MainWindow)
-        self.tabWidget.setCurrentIndex(1)
+        self.tabWidget.setCurrentIndex(3)
         self.chartHost.setCurrentIndex(2)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
         MainWindow.setTabOrder(self.tabWidget, self.dateEdit)
@@ -2110,7 +2110,7 @@ class Ui_MainWindow(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), _translate("MainWindow", "NG 效益計算"))
         self.tw2_2.headerItem().setText(0, _translate("MainWindow", "常調度負載"))
         self.tw2_2.headerItem().setText(1, _translate("MainWindow", "即時量"))
-        self.tw2_2.headerItem().setText(2, _translate("MainWindow", "產線狀況"))
+        self.tw2_2.headerItem().setText(2, _translate("MainWindow", "產線即時狀況"))
         __sortingEnabled = self.tw2_2.isSortingEnabled()
         self.tw2_2.setSortingEnabled(False)
         self.tw2_2.topLevelItem(0).setText(0, _translate("MainWindow", "HSM 軋延機組"))

@@ -342,7 +342,123 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
         self.checkBox_5.setChecked(True)
 
-    # 1) 放在類別裡
+        try:
+            self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
+        except Exception:
+            pass
+
+    def update_tw2_2_column2_from_schedule(self, past_df: pd.DataFrame, current_df: pd.DataFrame,
+                                           future_df: pd.DataFrame):
+        """
+        依 scrape_schedule() 的結果，將「產線即時狀況」寫入 tw2_2 的 column 2，並建立可展開的細節。
+        製程對應：EAF(=EAFA/B 合併)、LF1-1、LF1-2。HSM 由 real_time_hsm_cycle() 填入。
+        顯示規則：
+          1) 尚未開始： Next: HH:MM 開始生產 (X分後)
+          2) 正在生產： <爐別>生產中。預計HH:MM結束。Next HH:MM 開始（若無下一爐，省略 Next）
+          3) 無排程：   目前未有排程
+        """
+        if not hasattr(self, "tw2_2") or self.tw2_2 is None or self.tw2_2.columnCount() <= 2:
+            return
+
+        MAP = {"HSM": 0, "EAF": 1, "LF1-1": 2, "LF1-2": 3}
+        now = pd.Timestamp.now()
+
+        def fmt_hhmm(ts):
+            try:
+                return pd.Timestamp(ts).strftime("%H:%M")
+            except:
+                return "--:--"
+
+        def mins_delta(ts):
+            try:
+                return int((pd.Timestamp(ts) - now).total_seconds() // 60)
+            except:
+                return None
+
+        def set_status_row(process_name: str, text: str):
+            row = MAP.get(process_name)
+            if row is None: return
+            try:
+                item = self._item_at(self.tw2_2, (row,))
+                item.setText(2, text)
+                item.setToolTip(2, text)  # 長字顯示完整
+            except Exception:
+                pass
+
+        def apply_detail_children(process_name: str, active_df: pd.DataFrame, future_df: pd.DataFrame):
+            """在對應 top-level 列下建立子節點（進行中 / 下一爐）。"""
+            row = MAP.get(process_name)
+            if row is None: return
+            try:
+                root = self._item_at(self.tw2_2, (row,))
+            except Exception:
+                return
+            # 清除舊子節點
+            while root.childCount() > 0:
+                root.removeChild(root.child(0))
+
+            # 進行中的每一爐
+            if active_df is not None and not active_df.empty:
+                for _, r in active_df.sort_values(by="開始時間").iterrows():
+                    furn = r.get("爐號", "")
+                    st, et = r.get("開始時間"), r.get("結束時間")
+                    child = make_item([f"進行中：{furn}", f"{fmt_hhmm(st)} ~ {fmt_hhmm(et)}", ""], bold=False)
+                    root.addChild(child)
+
+            # 下一爐（最近未來）
+            if future_df is not None and not future_df.empty:
+                nxt = future_df.sort_values(by="開始時間").iloc[0]
+                furn = nxt.get("爐號", "")
+                st, et = nxt.get("開始時間"), nxt.get("結束時間")
+                child = make_item([f"下一爐：{furn}", f"{fmt_hhmm(st)} ~ {fmt_hhmm(et)}", ""], italic=True)
+                root.addChild(child)
+
+        def status_for(proc_name: str):
+            if proc_name == "EAF":
+                active = current_df[current_df["製程"].isin(["EAFA", "EAFB"])].copy()
+                future = future_df[future_df["製程"].isin(["EAFA", "EAFB"])].copy()
+            else:
+                active = current_df[current_df["製程"] == proc_name].copy()
+                future = future_df[future_df["製程"] == proc_name].copy()
+
+            # 正在生產
+            if not active.empty:
+                # EAF → 顯示 A/B 爐；LF → 不顯示爐別
+                furnaces = []
+                if proc_name == "EAF":
+                    for _, r in active.iterrows():
+                        furnaces.append("A爐" if r["製程"] == "EAFA" else "B爐" if r["製程"] == "EAFB" else "")
+                    furnaces = sorted({f for f in furnaces if f})
+                    prefix = ("、".join(furnaces) + " ") if furnaces else ""
+                else:
+                    prefix = ""
+
+                end = fmt_hhmm(active["結束時間"].max())
+                nxt_txt = ""
+                if not future.empty:
+                    nxt = future.sort_values(by="開始時間").iloc[0]
+                    nxt_txt = f" Next {fmt_hhmm(nxt['開始時間'])} 開始"
+                text = f"{prefix}生產中。預計{end} 結束。" + nxt_txt
+                return text, active, future
+
+            # 尚未開始：取最近未來
+            if not future.empty:
+                nxt = future.sort_values(by="開始時間").iloc[0]
+                hhmm = fmt_hhmm(nxt["開始時間"])
+                mins = mins_delta(nxt["開始時間"])
+                tail = f" ({mins}分後)" if mins is not None else ""
+                text = f"Next: {hhmm} 開始生產{tail}"
+                return text, active, future
+
+            # 完全無排程
+            return "目前未有排程", active, future
+
+        # 寫回 tw2_2（HSM 由 real_time_hsm_cycle() 負責）
+        for proc in ("EAF", "LF1-1", "LF1-2"):
+            text, active_df, future_df = status_for(proc)
+            set_status_row(proc, text)
+            apply_detail_children(proc, active_df, future_df)
+
     def _reapply_tree_header_styles(self):
         """
         重新套用 tw1、tw2、tw3 與 tw*_2 的表頭樣式。
@@ -371,7 +487,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                 "{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, "
                                 "stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
 
-    # 2) 事件過來時重套（如果你的類別沒有 eventFilter，可新增）
     def eventFilter(self, obj, e):
         """
         事件過濾器，用於攔截樣式相關事件並重新套用表頭樣式。
@@ -1223,43 +1338,47 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def real_time_hsm_cycle(self):
         """
-        查詢近15分鐘 (可調整) 的HSM 軋延設備群的 P值，
-        並調用 data_analysis.estimate_speed_from_last_peaks 函式，
-        取得 HSM 目前生產速度每卷需量，並更新到指定的 UI 容器中。
-        PS. 如果用 kwh 反推的話，需量會比較準；用 P 值的話，生產速率和件數會比較準。(後續再考慮要不要合併使用)
-        Args:
-        Returns:
-            None
+        近 15 分鐘估算 HSM 生產狀態並顯示四階段文字：
+        暫停生產 → （偵測到第一個峰）→ 開始生產，計算速度及秏能中… → （兩峰以上且算得出數值）→ x.x 卷/15分鐘 (約 x.xx MW/卷) → （B>420s）→ 暫停生產
         """
-        # 用來查詢 HSM 歷史 p值的 tags
         tag_reference = self.tag_list.set_index('name').copy()
         hsm_tags = tag_reference.loc['9H140':'9KB33', 'tag_name'].tolist()
 
-        # 以現在時間的 Timestamp 往下取整到指定的時間粒度的邊界，並指定給et
         et = pd.Timestamp.now().floor('S')
         st = et - pd.offsets.Minute(15)
 
-        # 向PI system 查詢資料
-        df2 = pi_client.query(st=st, et=et, tags=hsm_tags,summary='AVERAGE',
-                                      interval='5s', fillna_method='ffill')
+        df2 = pi_client.query(st=st, et=et, tags=hsm_tags, summary='AVERAGE', interval='5s', fillna_method='ffill')
 
-        # 針對9h160、9h170 的 P值，從原始HSM 設備群中挑出來，提高分析生產速率和數量的準確性。
-        original_date = df2.sum(axis=1)
-        filter_date = df2.loc[:, 'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
+        power = df2.sum(axis=1)
+        pfilter = df2.loc[:, 'W511_HSM/33KV/9H_160/P':'W511_HSM/33KV/9H_170/P'].sum(axis=1)
 
-        result = estimate_speed_from_last_peaks(power= original_date, threshold=10.0,
-                                                power_filter= filter_date, smooth_window=8, prominence=1)
+        r = estimate_speed_from_last_peaks(power=power, threshold=10.0, power_filter=pfilter,
+                                           smooth_window=8, prominence=1)
 
-        v1 = result.get('current_rate_items_per_15min')
-        v2 = result.get('mw_per_item')
+        production_normal = bool(r.get('production_normal'))
+        peaks = r.get('peak_times') or []
+        A = r.get('A_sec')
+        B = r.get('B_sec')
+        curr = r.get('current_rate_items_per_15min')
+        mw_item = r.get('mw_per_item')
 
-        if v1 and v2:
-            hsm_status_text = (
-                f"{v1:.1f} 卷/15分鐘 (約 " f"{v2:.2f} MW/卷)"
-            )
+        # 4-state 決策：
+        if (not peaks) or (B is not None and B > 420) or (isinstance(curr, (int, float)) and curr == 0):
+            text = "暫停生產中"
+        elif (len(peaks) == 1) or (not production_normal) or (mw_item is None):
+            text = "HSM 開始生產，計算速度及秏能中..."
+        elif production_normal and (mw_item is not None) and (curr is not None):
+            text = f"{curr:.1f} 卷/15分鐘 (約 {mw_item:.2f} MW/卷)"
         else:
-            hsm_status_text = f"暫停生產中"
-        self._item_at(self.tw2_2, (0,)).setText(2, hsm_status_text)
+            text = "暫停生產中"
+
+        # 寫入 tw2_2：row=0 假定為 HSM，col=2 為「產線即時狀況」
+        try:
+            item = self._item_at(self.tw2_2, (0,))
+            item.setText(2, text)
+            item.setToolTip(2, text)  # 長字顯示完整
+        except Exception:
+            pass
 
     def remove_target_tag_from_list3(self, item: QtWidgets.QListWidgetItem):
         """
@@ -2140,6 +2259,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # **確保所有節點展開**
         self.tw4.expandAll()  # ✅ 確保所有製程展開
         self.statusBar().showMessage(f"排程已更新({res.fetched_at:%H:%M:%S})")
+
+        self.update_tw2_2_column2_from_schedule(past_df, current_df, future_df)
 
     def predict_demand(self):
         """
