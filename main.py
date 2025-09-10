@@ -333,13 +333,15 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
         except Exception:
             pass
+        # 放在 __init__ 或類別屬性處：初始化重入旗標
+        self._styling_in_progress = False
 
     def update_tw2_2_column2_from_schedule(self, past_df: pd.DataFrame, current_df: pd.DataFrame,
                                            future_df: pd.DataFrame):
         """
-        依 scrape_schedule() 的結果，將「產線即時狀況」寫入 tw2_2 的 column 2，並建立可展開的細節。
+        依 scrape_schedule() 的結果，將「產線即時狀況」寫入 tw2_2 的 column 2。
         製程對應：EAF(=EAFA/B 合併)、LF1-1、LF1-2。HSM 由 real_time_hsm_cycle() 填入。
-        顯示規則：
+        規則：
           1) 尚未開始： Next: HH:MM 開始生產 (X分後)
           2) 正在生產： <爐別>生產中。預計HH:MM結束。Next HH:MM 開始（若無下一爐，省略 Next）
           3) 無排程：   目前未有排程
@@ -368,37 +370,13 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             try:
                 item = self._item_at(self.tw2_2, (row,))
                 item.setText(2, text)
-                item.setToolTip(2, text)  # 長字顯示完整
+                item.setToolTip(2, text)  # 長字→滑鼠提示
+                # (第 2 點) 這裡順手統一把 column 2 字體縮小一點
+                f = item.font(2)        # 取得 column 2 目前字型
+                f.setPointSize(10)      # 調整 column 字體大小
+                item.setFont(2, f)      # 套用新的字型
             except Exception:
                 pass
-
-        def apply_detail_children(process_name: str, active_df: pd.DataFrame, future_df: pd.DataFrame):
-            """在對應 top-level 列下建立子節點（進行中 / 下一爐）。"""
-            row = MAP.get(process_name)
-            if row is None: return
-            try:
-                root = self._item_at(self.tw2_2, (row,))
-            except Exception:
-                return
-            # 清除舊子節點
-            while root.childCount() > 0:
-                root.removeChild(root.child(0))
-
-            # 進行中的每一爐
-            if active_df is not None and not active_df.empty:
-                for _, r in active_df.sort_values(by="開始時間").iterrows():
-                    furn = r.get("爐號", "")
-                    st, et = r.get("開始時間"), r.get("結束時間")
-                    child = make_item([f"進行中：{furn}", f"{fmt_hhmm(st)} ~ {fmt_hhmm(et)}", ""], bold=False)
-                    root.addChild(child)
-
-            # 下一爐（最近未來）
-            if future_df is not None and not future_df.empty:
-                nxt = future_df.sort_values(by="開始時間").iloc[0]
-                furn = nxt.get("爐號", "")
-                st, et = nxt.get("開始時間"), nxt.get("結束時間")
-                child = make_item([f"下一爐：{furn}", f"{fmt_hhmm(st)} ~ {fmt_hhmm(et)}", ""], italic=True)
-                root.addChild(child)
 
         def status_for(proc_name: str):
             if proc_name == "EAF":
@@ -410,7 +388,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
             # 正在生產
             if not active.empty:
-                # EAF → 顯示 A/B 爐；LF → 不顯示爐別
                 furnaces = []
                 if proc_name == "EAF":
                     for _, r in active.iterrows():
@@ -419,78 +396,71 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     prefix = ("、".join(furnaces) + " ") if furnaces else ""
                 else:
                     prefix = ""
-
                 end = fmt_hhmm(active["結束時間"].max())
                 nxt_txt = ""
                 if not future.empty:
                     nxt = future.sort_values(by="開始時間").iloc[0]
                     nxt_txt = f" Next {fmt_hhmm(nxt['開始時間'])} 開始"
-                text = f"{prefix}生產中。預計{end} 結束。" + nxt_txt
-                return text, active, future
+                return f"{prefix}生產中。預計{end} 結束。" + nxt_txt
 
-            # 尚未開始：取最近未來
+            # 尚未開始（最近未來）
             if not future.empty:
                 nxt = future.sort_values(by="開始時間").iloc[0]
                 hhmm = fmt_hhmm(nxt["開始時間"])
                 mins = mins_delta(nxt["開始時間"])
                 tail = f" ({mins}分後)" if mins is not None else ""
-                text = f"Next: {hhmm} 開始生產{tail}"
-                return text, active, future
+                return f"Next: {hhmm} 開始生產{tail}"
 
             # 完全無排程
-            return "目前未有排程", active, future
+            return "目前未有排程"
 
-        # 寫回 tw2_2（HSM 由 real_time_hsm_cycle() 負責）
+        # 寫回 tw2_2（HSM 仍由 real_time_hsm_cycle() 處理）
         for proc in ("EAF", "LF1-1", "LF1-2"):
-            text, active_df, future_df = status_for(proc)
-            set_status_row(proc, text)
-            apply_detail_children(proc, active_df, future_df)
+            set_status_row(proc, status_for(proc))
 
     def _reapply_tree_header_styles(self):
-        """
-        重新套用 tw1、tw2、tw3 與 tw*_2 的表頭樣式。
+        if getattr(self, "_styling_in_progress", False):
+            return
+        self._styling_in_progress = True
+        try:
+            widgets = [getattr(self, n, None) for n in ("tw1", "tw2", "tw3", "tw4", "tw1_2", "tw2_2", "tw3_2")]
+            for w in widgets:
+                if w is None:
+                    continue
+                try:
+                    h = w.header()
+                    if w in (getattr(self, "tw3", None), getattr(self, "tw3_2", None)):
+                        h.setStyleSheet(
+                            "QHeaderView::section { "
+                            "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); "
+                            "color: white; font-weight: bold; }"
+                        )
+                    else:
+                        h.setStyleSheet(
+                            "QHeaderView::section { "
+                            "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); "
+                            "color: white; font-weight: bold; }"
+                        )
 
-        - 於特定事件（如 StyleChange、PaletteChange）時呼叫，確保樣式不會因重建或覆寫而消失。
-        - 對每個 TreeWidget 檢查 objectName，若不存在則自動補上。
-        - 根據 tw3 / tw3_2（綠藍漸層）與其餘 tw*（藍色漸層）分別套用不同 header style。
-
-        Note:
-            搭配 eventFilter 使用，可在樣式被系統覆蓋時自動修復表頭背景。
-        """
-        widgets = [self.tw1, self.tw2, self.tw3,
-                   getattr(self, "tw1_2", None),
-                   getattr(self, "tw2_2", None),
-                   getattr(self, "tw3_2", None)]
-        for w in filter(None, widgets):
-            if not w.objectName():
-                # tw1/tw2/tw3 在 UI.py 內已有 objectName；*_2 若沒有，就補一個
-                w.setObjectName(w.objectName() or w.accessibleName() or f"tw_{id(w)}")
-            if w in (self.tw3, getattr(self, "tw3_2", None)):
-                w.setStyleSheet(f"#{w.objectName()} QHeaderView::section "
-                                "{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, "
-                                "stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}")
-            else:
-                w.setStyleSheet(f"#{w.objectName()} QHeaderView::section "
-                                "{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, "
-                                "stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}")
+                    # (可選) 若你看到 header 字級被改動，這裡鎖定字級，例如 10pt
+                    hf = h.font()
+                    hf.setPointSize(11)  # 你的既有字級是多少就填多少
+                    h.setFont(hf)
+                except Exception:
+                    pass
+        finally:
+            self._styling_in_progress = False
 
     def eventFilter(self, obj, e):
-        """
-        事件過濾器，用於攔截樣式相關事件並重新套用表頭樣式。
-
-        - 當事件類型為 QEvent.StyleChange 或 QEvent.PaletteChange 時，
-          會呼叫 _reapply_tree_header_styles() 重新套用漸層表頭。
-        - 其他事件則交由父類別處理。
-
-        Args:
-            obj (QObject): 發生事件的物件。
-            e (QEvent): 事件實例。
-
-        Returns:
-            bool: True 若事件已處理，否則交給父類別。
-        """
-        if e.type() in (QtCore.QEvent.Type.StyleChange, QtCore.QEvent.Type.PaletteChange):
-            self._reapply_tree_header_styles()
+        if isinstance(obj, QtWidgets.QHeaderView):
+            if e.type() in (
+                    QtCore.QEvent.Type.StyleChange,
+                    QtCore.QEvent.Type.PaletteChange,
+                    QtCore.QEvent.Type.PolishRequest,
+                    QtCore.QEvent.Type.Show,
+            ):
+                if not getattr(self, "_styling_in_progress", False):
+                    QtCore.QTimer.singleShot(0, self._reapply_tree_header_styles)
         return super().eventFilter(obj, e)
 
     def _apply_chart_mode(self):
@@ -1365,6 +1335,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             item = self._item_at(self.tw2_2, (0,))
             item.setText(2, text)
             item.setToolTip(2, text)  # 長字顯示完整
+
+            font = item.font(2)       # 取得第二欄目前字型
+            font.setPointSize(9)      # 調整字體大小
+            item.setFont(2, font)     # 套用新的字型
         except Exception:
             pass
 
@@ -1705,37 +1679,38 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     level_sub_color=brush_sub
                 )
 
-    def init_tree_item(self, item, level, level0_color=None, level_sub_color=None):
+    def init_tree_item(self, item, level, level0_color=None, level_sub_color=None, ):
         """
-        初始化單一 QTreeWidgetItem 的外觀與對齊方式。
+        建立並初始化一個 QTreeWidgetItem，並依照指定的 widget 與 column 規則套用字型與對齊方式。
 
-        - 動態依據 columnCount 設定 alignment（避免部分 tree 沒有第 2 欄時拋錯）。
-        - 針對 level=0（頂層）與 level>=2（內層）的即時量欄位，套用不同前景色。
-        - 可用於 tw1/tw2/tw3 與 *_2 版本的 TreeWidget。
-
-        Args:
-            item (QTreeWidgetItem): 目標項目。
-            level (int): 階層深度（0=頂層）。
-            level0_color (QBrush, optional): 頂層即時量文字顏色。
-            level_sub_color (QBrush, optional): 內層即時量文字顏色。
-
-        Note:
-            只會針對實際存在的欄位進行處理，確保 tw*_2 的安全性。
+        規則：
+        - 所有欄位都會套用預設字型大小。
+        - tw1 ~ tw3：
+            - column 1、2 → 文字靠右、垂直置中。
+        - tw*_2：
+            - column 1 → 文字靠右、垂直置中。
+            - column 2 → 文字置中。
+        - 其它 widget → 全部置中。
         """
+        tw = item.treeWidget()
+        name = tw.objectName() or ""  # 以 objectName 辨識 tw1_2 / tw2_2 / tw3_2
+        is_secondary = name in ("tw1_2", "tw2_2", "tw3_2")
 
         # 設定欄位對齊方式
         align0 = QtCore.Qt.AlignmentFlag.AlignCenter if level != 1 else QtCore.Qt.AlignmentFlag.AlignLeft
         align1 = QtCore.Qt.AlignmentFlag.AlignRight
-        align2 = QtCore.Qt.AlignmentFlag.AlignRight
+        align_2 = (
+            QtCore.Qt.AlignmentFlag.AlignCenter if is_secondary
+            else QtCore.Qt.AlignmentFlag.AlignRight
+        )
 
-        # New (2025-09-07): 僅設定實際存在的欄位，避免新的QTreeWidget 可能沒有第2欄位，而產生例外
-        max_cols = item.treeWidget().columnCount()
+        max_cols = tw.columnCount()
         if max_cols > 0:
             item.setTextAlignment(0, align0)
         if max_cols > 1:
             item.setTextAlignment(1, align1)
         if max_cols > 2:
-            item.setTextAlignment(2, align0)
+            item.setTextAlignment(2, align_2)
 
         # 設定顏色
         if level == 0 and level0_color is not None and item.treeWidget().columnCount() > 1:
@@ -1750,110 +1725,143 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def beautify_tree_widgets(self):
         """
-        美化 tw1、tw2、tw3、tw4 以及 tw1_2、tw2_2、tw3_2 的表頭與欄位樣式。
+        統一美化 tw1, tw2, tw3, tw4 與 tw1_2, tw2_2, tw3_2 的表頭樣式與欄位寬度。
 
-        - 設定表頭 (QHeaderView) 的漸層背景、字型、顏色。
-        - 固定各欄位的寬度與 SectionResizeMode，避免被拉伸覆蓋。
-        - tw1/tw2/tw3 額外處理「即時量（col=1）」與「平均值（col=2）」欄位的配色。
-        - tw*_2 則僅針對 col=0、1 套用相同的 header 樣式與即時量欄位配色。
+        - 一律只針對 QHeaderView 設定樣式，避免與 widget 級別樣式互相覆蓋。
+        - 顏色主題：
+            * 藍紫：tw1, tw2, tw1_2, tw2_2
+            * 綠藍：tw3, tw3_2
+        - 欄寬維持你目前的設定：
+            * tw1/tw2/tw3: [175, 90, 65]
+            * tw4: col0=190, col1=210 並將 section resize 設為 Fixed
+            * tw1_2/tw3_2：套用對應 tw1/tw3 的 col0、col1（僅共通欄）
+            * tw2_2：col0=130、col1=沿用 tw2 的第二欄寬、col2=270
+        - 表頭字級統一（例如 11pt；若你想回到舊字級，改 header_point_sz 即可）。
 
-        Note:
-            - 使用 ID 選擇器（#objectName QHeaderView::section）強化樣式專一性，
-              避免多處 setStyleSheet() 覆寫造成表頭背景變白。
-            - 建議所有 tw* 在 UI 設計時皆設定 objectName，以利樣式套用。
+        注意：
+        本函式不處理「即時量(col=1) / 平均值(col=2)」的 item 顏色；請沿用你在 init_tree_item() /
+        產樹流程中對每個 QTreeWidgetItem 的 setForeground/setBackground，避免重複設定。
         """
 
-        if not self.tw1.objectName():
-            self.tw1.setObjectName("tw1")
-        self.tw1.setStyleSheet(f"#{self.tw1.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
-        if not self.tw2.objectName():
-            self.tw2.setObjectName("tw2")
-        self.tw2.setStyleSheet(f"#{self.tw2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
-        if not self.tw3.objectName():
-            self.tw3.setObjectName("tw3")
-        self.tw3.setStyleSheet(f"#{self.tw3.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}}")
-        self.tw4.setStyleSheet(
-            "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #fad7a1, stop:1 #e96d71); color: white; font-weight: bold;}")
+        # ---- 漸層樣式（header 專用）----
+        style_blue = (
+            "QHeaderView::section { "
+            "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); "
+            "color: white; font-weight: bold; }"
+        )
+        style_green = (
+            "QHeaderView::section { "
+            "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); "
+            "color: white; font-weight: bold; }"
+        )
 
-        column_widths = {
-            "tw1": [175, 90, 65],
-            "tw2": [175, 90, 65],
-            "tw3": [175, 90, 65]
-        }
+        header_point_sz = 11  # 與你目前檔案相符的字級；需要微調可改這個數字
 
-        tree_widgets = {"tw1": self.tw1, "tw2": self.tw2, "tw3": self.tw3}
+        # ---- 依名稱套主題並統一字級 ----
+        for name in ("tw1", "tw2", "tw1_2", "tw2_2"):
+            w = getattr(self, name, None)
+            if not w:
+                continue
+            h = w.header()
+            h.setStyleSheet(style_blue)
+            hf = h.font()
+            hf.setPointSize(header_point_sz)
+            h.setFont(hf)
 
-        for name, widget in tree_widgets.items():
-            # 設定 Column 寬度
-            widget.setColumnWidth(0, column_widths[name][0])
-            widget.setColumnWidth(1, column_widths[name][1])
-            widget.setColumnWidth(2, column_widths[name][2])
+        for name in ("tw3", "tw3_2"):
+            w = getattr(self, name, None)
+            if not w:
+                continue
+            h = w.header()
+            h.setStyleSheet(style_green)
+            hf = h.font()
+            hf.setPointSize(header_point_sz)
+            h.setFont(hf)
 
-        # (2025/09/07): *_2 的 header 與欄寬
-        if hasattr(self, "tw1_2") and self.tw1_2:
-            # 與tw1/tw2 同款 header (藍色漸層)
-            if not self.tw1_2.objectName():
-                self.tw1_2.setObjectName("tw1_2")
-            self.tw1_2.setStyleSheet(f"#{self.tw1_2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
+        # ---- 欄寬 ----
+        column_widths = {"tw1": [175, 90, 65], "tw2": [175, 90, 65], "tw3": [175, 90, 65]}
+
+        for name in ("tw1", "tw2", "tw3"):
+            w = getattr(self, name, None)
+            if not w:
+                continue
+            w.setColumnWidth(0, column_widths[name][0])
+            w.setColumnWidth(1, column_widths[name][1])
+            w.setColumnWidth(2, column_widths[name][2])
+
+        # 確保 tw4 有 objectName（非必要，但有助於未來 CSS 定位）
+        if not self.tw4.objectName():
+            self.tw4.setObjectName("tw4")
+
+        # 將 tw4 表頭改成橘粉漸層（與先前一致）
+        self.tw4.header().setStyleSheet(
+            "QHeaderView::section { "
+            "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #fad7a1, stop:1 #e96d71); "
+            "color: white; font-weight: bold; }"
+        )
+        hf = self.tw4.header().font()
+        hf.setPointSize(header_point_sz)
+        self.tw4.header().setFont(hf)
+
+        # tw4 欄寬與固定
+        if getattr(self, "tw4", None):
+            self.tw4.setColumnWidth(0, 190)
+            self.tw4.setColumnWidth(1, 210)  # 你原本也有 200 或 210，統一成 210 可視需求調
+            self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
+            self.tw4.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Fixed)
+
+        # tw1_2 / tw3_2：對應 tw1 / tw3 的前兩欄欄寬（僅共通欄）
+        if getattr(self, "tw1_2", None):
             self.tw1_2.setColumnWidth(0, column_widths["tw1"][0])
-            if self.tw1_2.columnCount() > 1:
-                self.tw1_2.setColumnWidth(1, column_widths["tw1"][1])
-        if hasattr(self, "tw2_2") and self.tw2_2:
-            if not self.tw2_2.objectName():
-                self.tw2_2.setObjectName("tw2_2")
-            self.tw2_2.setStyleSheet(f"#{self.tw2_2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #52e5e7, stop:1 #130cb7); color: white; font-weight: bold;}}")
+            self.tw1_2.setColumnWidth(1, column_widths["tw1"][1])
+
+        if getattr(self, "tw3_2", None):
+            self.tw3_2.setColumnWidth(0, column_widths["tw3"][0])
+            self.tw3_2.setColumnWidth(1, column_widths["tw3"][1])
+
+        # tw2_2：你先前指定的 0/1/2 欄寬（第 1 欄沿用 tw2 的寬度）
+        if getattr(self, "tw2_2", None):
             self.tw2_2.setColumnWidth(0, 130)
             self.tw2_2.setColumnWidth(1, column_widths["tw2"][1])
-            self.tw2_2.setColumnWidth(2, 270)
-
-        if hasattr(self, "tw3_2") and self.tw3_2:
-            # 與 tw3 同款 header (綠藍漸層)
-            if not self.tw3_2.objectName():
-                self.tw3_2.setObjectName("tw3_2")
-            self.tw3_2.setStyleSheet(f"#{self.tw3_2.objectName()} QHeaderView::section {{ background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #0e6499, stop:1 #9fdeab); color: white; font-weight: bold;}}")
-            self.tw3_2.setColumnWidth(0, column_widths["tw3"][0])
-            if self.tw3_2.columnCount() > 1:
-                self.tw3_2.setColumnWidth(1, column_widths["tw3"][1])
-
-        # **設定 tw4 column 寬度，確保文字完整顯示**
-        self.tw4.setColumnWidth(0, 190)  # **排程時間**
-        self.tw4.setColumnWidth(1, 210)  # **狀態**
-
-        # **固定 tw4 column 寬度，防止 tw4.clear() 影響**
-        self.tw4.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Fixed)
-        self.tw4.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Fixed)
+            if self.tw2_2.columnCount() > 2:
+                self.tw2_2.setColumnWidth(2, 270)
 
         # **確保 tw4.clear() 不影響 header**
         self.tw4.setHeaderLabels(["製程種類 & 排程時間", "狀態"])
 
-        # **美化tw1,tw2,tw3 即時量 (column 2)**
-        for widget in tree_widgets.values():
-            for row in range(widget.topLevelItemCount()):
-                item = widget.topLevelItem(row)
-                item.setFont(1, QtGui.QFont("微軟正黑體", 12))
-                item.setBackground(1, QtGui.QBrush(QtGui.QColor(self.real_time_back)))  # 淡綠色背景
-                item.setForeground(1, QtGui.QBrush(QtGui.QColor(self.real_time_text)))  # 深綠色文字
-                item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-
-        # (2025/09/07) tw1_2/ tw2_2 / tw3_2 設定『即時量(col=1)』的字型/底色/字色
-        for widget in [getattr(self, "tw1_2", None), getattr(self, "tw2_2", None), getattr(self, "tw3_2", None)]:
-            if widget is None or widget.columnCount() <=1:
+        # tw1/tw2/tw3：col=1(即時量) + col=2(平均值)
+        for widget in [self.tw1, self.tw2, self.tw3]:
+            if widget is None:
                 continue
-            for row in range(widget.topLevelItemCount()):
-                item = widget.topLevelItem(row)
+            it = QtWidgets.QTreeWidgetItemIterator(widget)
+            while it.value():
+                item = it.value()
+                # col=1 即時量
+                if widget.columnCount() > 1:
+                    item.setFont(1, QtGui.QFont("微軟正黑體", 12))
+                    item.setBackground(1, QtGui.QBrush(QtGui.QColor(self.real_time_back)))
+                    item.setForeground(1, QtGui.QBrush(QtGui.QColor(self.real_time_text)))
+                    item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
+                # col=2 平均值
+                if widget.columnCount() > 2:
+                    item.setFont(2, QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold))
+                    item.setBackground(2, QtGui.QBrush(QtGui.QColor("#D6EAF8")))
+                    item.setForeground(2, QtGui.QBrush(QtGui.QColor("#154360")))
+                    item.setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+                it += 1
+
+        # tw*_2：僅 col=1（即時量）配色；col=2 留給你的排程/字級 9 pt 流程處理
+        for widget in [getattr(self, "tw1_2", None), getattr(self, "tw2_2", None), getattr(self, "tw3_2", None)]:
+            if widget is None or widget.columnCount() <= 1:
+                continue
+            it = QtWidgets.QTreeWidgetItemIterator(widget)
+            while it.value():
+                item = it.value()
                 item.setFont(1, QtGui.QFont("微軟正黑體", 12))
                 item.setBackground(1, QtGui.QBrush(QtGui.QColor(self.real_time_back)))
                 item.setForeground(1, QtGui.QBrush(QtGui.QColor(self.real_time_text)))
                 item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignRight)
-
-        # **美化平均值 (column 3) --> 僅 tw1/2/3, *_2 不處理 (依需求)**
-        for widget in tree_widgets.values():
-            for row in range(widget.topLevelItemCount()):
-                item = widget.topLevelItem(row)
-                item.setFont(2, QtGui.QFont("微軟正黑體", 12, QtGui.QFont.Weight.Bold))
-                item.setBackground(2, QtGui.QBrush(QtGui.QColor("#D6EAF8")))  # 淡藍色背景
-                item.setForeground(2, QtGui.QBrush(QtGui.QColor("#154360")))  # 深藍色文字
-                item.setTextAlignment(2, QtCore.Qt.AlignmentFlag.AlignRight)
+                it += 1
 
         # **針對 tw1 & tw3 (TGs, TG1~TG4) 的即時量，讓它能隨展開事件改變顏色**
         self.tw1.itemExpanded.connect(self.tw1_expanded_event)
@@ -1865,7 +1873,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """ 使用 setStyleSheet() 統一美化 tableWidget_3 的表頭 """
 
         # **透過 setStyleSheet() 設定表頭統一風格**
-        #self.tableWidget_3.setStyleSheet("QHeaderView::section { background-color: #eff9dd; color: black; font-weight: bold; }")
         self.tableWidget_3.setStyleSheet(
             "QHeaderView::section { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #FF5D5D, stop:1 #FFB648); color: white; font-weight: bold;}")
 
@@ -1894,7 +1901,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         item.setForeground((QtGui.QBrush(QtGui.QColor('white'))))   # 設定文字顏色為白色
 
         self.tableWidget_3.setItem(2, 0, make_item('太陽能', bold=False, bg_color='#f6ffc6',font_size=12))
-        self.tableWidget_3.setItem(3, 0, make_item('台電供電量\n(需量)', bold=False, font_size=8.5))
+        self.tableWidget_3.setItem(3, 0, make_item('台電供電量\n(需量)', bold=False, font_size=8))
 
         # **設定欄位樣式，使其與 tw1, tw2, tw3 保持一致**
         for row in range(self.tableWidget_3.rowCount()):
@@ -2935,17 +2942,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.label_10.setStyleSheet("color:blue")
         self.tableWidget.resizeColumnsToContents()  # 7
         self.tableWidget.resizeRowsToContents()     # 7
-        """
-        # 以下是用來摸索調整table widget 大小方式。
-        width = self.tableWidget.horizontalHeader().length()    # horizontal 所有cell 的長度
-        width += self.tableWidget.frameWidth()*2                # table widget 兩邊框架寬度
-        if self.tableWidget.verticalHeader().isVisible():
-            width += self.tableWidget.verticalHeader().width()          # row 名稱的寬度
-        if self.tableWidget.verticalHeader().isVisible():
-            width += self.tableWidget.verticalScrollBar().width()       # 垂直scroller 寬度
-        # self.tableWidget.setFixedWidth(width)
-        # self.tableWidget.setGeometry(550,590,width,110)
-        """
 
     def calculate_demand(self, e_date_time):
         """

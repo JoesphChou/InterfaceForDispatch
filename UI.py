@@ -1635,7 +1635,7 @@ class Ui_MainWindow(object):
         self.gen_by_fuel_of_history = QtWidgets.QWidget()
         self.gen_by_fuel_of_history.setObjectName("gen_by_fuel_of_history")
         self.verticalLayoutWidget_5 = QtWidgets.QWidget(parent=self.gen_by_fuel_of_history)
-        self.verticalLayoutWidget_5.setGeometry(QtCore.QRect(0, 0, 411, 311))
+        self.verticalLayoutWidget_5.setGeometry(QtCore.QRect(0, 0, 581, 311))
         self.verticalLayoutWidget_5.setObjectName("verticalLayoutWidget_5")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.verticalLayoutWidget_5)
         self.verticalLayout_3.setContentsMargins(0, 0, 0, 0)
@@ -1849,7 +1849,7 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
         self.tabWidget.setCurrentIndex(3)
-        self.chartHost.setCurrentIndex(2)
+        self.chartHost.setCurrentIndex(1)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
         MainWindow.setTabOrder(self.tabWidget, self.dateEdit)
         MainWindow.setTabOrder(self.dateEdit, self.tableWidget_2)
