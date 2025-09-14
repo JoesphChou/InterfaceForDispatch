@@ -281,6 +281,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.pie: Optional["PieChartArea"] = None       # 和 pie chart 有關
         self.loader = LoadingOverlay(self)  # 彈出半透明loading 的
 
+        self.radioButton_5.setChecked(True)  # 支援選擇 KWH 或 P 值的查詢方式 (這個項目要先做)
         self.dashboard_value()
         # 建立趨勢圖元件並加入版面配置
         self.trend_chart = TrendChartCanvas(self)
@@ -295,7 +296,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
         self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
         self.listWidget_3.itemDoubleClicked.connect(self.remove_target_tag_from_list3)
-        self.radioButton_5.setChecked(True)
+        #self.radioButton_5.setChecked(True)
 
         # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
         current_datetime = QtCore.QDateTime.currentDateTime()
@@ -535,7 +536,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         接收背景執行緒（DashboardThread）送回的堆疊圖資料，負責在主執行緒建立/更新圖表。
 
-        Parameters
+        參數
         ----------
         payload : dict
             必含鍵值：
@@ -2259,33 +2260,77 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def predict_demand(self):
         """
-        計算預測的demand。目前預測需量的計算方式為，
-        目前週期的累計需量值 + 近180秒的平均需量 / 180 x 該剩期剩餘秒數
-        :return:
+        預估本 15 分鐘週期完成時的「最終需量」（即將來到的區段平均功率）。
+
+        概念
+        ----
+        - 以目前週期已經累積的需量，加上「近 300 秒的平均需量」外推至本週期剩餘秒數的貢獻量：
+          預測 = 目前累積 + (最近300秒平均 / 300) * 剩餘秒數
+
+        時間處理
+        --------
+        - 週期起訖：st = now().floor('15T')、et = st + 15 分鐘。
+        - 「現在」一律取整秒 pd.Timestamp.now().floor('s')，避免小數秒造成邏輯偏差。
+        - 近 300 秒時間窗：[now-300s, now)。
+
+        模式
+        ----
+        - kWh 模式（radioButton_5 勾選）：
+            * 週期內累積量：直接查詢 kWh tag（1510/1520），相加後乘以 4 得到「目前週期至今」的需量累積。
+            * 近窗平均：對同兩 tag 在最近 300 秒區間相加乘 4，取其平均後按「剩餘秒數」線性外推。
+        - P 模式（radioButton_5 未勾選）：
+            * 以 summary="AVERAGE"、秒級 interval 讀取功率，先 clip(lower=0)，對未來時間造成的 NaN 以 0 補，
+              再 resample('15T').mean() 將目前週期的均值視為「已累積」，並用近 300 秒平均推估剩餘貢獻。
+
+        回傳
+        ----
+        float
+            本 15 分鐘區段的預測需量（四捨五入到小數點後 2 位）。
+
+        注意
+        ----
+        - 本方法假設「近 300 秒的平均」可代表剩餘時間的用電行為（線性外推）。
+        - P 模式會把負功率視為 0；對未來造成的 NaN 先以 0 補齊再進行平均。
         """
+        time_window = 300                   # 滾動平均值的時間窗長度
         st = pd.Timestamp.now().floor('15T')    # 目前週期的起始時間
         et = st + pd.offsets.Minute(15)         # 目前週期的結束時間
 
-        back_300s_from_now = pd.Timestamp.now() - pd.offsets.Second(300)    # 300秒前的時間點 (180->300)
-        diff_between_now_and_et = (et - pd.Timestamp.now()).total_seconds()   # 此週期剩餘時間
+        # now() 必須把當前時間「往下取整的整秒」，避免後續計算出問題。
+        back_300s_from_now = pd.Timestamp.now().floor('s') - pd.offsets.Second(time_window)
+        diff_between_now_and_et = (et - pd.Timestamp.now().floor('s')).total_seconds()  # 此週期剩餘時間
 
-        tags = self.tag_list.loc[0:1,'tag_name2']
-        tags.index = self.tag_list.loc[0:1,'name']
-        name_list = tags.loc[:].dropna().tolist()
+        # 根據radioButton_5，判斷用kwh 或p 計算需量。
+        if self.radioButton_5.isChecked():
+            tags=('W511_MS1/161KV/1510/kwh11', 'W511_MS1/161KV/1520/kwh11')
+            # 查詢目前週期的累計需量值
+            query_result = pi_client.query(st=st, et=et, tags=tags)
+            current_accumulation = query_result.sum(axis=1) * 4
 
-        # 查詢目前週期的累計需量值
-        query_result = pi_client.query(st=st, et=et, tags=name_list)
-        current_accumulation = query_result.sum(axis = 1) * 4
+            # 查近time_window秒的平均需量，並計算出剩餘時間可能會增加的需量累計值
+            result = pi_client.query(st=back_300s_from_now, et=back_300s_from_now + pd.offsets.Second(time_window),
+                                     tags=tags)
+            result = result.sum(axis=1) * 4   # MWH * 60min / 15min = MW/15min
+            weight = 1 / time_window * diff_between_now_and_et
+            predict = result * weight
+            demand = round((current_accumulation[0] + predict[0]), 2)
+        else:
+            tags=('W511_MS1/161KV/1510/P', 'W511_MS1/161KV/1520/P')
+            query_result = pi_client.query(st=st, et=et, tags=tags, summary="AVERAGE", interval= f'3s')
+            query_result = query_result.clip(lower=0)
+            # 考慮部份時間範圍屬於未來時間而有nan值，所以將必須先將nan值轉為0。
+            query_result = query_result.fillna(0).resample('15T').mean()
+            current_accumulation = query_result.sum(axis=1)
 
-
-        # 查近180秒的平均需量，並計算出剩餘時間可能會增加的需量累計值
-        result = pi_client.query(st=back_300s_from_now, et=back_300s_from_now + pd.offsets.Second(180),
-                            tags=name_list)
-        weight2 = 4 / 180 * diff_between_now_and_et
-        predict = result.sum(axis=1) * weight2
-
-        # 取四捨五入
-        demand = round((current_accumulation[0] + predict[0]),2)
+            # 查近time_window秒的平均需量，並計算出剩餘時間可能會增加的需量累計值
+            result = pi_client.query(st=back_300s_from_now,
+                                     et=back_300s_from_now + pd.offsets.Second(time_window),
+                                     tags=tags, summary="AVERAGE", interval=f'3s')
+            result = result.clip(lower=0).mean()        # (MW/time_window)
+            result = result.sum() * time_window / 900   # MW/time_window * time_window / 15min = MW/15min
+            weight = 1 / time_window * diff_between_now_and_et
+            predict = result * weight
+            demand = round((current_accumulation[0] + predict),2)
         return demand
 
     def date_edit3_user_change(self, new_date:QtCore.QDate):
@@ -2824,35 +2869,59 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def query_demand(self):
         """
-        此函式的功能為查詢指定日期的週期需量。
-        1. j -> Column    i -> row
-        2. item1 用來設定和起始時間有關的cell；item2 用來設定和需量有關cell。
-        3. 設定item 內容的字體大小
-        4. 將item 內容置中
-        5. 判斷raw_data 中是否有nan 值，如果是，則將該item 內容設為空白字串
-        6. 判斷該週期的結束時間，是否大於current time。  (True:字體紅色  False:字體藍色)
-        7. 將表格的高度、寬度自動依內容調整
-        :return:
+        查詢指定「日期」的 15 分鐘需量並更新右側表格（tableWidget_2）。
+
+        行為
+        ----
+        - 依 UI 選擇決定計算來源：
+          * kWh 模式（radioButton_5 勾選）：對兩條 kWh tag 相加後乘以 4，直接視為 15 分鐘需量
+            （等同將每 15 分鐘累積電量換算為 MW 平均功率）。
+          * P 模式（radioButton_5 未勾選）：以 PI summary="AVERAGE"、interval='6s' 取得 1~5 秒粒度的
+            平均功率，先將負值以 0 取代，再以 resample('15T').mean() 轉成 15 分鐘平均功率，
+            接著將兩迴路相加得到該 15 分鐘需量。
+
+        表格呈現
+        --------
+        - 每天 96 個區段分 6 欄顯示（每欄 16 列）；偶數欄顯示時間、奇數欄顯示該段需量。
+        - 若某段為未來時間（區段結束時刻 > 現在），需量以紅字顯示；其餘為藍字。
+        - 該段無數值（NaN）時，該格顯示為空字串。
+
+        注意
+        ----
+        - P 模式會先以 clip(lower=0) 把負值視為 0 才取平均，以符合需量邏輯。
+        - kWh 模式不進行重採樣，直接以（1510 + 1520）* 4 作為每 15 分鐘需量列。
         """
-        tags=('W511_MS1/161KV/1510/kwh11', 'W511_MS1/161KV/1520/kwh11')
         st = pd.Timestamp(str(self.dateEdit.date().toPyDate()))
         et = st + pd.offsets.Day(1)
-        raw_data = pi_client.query(st=st, et=et, tags=tags)
-        raw_data.insert(0, 'TPC', (raw_data.iloc[:, 0] + raw_data.iloc[:, 1]) * 4)
+
+        # 根據radioButton_5，判斷用kwh 或p 計算需量。
+        if self.radioButton_5.isChecked():
+            tags=('W511_MS1/161KV/1510/kwh11', 'W511_MS1/161KV/1520/kwh11')
+            raw_result = pi_client.query(st=st, et=et, tags=tags)
+            raw_result.insert(0, 'TPC', (raw_result.iloc[:, 0] + raw_result.iloc[:, 1]) * 4)
+            demand_15min = raw_result
+        else:
+            tags=('W511_MS1/161KV/1510/P', 'W511_MS1/161KV/1520/P')
+            raw_result = pi_client.query(st=st, et=et, tags=tags, summary="AVERAGE", interval='6s')
+            raw_result = raw_result.clip(lower=0)
+            raw_data = raw_result.resample('15T').mean()
+            raw_data.insert(0, 'TPC', (raw_data.iloc[:, 0] + raw_data.iloc[:,1]))
+            demand_15min = raw_data
+
         for j in range(6):          # 1
             for i in range(16):
-                item1 = QtWidgets.QTableWidgetItem(pd.Timestamp(raw_data.index[i + j * 16]).strftime('%H:%M'))  #2
+                item1 = QtWidgets.QTableWidgetItem(pd.Timestamp(demand_15min.index[i + j * 16]).strftime('%H:%M'))  #2
                 font = QtGui.QFont()
                 font.setPointSize(10)
                 item1.setFont(font)         # 3
                 self.tableWidget_2.setItem(i, 0 + j * 2,item1)
                 self.tableWidget_2.item(i, 0 + j * 2).setTextAlignment(4 | 4)       # 4
 
-                if pd.isnull(raw_data.iloc[i + j * 16, 0]):             # 5
+                if pd.isnull(demand_15min.iloc[i + j * 16, 0]):             # 5
                     item2 = QtWidgets.QTableWidgetItem(str(''))
                 else:
-                    item2 = QtWidgets.QTableWidgetItem(str(round(raw_data.iloc[i + j * 16,0], 3)))
-                if pd.Timestamp.now() < (raw_data.index[i + j * 16].tz_localize(None) + pd.offsets.Minute(15)):
+                    item2 = QtWidgets.QTableWidgetItem(str(round(demand_15min.iloc[i + j * 16,0], 3)))
+                if pd.Timestamp.now() < (demand_15min.index[i + j * 16].tz_localize(None) + pd.offsets.Minute(15)):
                     brush = QtGui.QBrush(QtGui.QColor(255, 0, 0))       # 6
                 else:
                     brush = QtGui.QBrush(QtGui.QColor(0, 0, 255))
@@ -2890,27 +2959,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.show_box(content='時間長度不可跨至隔天')
             return
 
-        """ 設定表格
-            1. 依CBL 參考天數，設定表格column 數量
-            2. 將第2row 的表格全部合併
-            3. 將計算好的CBLs指定至特定表格位置，並且將內容置中對齊
-            4. 設定column、row 的名稱    
-            5. 將計算好的CBL 顯示於第 2 row，並且將內容置中對齊
-            6. 將表格的高度、寬度自動依內容調整   
-        self.tableWidget.setColumnCount(self.spinBox.value())    # 1
-        self.tableWidget.setSpan(1, 0, 1, self.spinBox.value())  # 2
-        header_label = list()
-        for i in range(len(demands.columns)):
-            header_label.append(str(demands.columns[i]))
-            item = QtWidgets.QTableWidgetItem(str(round(cbl[i], 3)))  # 3-1
-            self.tableWidget.setItem(0, i, item)  # 3-2
-            self.tableWidget.item(0, i).setTextAlignment(4 | 4)  # 3-3
-        self.tableWidget.setHorizontalHeaderLabels([label for label in header_label])  # 4-1
-        self.tableWidget.setVerticalHeaderLabels(['平均值', 'CBL'])  # 4 -2
-        item = QtWidgets.QTableWidgetItem(str(round(cbl.mean(), 3)))  #5-1
-        self.tableWidget.setItem(1, 0, item)  # 5-2
-        self.tableWidget.item(1, 0).setTextAlignment(4 | 4)  # 5-3
-        """
         demands = self.calculate_demand(e_date_time=end_date_time)  # DataFrame
         cbl = demands.mean(axis=0, skipna=True)  # Series
         """
@@ -2945,21 +2993,56 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def calculate_demand(self, e_date_time):
         """
-            1. 根據目前時間是否超出取樣時間的最後一段，決定呼叫 define_cbl_date 函式的參數，取得一組list，list 中存有CBL 參考日期
-            2. 起始時間為參考日最早的一天，結束時間為參考日最後一天+1
-            3. buffer2 的第 0、1 Column 進行相加後乘4的運算，並把結果將 Series的型態存在row_data
-        :param e_date_time 傳入的參數數為TimeStamp，為完整的起時和結束的日期+時間
-        :return: 將CBL 參考日指定時段的平均需量，用 DataFrame 的方式回傳
+        計算 CBL（基準用電量）所需的「多個參考日、指定時段」之 15 分鐘需量，並回傳為 DataFrame。
+
+        參數
+        ----
+        e_date_time : pandas.Timestamp
+            欲計算的「結束時間」；開始時間由 UI 的日期與時間（dateEdit_2, timeEdit）決定，
+            長度由 spinBox_2（小時數）決定。當現在時間已超過 e_date_time 時，參考日區間向後平移一天。
+
+        計算方式
+        --------
+        - 參考日：呼叫 define_cbl_date() 取得一組日期清單（由 UI 決定天數／指定日）。
+        - kWh 模式（radioButton_5 勾選）：
+            讀取 1510/1520 兩條 kWh tag，將同時刻兩者相加後乘以 4，視為 15 分鐘需量序列。
+        - P 模式（radioButton_5 未勾選）：
+            以 summary="AVERAGE", interval='6s' 讀取功率，將負值剪成 0，並做 resample('15T').mean()，
+            再把兩條迴路相加為該時刻之 15 分鐘需量。
+
+        回傳
+        ----
+        pandas.DataFrame
+            欄為各參考日（日期），列為該參考日中「指定時段」涵蓋的 15 分鐘需量。
+            該結果通常會再被 mean(axis=0, skipna=True) 取得 CBL。
+
+        備註
+        ----
+        - P 模式先 clip(lower=0) 再平均，確保需量不被負值拉低。
+        - 取樣起訖時刻會依 UI 的開始時間與時長（不可跨日）逐一切片組成。
         """
         if pd.Timestamp.now() > e_date_time:  # 1
             cbl_date = self.define_cbl_date(e_date_time.date() + pd.offsets.Day(1))
         else:
             cbl_date = self.define_cbl_date(e_date_time.date())
-        tags = ['W511_MS1/161KV/1510/kwh11', 'W511_MS1/161KV/1520/kwh11']
-        # 2
-        buffer2 = pi_client.query(st=pd.Timestamp(cbl_date[-1]),
-                           et=pd.Timestamp(cbl_date[0] + pd.offsets.Day(1)), tags=tags)
-        row_data = (buffer2.iloc[:, 0] + buffer2.iloc[:, 1]) * 4  # 3
+
+        # 根據radioButton_5，判斷用kwh 或p 計算需量。
+        if self.radioButton_5.isChecked():
+            tags=('W511_MS1/161KV/1510/kwh11', 'W511_MS1/161KV/1520/kwh11')
+            # 2
+            buffer2 = pi_client.query(st=pd.Timestamp(cbl_date[-1]),
+                                      et=pd.Timestamp(cbl_date[0] + pd.offsets.Day(1)), tags=tags)
+            row_data = (buffer2.iloc[:, 0] + buffer2.iloc[:, 1]) * 4  # 3
+        else:
+            tags=('W511_MS1/161KV/1510/P', 'W511_MS1/161KV/1520/P')
+            # 2
+            buffer2 = pi_client.query(st=pd.Timestamp(cbl_date[-1]),
+                                         et=pd.Timestamp(cbl_date[0] + pd.offsets.Day(1)),
+                                         tags=tags, summary="AVERAGE", interval='6s')
+            buffer2 = buffer2.clip(lower=0)
+            buffer2 = buffer2.resample('15T').mean()
+            row_data = (buffer2.iloc[:, 0] + buffer2.iloc[:, 1])  # 3
+
         """
             1. 每天要取樣的起始時間點, 存成list
             2. 將指定時間長度的需量，一天為一筆(pd.Series 的型態) 儲存至list
