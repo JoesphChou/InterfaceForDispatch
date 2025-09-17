@@ -4,14 +4,14 @@ setup_logging("logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
 import sys, re, math, time
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Protocol, runtime_checkable, cast
 import pandas as pd
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
 from UI import Ui_MainWindow
 from tariff_version import get_current_rate_type_v6, get_ng_generation_cost_v2, format_range
 from make_item import make_item
-from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea, StackedAreaCanvas
+from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea, StackedAreaCanvas, GanttCanvas
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
@@ -92,11 +92,38 @@ class DashboardThread(QtCore.QThread):
                 slept += 0.5
         logger.info("DashboardThread 己收到中斷，停止執行。")
 
+@runtime_checkable
+class ScheduleResult(Protocol):
+    ok: bool
+    reason: Optional[str]
+    past: pd.DataFrame
+    current: pd.DataFrame
+    future: pd.DataFrame
+    fetched_at: pd.Timestamp
+
 class ScheduleThread(QtCore.QThread):
     """
-        在背景定期呼叫 Mainwindow.update_tw4_schedule()，
-        並支援中斷與例外捕捉
+    週期性在背景執行緒抓取「製程排程」資料並以訊號回傳主執行緒。
+
+    設計
+    ----
+    - 只做資料取得（呼叫 `scrape_schedule()`），**不在子執行緒動任何 Qt UI**。
+    - 每次取得結果後透過 `sig_schedule`（payload: ScheduleResult）送回主執行緒。
+    - 尊重 `requestInterruption()`，以短睡眠片段快速響應停止。
+
+    Signals
+    -------
+    sig_schedule : object
+        Payload 於執行時為符合 ScheduleResult 協議的物件（具有 ok/reason/past/current/future）。
+
+    Parameters
+    ----------
+    main_win : MyMainWindow
+        主視窗，持有 UI 與 slot。
+    interval : float, default=30.0
+        兩次抓取間隔秒數。
     """
+    sig_schedule = QtCore.pyqtSignal(object)        # payload: ScheduleResult
     def __init__(self, main_win: "MyMainWindow", interval: float = 30.0):
         super().__init__(main_win)
         self.main_win = main_win
@@ -106,10 +133,12 @@ class ScheduleThread(QtCore.QThread):
         # 只要沒有被 requestInterruption() 就持續執行
         while not self.isInterruptionRequested():
             try:
-                self.main_win.update_tw4_schedule()
+                res = scrape_schedule()
+                self.sig_schedule.emit(res)     # 將爬取的排程資料丟回主執行緒
             except Exception:
                 # 記錄log
                 logger.error("背景排程發生錯誤", exc_info=True)
+
             slept = 0.0
             while slept < self.interval and not self.isInterruptionRequested():
                 time.sleep(0.5)
@@ -280,6 +309,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.dashboard_thread: Optional[DashboardThread] = None     # 當作DashboardThread 的實例，作為背景排程
         self.pie: Optional["PieChartArea"] = None       # 和 pie chart 有關
         self.loader = LoadingOverlay(self)  # 彈出半透明loading 的
+        self._styling_in_progress = False
 
         self.radioButton_5.setChecked(True)  # 支援選擇 KWH 或 P 值的查詢方式 (這個項目要先做)
         self.dashboard_value()
@@ -290,13 +320,12 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
         self.pushButton_9.clicked.connect(self.on_show_trend)
-        self.pushButton_7.clicked.connect(self.compute_stack_area_metrics)
+        #self.pushButton_7.clicked.connect(self.show_gantt_window)
 
         self.listWidget_2.addItems(['HSM 軋延機組'])
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
         self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
         self.listWidget_3.itemDoubleClicked.connect(self.remove_target_tag_from_list3)
-        #self.radioButton_5.setChecked(True)
 
         # 取得目前的日期與時間，並捨去分鐘與秒數，將時間調整為整點
         current_datetime = QtCore.QDateTime.currentDateTime()
@@ -325,6 +354,9 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.canvas_unit = None
         self.canvas_fuel = None
 
+        # --- Gantt chart 初始化：放在 __init__ 內合適位置 ---
+        self.canvas_gantt = None
+
         #
         self.checkBox_5.stateChanged.connect(self._apply_chart_mode)    # 是否顯示圖表的選項
         self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
@@ -334,8 +366,197 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
         except Exception:
             pass
-        # 放在 __init__ 或類別屬性處：初始化重入旗標
-        self._styling_in_progress = False
+
+    @QtCore.pyqtSlot(object)
+    def on_schedule_result(self, res_obj: object) -> None:
+        """
+        接收背景 ScheduleThread 發出的排程結果（**主執行緒**），並更新 tw4 與 Gantt。
+
+        Parameters
+        ----------
+        res_obj : object
+            執行時 payload 為符合 ScheduleResult 協議的物件；包含：
+            - ok : bool
+            - reason : Optional[str]
+            - past, current, future : pandas.DataFrame
+              欄位至少含「開始時間、結束時間、爐號、製程」（current 另含「製程狀態」）。
+
+        Notes
+        -----
+        - 函式開頭以 typing.cast(ScheduleResult, res_obj) 提示型別檢查器，避免
+          “Unresolved attribute reference … for class 'object'” 警告。
+        - 本函式內可以安全建立/操作 QWidget（主執行緒）。
+        """
+        res = cast(ScheduleResult, res_obj)
+        self.update_tw4_schedule(res)
+
+        if not hasattr(self, "canvas_gantt") or self.canvas_gantt is None:
+            self.canvas_gantt = GanttCanvas()
+            self.verticalLayout_5.addWidget(self.canvas_gantt)
+        # 繪圖
+        self.canvas_gantt.plot(res.past, res.current, res.future)
+
+    def start_schedule_thread(self):
+        """
+        啟動背景「製程排程」執行緒；先連線 signal→slot，再啟動 thread。
+
+        行為
+        ----
+        - 建立 `ScheduleThread(self, interval=30.0)`。
+        - sig_schedule.connect(self.on_schedule_result) 後再 `start()`，
+          確保第一筆結果能被主執行緒處理。
+        """
+        # 建立並儲存 ScheduleThread 實例
+        self.scheduler_thread = ScheduleThread(self, interval=30.0)
+        self.scheduler_thread.setObjectName("SchedulerThread")
+
+        # start() 之前建立好連線
+        self.scheduler_thread.sig_schedule.connect(self.on_schedule_result)
+        # 啟動執行緒
+        self.scheduler_thread.start()
+
+    def update_tw4_schedule(self, res):
+        """
+        以階層節點更新 tw4（QTreeWidget）的製程排程清單。
+
+        呈現規則
+        --------
+        - 第一層：製程種類（EAF, LF1-1, LF1-2；EAFA/EAFB 併入 EAF）。
+        - 第二層兩分類：
+            * 「生產或等待中」：`res.current` + `res.future`（依開始時間排序）
+            * 「過去排程」：`res.past`（依開始時間排序）
+        - 資料為空時顯示占位訊息，並將「狀態欄」置中。
+
+        Parameters
+        ----------
+        res : ScheduleResult
+            具備 ok/reason/past/current/future 的結果物件；DataFrame 欄位格式
+            與 GanttCanvas.plot(...) 的期望一致。
+        """
+        past_df = res.past
+        current_df = res.current
+        future_df = res.future
+
+        if not res.ok:
+            self.statusBar().showMessage(f"排程更新失敗:{res.reason}")
+
+        self.tw4.clear()
+
+        process_map = {"EAF": None, "LF1-1": None, "LF1-2": None}
+
+        for process_name in process_map.keys():
+            process_parent = QtWidgets.QTreeWidgetItem(self.tw4)
+            process_parent.setText(0, process_name)
+            self.tw4.addTopLevelItem(process_parent)
+
+            # **過濾當前製程的排程**
+            active_schedules = pd.concat([
+                current_df.assign(類別="current"),
+                future_df.assign(類別="future")
+            ], ignore_index=True).sort_values(by="開始時間")
+            active_schedules = active_schedules[
+                (active_schedules["製程"] == process_name) |
+                ((process_name == "EAF") & active_schedules["製程"].isin(["EAFA", "EAFB"]))
+                ]
+
+            past_schedules = past_df[
+                (past_df["製程"] == process_name) |
+                ((process_name == "EAF") & past_df["製程"].isin(["EAFA", "EAFB"]))
+                ].sort_values(by="開始時間")
+
+            # **處理 "生產或等待中"**
+            active_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            active_parent.setFont(0, QtGui.QFont("微軟正黑體", 10))
+            active_parent.setText(0, "生產或等待中")
+            process_parent.addChild(active_parent)
+
+            if not active_schedules.empty:
+                """
+                從iterrows() 改為itertuples() 的說明:
+                1. 效能較快、且省記憶體
+                2. itertuples(index=False)：避免產生多餘的 Index 欄位。
+                2. row.開始時間、row.類別 等是透過屬性方式存取。
+                3. hasattr(row, "製程狀態") 是為了避免製程狀態 欄位在某些 DataFrame 裡不存在（如 future_df），防止程式報錯。
+                """
+                for row in active_schedules.itertuples(index=False):
+                    start_time = row.開始時間.strftime("%H:%M:%S")
+                    end_time = row.結束時間.strftime("%H:%M:%S")
+                    category = row.類別
+                    status = str(row.製程狀態) if hasattr(row, "製程狀態") and pd.notna(row.製程狀態) else "N/A"
+
+                    if row.製程 == "EAFA":
+                        process_display = "EAF"
+                        status += " (A爐)"
+                        furnace = "(A爐)"
+                    elif row.製程 == "EAFB":
+                        process_display = "EAF"
+                        status += " (B爐)"
+                        furnace = "(B爐)"
+                    else:
+                        process_display = row.製程
+                        furnace = ""
+                    if process_display != process_name:
+                        continue
+
+                    item = QtWidgets.QTreeWidgetItem(active_parent)
+                    item.setFont(0, QtGui.QFont("微軟正黑體", 10))
+                    item.setFont(1, QtGui.QFont("微軟正黑體", 10))
+                    item.setText(0, f"{start_time} ~ {end_time}")
+                    item.setText(1, status)
+
+                    # **狀態欄 (column 2) 文字置中**
+                    item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
+
+                    if category == "current":
+                        item.setBackground(0, QtGui.QBrush(QtGui.QColor("#FCF8BC")))  # **淡黃色背景**
+                        item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
+                    elif category == "future":
+                        minutes = int((row.開始時間 - pd.Timestamp.now()).total_seconds() / 60)
+                        if process_name == "EAF":
+                            item.setText(1, f"{furnace} 預計{minutes} 分鐘後開始生產")
+                        else:
+                            item.setText(1, f"預計{minutes} 分鐘後開始生產")
+                        item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **未來排程置中**
+
+                    active_parent.addChild(item)
+
+            else:
+                # **若無生產或等待中排程，在 column 2 顯示 "目前無排程"，並置中**
+                active_parent.setFont(1, QtGui.QFont("微軟正黑體", 10))
+                active_parent.setText(1, "目前無排程")
+                active_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
+
+            # **處理 "過去排程"**
+            past_parent = QtWidgets.QTreeWidgetItem(process_parent)
+            past_parent.setFont(0, QtGui.QFont("微軟正黑體", 10))
+            past_parent.setText(0, "過去排程")
+            process_parent.addChild(past_parent)
+
+            if not past_schedules.empty:
+                for _, row in past_schedules.iterrows():
+                    start_time = row["開始時間"].strftime("%H:%M:%S")
+                    end_time = row["結束時間"].strftime("%H:%M:%S")
+
+                    item = QtWidgets.QTreeWidgetItem(past_parent)
+                    item.setFont(0, QtGui.QFont("微軟正黑體", 10))
+                    item.setFont(1, QtGui.QFont("微軟正黑體", 10))
+                    item.setText(0, f"{start_time} ~ {end_time}")
+                    item.setText(1, "已完成")
+                    item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **過去排程置中**
+
+                    past_parent.addChild(item)
+
+            else:
+                # **若無過去排程，在 column 2 顯示 "無相關排程"，並置中**
+                past_parent.setFont(1, QtGui.QFont("微軟正黑體", 10))
+                past_parent.setText(1, "無相關排程")
+                past_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        # **確保所有節點展開**
+        self.tw4.expandAll()  # ✅ 確保所有製程展開
+        self.statusBar().showMessage(f"排程已更新({res.fetched_at:%H:%M:%S})")
+
+        self.update_tw2_2_column2_from_schedule(past_df, current_df, future_df)
 
     def update_tw2_2_column2_from_schedule(self, past_df: pd.DataFrame, current_df: pd.DataFrame,
                                            future_df: pd.DataFrame):
@@ -488,14 +709,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         mode = self.comboBox_3.currentIndex()
         self.chartHost.setCurrentIndex(mode)
-        """
-        if mode == 0:
-            self.chartHost.setCurrentIndex(0)
-        elif mode == 1:
-            self.chartHost.setCurrentIndex(1)
-        else:
-            self.chartHost.setCurrentIndex(2)
-        """
 
     def fetch_stack_raw_df(self) -> pd.DataFrame:
         """
@@ -1281,19 +1494,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # 啟動執行緒
         self.dashboard_thread.start()
-
-    def start_schedule_thread(self):
-        """
-        用來建立繼承自 QThread 的ScheduleThread 的實例。
-        並每隔一段時間執行 update_tw4_schedule() 爬取 PMIS 和更新產線排程訊息
-        Returns:
-            None
-        """
-        # 建立並儲存 ScheduleThread 實例
-        self.scheduler_thread = ScheduleThread(self, interval=30.0)
-        self.scheduler_thread.setObjectName("SchedulerThread")
-        # 啟動執行緒
-        self.scheduler_thread.start()
 
     def real_time_hsm_cycle(self):
         """
@@ -2122,141 +2322,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # 更新hsm 目前速率及每卷需量
         self.real_time_hsm_cycle()
         return c_values
-
-    def update_tw4_schedule(self):
-        """
-        更新 tw4 (treeWidget) 顯示 scrapy_schedule() 解析的排程資訊：
-        - 第一層：製程種類 (EAF, LF1-1, LF1-2)
-        - 第二層："生產或等待中" (current + future) / "過去排程" (past)
-        - 若無 "生產或等待中" 排程，仍增加此分類，但不增加子排程，並顯示 "目前無排程"
-        - 若無 "過去排程" 資料，仍增加此分類，但不增加子排程，並顯示 "無相關排程"
-        - **column 2 (狀態欄) 文字置中**
-        """
-        res = scrape_schedule()
-        past_df = res.past
-        current_df = res.current
-        future_df = res.future
-
-        if not res.ok:
-            self.statusBar().showMessage(f"排程更新失敗:{res.reason}")
-
-        self.tw4.clear()
-
-        process_map = {"EAF": None, "LF1-1": None, "LF1-2": None}
-
-        for process_name in process_map.keys():
-            process_parent = QtWidgets.QTreeWidgetItem(self.tw4)
-            process_parent.setText(0, process_name)
-            self.tw4.addTopLevelItem(process_parent)
-
-            # **過濾當前製程的排程**
-            active_schedules = pd.concat([
-                current_df.assign(類別="current"),
-                future_df.assign(類別="future")
-            ], ignore_index=True).sort_values(by="開始時間")
-            active_schedules = active_schedules[
-                (active_schedules["製程"] == process_name) |
-                ((process_name == "EAF") & active_schedules["製程"].isin(["EAFA", "EAFB"]))
-                ]
-
-            past_schedules = past_df[
-                (past_df["製程"] == process_name) |
-                ((process_name == "EAF") & past_df["製程"].isin(["EAFA", "EAFB"]))
-                ].sort_values(by="開始時間")
-
-            # **處理 "生產或等待中"**
-            active_parent = QtWidgets.QTreeWidgetItem(process_parent)
-            active_parent.setFont(0, QtGui.QFont("微軟正黑體", 10))
-            active_parent.setText(0, "生產或等待中")
-            process_parent.addChild(active_parent)
-
-            if not active_schedules.empty:
-                """
-                從iterrows() 改為itertuples() 的說明:
-                1. 效能較快、且省記憶體
-                2. itertuples(index=False)：避免產生多餘的 Index 欄位。
-                2. row.開始時間、row.類別 等是透過屬性方式存取。
-                3. hasattr(row, "製程狀態") 是為了避免製程狀態 欄位在某些 DataFrame 裡不存在（如 future_df），防止程式報錯。
-                """
-                for row in active_schedules.itertuples(index=False):
-                    start_time = row.開始時間.strftime("%H:%M:%S")
-                    end_time = row.結束時間.strftime("%H:%M:%S")
-                    category = row.類別
-                    status = str(row.製程狀態) if hasattr(row, "製程狀態") and pd.notna(row.製程狀態) else "N/A"
-
-                    if row.製程 == "EAFA":
-                        process_display = "EAF"
-                        status += " (A爐)"
-                        furnace = "(A爐)"
-                    elif row.製程 == "EAFB":
-                        process_display = "EAF"
-                        status += " (B爐)"
-                        furnace = "(B爐)"
-                    else:
-                        process_display = row.製程
-                        furnace = ""
-                    if process_display != process_name:
-                        continue
-
-                    item = QtWidgets.QTreeWidgetItem(active_parent)
-                    item.setFont(0, QtGui.QFont("微軟正黑體", 10))
-                    item.setFont(1, QtGui.QFont("微軟正黑體", 10))
-                    item.setText(0, f"{start_time} ~ {end_time}")
-                    item.setText(1, status)
-
-                    # **狀態欄 (column 2) 文字置中**
-                    item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
-
-                    if category == "current":
-                        item.setBackground(0, QtGui.QBrush(QtGui.QColor("#FCF8BC")))  # **淡黃色背景**
-                        item.setBackground(1, QtGui.QBrush(QtGui.QColor("#FCF8BC")))
-                    elif category == "future":
-                        minutes = int((row.開始時間 - pd.Timestamp.now()).total_seconds() / 60)
-                        if process_name == "EAF":
-                            item.setText(1, f"{furnace} 預計{minutes} 分鐘後開始生產")
-                        else:
-                            item.setText(1, f"預計{minutes} 分鐘後開始生產")
-                        item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **未來排程置中**
-
-                    active_parent.addChild(item)
-
-            else:
-                # **若無生產或等待中排程，在 column 2 顯示 "目前無排程"，並置中**
-                active_parent.setFont(1, QtGui.QFont("微軟正黑體", 10))
-                active_parent.setText(1, "目前無排程")
-                active_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
-
-            # **處理 "過去排程"**
-            past_parent = QtWidgets.QTreeWidgetItem(process_parent)
-            past_parent.setFont(0, QtGui.QFont("微軟正黑體", 10))
-            past_parent.setText(0, "過去排程")
-            process_parent.addChild(past_parent)
-
-            if not past_schedules.empty:
-                for _, row in past_schedules.iterrows():
-                    start_time = row["開始時間"].strftime("%H:%M:%S")
-                    end_time = row["結束時間"].strftime("%H:%M:%S")
-
-                    item = QtWidgets.QTreeWidgetItem(past_parent)
-                    item.setFont(0, QtGui.QFont("微軟正黑體", 10))
-                    item.setFont(1, QtGui.QFont("微軟正黑體", 10))
-                    item.setText(0, f"{start_time} ~ {end_time}")
-                    item.setText(1, "已完成")
-                    item.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)  # **過去排程置中**
-
-                    past_parent.addChild(item)
-
-            else:
-                # **若無過去排程，在 column 2 顯示 "無相關排程"，並置中**
-                past_parent.setFont(1, QtGui.QFont("微軟正黑體", 10))
-                past_parent.setText(1, "無相關排程")
-                past_parent.setTextAlignment(1, QtCore.Qt.AlignmentFlag.AlignCenter)
-
-        # **確保所有節點展開**
-        self.tw4.expandAll()  # ✅ 確保所有製程展開
-        self.statusBar().showMessage(f"排程已更新({res.fetched_at:%H:%M:%S})")
-
-        self.update_tw2_2_column2_from_schedule(past_df, current_df, future_df)
 
     def predict_demand(self):
         """

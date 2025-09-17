@@ -27,6 +27,109 @@ from PyQt6.QtWidgets import QFileDialog
 
 logger = get_logger(__name__)
 
+class GanttCanvas(FigureCanvas):
+    """
+    以甘特圖方式呈現製程排程。
+    列：EAF / LF1-1 / LF1-2（EAF 內含 EAFA/EAFB）
+    色：依類別與狀態（past/current/future）著色，方塊文字顯示爐號。
+    """
+    def __init__(self, *, row_order=("EAF", "LF1-1", "LF1-2")):
+        self.fig = Figure(figsize=(7.5, 3.8), dpi=100)
+        super().__init__(self.fig)
+        self.ax = self.fig.add_subplot(111)
+        self.row_order = list(row_order)
+
+        # 顏色配置（可依喜好微調）
+        self.proc_colors = {
+            "EAF":  "#4E79A7",
+            "LF1-1":"#F28E2B",
+            "LF1-2":"#59A14F",
+        }
+        self.state_alpha = {
+            "past":   0.35,
+            "current":0.95,
+            "future": 0.65,
+        }
+        self.text_color = "#111"
+
+        self.ax.grid(True, axis="x", linestyle=":", linewidth=0.8, alpha=0.5)
+        self.ax.set_yticks(range(len(self.row_order)))
+        self.ax.set_yticklabels(self.row_order)
+        self.ax.invert_yaxis()  # 上面顯示 EAF
+
+        # 時間軸格式
+        self.ax.xaxis.set_major_locator(mdates.HourLocator())
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+        self.fig.autofmt_xdate()
+
+    def _row_index(self, proc: str) -> int:
+        # EAFA/EAFB 都歸到 EAF 這列
+        key = "EAF" if proc in ("EAFA", "EAFB") else proc
+        if key not in self.row_order:
+            self.row_order.append(key)
+            self.ax.set_yticks(range(len(self.row_order)))
+            self.ax.set_yticklabels(self.row_order)
+        return self.row_order.index(key)
+
+    def _bars_from_df(self, df, state: str):
+        if df is None or df.empty:
+            return
+        for _, r in df.iterrows():
+            start = mdates.date2num(pd.to_datetime(r["開始時間"]))
+            end   = mdates.date2num(pd.to_datetime(r["結束時間"]))
+            width = max(end - start, 1/1440)  # 至少 1 分鐘寬
+            proc  = r["製程"]
+            y     = self._row_index(proc)
+            color = self.proc_colors["EAF" if proc in ("EAFA","EAFB") else proc]
+            self.ax.barh(
+                y=y, width=width, left=start, height=0.6,
+                color=color, alpha=self.state_alpha.get(state, 0.8), edgecolor="white", linewidth=1.0, zorder=3
+            )
+            # 方塊上的文字（爐號；current 也可把製程狀態放 tooltip/label）
+            label = str(r.get("爐號", "")) or ""
+            if label:
+                x_center = start + width/2.0
+                self.ax.text(x_center, y, label, ha="center", va="center",
+                             fontsize=9, color=self.text_color, zorder=5)
+
+    def plot(self, past_df, current_df, future_df):
+        self.ax.cla()
+        # 重畫座標設定
+        self.ax.grid(True, axis="x", linestyle=":", linewidth=0.8, alpha=0.5)
+        self.ax.set_yticks(range(len(self.row_order)))
+        self.ax.set_yticklabels(self.row_order)
+        self.ax.invert_yaxis()
+
+        # 疊上 past / current / future（讓 current 在最上層可讀性較好）
+        self._bars_from_df(past_df, "past")
+        self._bars_from_df(future_df, "future")
+        self._bars_from_df(current_df, "current")
+
+        # 自動調整 X 軸範圍（含一點左右留白）
+        all_times = []
+        for df in (past_df, current_df, future_df):
+            if df is not None and not df.empty:
+                all_times += list(pd.to_datetime(df["開始時間"]).values)
+                all_times += list(pd.to_datetime(df["結束時間"]).values)
+        if all_times:
+            lo = mdates.date2num(min(pd.to_datetime(all_times)))
+            hi = mdates.date2num(max(pd.to_datetime(all_times)))
+            pad = max((hi - lo) * 0.06, 1/24)  # 至少 1 小時 padding
+            self.ax.set_xlim(lo - pad, hi + pad)
+
+        # 時間軸刻度
+        self.ax.xaxis.set_major_locator(mdates.HourLocator())
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+        self.fig.autofmt_xdate()
+
+        # 小圖例
+        handles = [plt.Line2D([0],[0], color=self.proc_colors[k], lw=6) for k in ("EAF","LF1-1","LF1-2")]
+        labels  = ["EAF (含 EAFA/EAFB)","LF1-1","LF1-2"]
+        self.ax.legend(handles, labels, loc="upper left", frameon=False, fontsize=9)
+
+        self.ax.set_xlabel("時間")
+        self.draw()
+
 class PieChartArea(QtCore.QObject):
     """
     用於顯示燃氣發電比例的甜甜圈圖表。
