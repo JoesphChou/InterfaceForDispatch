@@ -14,7 +14,7 @@ from make_item import make_item
 from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea, StackedAreaCanvas, GanttCanvas
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
-from data_sources.schedule_scraper import scrape_schedule
+from data_sources.schedule_scraper import scrape_schedule, scrape_schedule_v2
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
 import numpy as np
 
@@ -133,7 +133,7 @@ class ScheduleThread(QtCore.QThread):
         # 只要沒有被 requestInterruption() 就持續執行
         while not self.isInterruptionRequested():
             try:
-                res = scrape_schedule()
+                res = scrape_schedule_v2()
                 self.sig_schedule.emit(res)     # 將爬取的排程資料丟回主執行緒
             except Exception:
                 # 記錄log
@@ -357,10 +357,11 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- Gantt chart 初始化：放在 __init__ 內合適位置 ---
         self.canvas_gantt = None
 
-        #
+        # 圖表顯示相關設定
         self.checkBox_5.stateChanged.connect(self._apply_chart_mode)    # 是否顯示圖表的選項
         self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
         self.checkBox_5.setChecked(True)
+        self.comboBox_3.setCurrentIndex(3)
 
         try:
             self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)

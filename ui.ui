@@ -32,7 +32,7 @@
      </font>
     </property>
     <property name="currentIndex">
-     <number>4</number>
+     <number>3</number>
     </property>
     <widget class="QWidget" name="tab_1">
      <property name="enabled">
@@ -3710,7 +3710,7 @@ font: 12pt &quot;Microsoft JhengHei UI&quot;;</string>
         <x>20</x>
         <y>20</y>
         <width>285</width>
-        <height>191</height>
+        <height>171</height>
        </rect>
       </property>
       <property name="sizePolicy">
@@ -4556,7 +4556,7 @@ Runner</string>
       <property name="geometry">
        <rect>
         <x>20</x>
-        <y>240</y>
+        <y>200</y>
         <width>285</width>
         <height>141</height>
        </rect>
@@ -4862,7 +4862,7 @@ Runner</string>
        </rect>
       </property>
       <property name="currentIndex">
-       <number>1</number>
+       <number>3</number>
       </property>
       <widget class="QWidget" name="gen_by_fuel">
        <widget class="QWidget" name="verticalLayoutWidget_2">
@@ -4967,6 +4967,19 @@ Runner</string>
         <layout class="QVBoxLayout" name="verticalLayout_4"/>
        </widget>
       </widget>
+      <widget class="QWidget" name="production_schedule">
+       <widget class="QWidget" name="verticalLayoutWidget_4">
+        <property name="geometry">
+         <rect>
+          <x>20</x>
+          <y>20</y>
+          <width>721</width>
+          <height>211</height>
+         </rect>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_5"/>
+       </widget>
+      </widget>
      </widget>
      <widget class="QComboBox" name="comboBox_3">
       <property name="geometry">
@@ -4990,6 +5003,11 @@ Runner</string>
       <item>
        <property name="text">
         <string>中龍發電量 (by 機組)</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>產線排程</string>
        </property>
       </item>
      </widget>
