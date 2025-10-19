@@ -403,10 +403,8 @@ def scrape_schedule(
         '開始處理時間': '狀態開始',
         '處理結束時間': '狀態結束',
         '生產狀態': '狀態'
-    })
+        })
     )
-
-    status_2143 = status_2143.drop(index=0)   # Temporary workaround until scrape_schedule is removed.
     status_2143['狀態開始'] = pd.to_datetime(status_2143['狀態開始'])
     status_2143['狀態結束'] = pd.to_datetime(status_2143['狀態結束'])
     s_2133_classify = schedule_2133.merge(status_2143, left_on=['製程', '爐號'], right_on=['製程', '狀態爐號'], how='left')
@@ -459,7 +457,6 @@ def scrape_schedule(
         ['past', 'future', 'current'],
         default='unknown'
     )
-    #s_2138_classify.drop(columns=['停機時間'], inplace=True)
     out_df = pd.concat([s_2138_classify, s_2133_classify], join='inner')
     out_df.rename(columns={"表定開始時間": "開始時間", "表定結束時間": "結束時間"}, inplace = True)
     past_df = out_df.loc[out_df['phase'].eq('past'), :]
@@ -601,7 +598,6 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
     ----
     dict:
       {
-        "ok": True/False,
         "LF1": {"爐號": str, "開始處理時間": Timestamp|None, "處理結束時間": Timestamp|None, "生產狀態": str, "停機時間": Timestamp|None},
         "LF2": {...}
       }
@@ -638,7 +634,6 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
     lf2_stop = _parse_time(get("lblLF2Stime"))
 
     data = {
-        "ok": True,
         "LF1": {
             "爐號": get("lbllf1_heat"),
             "開始處理時間": lf1_s,
