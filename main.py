@@ -14,7 +14,7 @@ from make_item import make_item
 from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea, StackedAreaCanvas, GanttCanvas
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
-from data_sources.schedule_scraper import scrape_schedule, scrape_schedule_v2
+from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
 import numpy as np
 
@@ -133,7 +133,7 @@ class ScheduleThread(QtCore.QThread):
         # 只要沒有被 requestInterruption() 就持續執行
         while not self.isInterruptionRequested():
             try:
-                res = scrape_schedule_v2()
+                res = scrape_schedule()
                 self.sig_schedule.emit(res)     # 將爬取的排程資料丟回主執行緒
             except Exception:
                 # 記錄log
@@ -394,8 +394,28 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if not hasattr(self, "canvas_gantt") or self.canvas_gantt is None:
             self.canvas_gantt = GanttCanvas()
             self.verticalLayout_5.addWidget(self.canvas_gantt)
+        #res.past = self._gantt_fill_start_end(res.past)
         # 繪圖
         self.canvas_gantt.plot(res.past, res.current, res.future)
+
+    def _gantt_fill_start_end(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        給 Gantt 用的欄位補齊：
+        - 開始時間若為 NaT，且有「實際開始時間」→ 補上
+        - 結束時間若為 NaT，且有「實際結束時間」→ 補上
+        不改動原本的「實際開始時間／實際結束時間」欄位。
+        """
+        if df is None or df.empty:
+            return df
+        out = df.copy()
+        # 只在 NaT 時才補；避免覆蓋本來就有的值
+        mask_s = out["開始時間"].isna() & out["實際開始時間"].notna()
+        mask_e = out["結束時間"].isna() & out["實際結束時間"].notna()
+        if mask_s.any():
+            out.loc[mask_s, "開始時間"] = out.loc[mask_s, "實際開始時間"]
+        if mask_e.any():
+            out.loc[mask_e, "結束時間"] = out.loc[mask_e, "實際結束時間"]
+        return out
 
     def start_schedule_thread(self):
         """
@@ -434,12 +454,14 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             具備 ok/reason/past/current/future 的結果物件；DataFrame 欄位格式
             與 GanttCanvas.plot(...) 的期望一致。
         """
-        past_df = res.past
-        current_df = res.current
-        future_df = res.future
+
 
         if not res.ok:
             self.statusBar().showMessage(f"排程更新失敗:{res.reason}")
+
+        past_df = res.past
+        current_df = res.current
+        future_df = res.future
 
         self.tw4.clear()
 
