@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 class GanttCanvas(FigureCanvas):
     """
     以甘特圖方式呈現製程排程。
-    列：EAF / LF1-1 / LF1-2（EAF 內含 EAFA/EAFB）
+    列：EAF / LF1-1 / LF1-2（EAF 內含 EAFA/EAFB）/ LF1 / LF2
     色：依類別與狀態（past/current/future）著色，方塊文字顯示爐號。
     """
     def __init__(self, *, row_order=("EAF", "LF1-1", "LF1-2", "LF1", "LF2")):
@@ -38,8 +38,10 @@ class GanttCanvas(FigureCanvas):
         super().__init__(self.fig)
         self.ax = self.fig.add_subplot(111)
         self.row_order = list(row_order)
-        self.row_height = 0.3       # 單列 bar 高度
+        self.row_height = 0.5       # 單列 bar 高度
         self.y_margin = 0.05        # Y 邊距比例
+        self._time_line = None
+        self._time_label= None
 
         # 透明背景
         self.fig.patch.set_alpha(0.0)   # 讓圖表外框透明
@@ -95,15 +97,21 @@ class GanttCanvas(FigureCanvas):
         return self.row_order.index(key)
 
     def _bars_from_df(self, df, state: str):
+        """
+        以 df["開始時間"]/df["結束時間"] 為座標畫 bar，並把 hover 需要的欄位塞進 self._bars。
+        注意：呼叫 plot() 前已將不同 phase 的資料轉成「g_start/g_end → 開始/結束」。
+        """
         if df is None or df.empty:
             return
+
         for _, r in df.iterrows():
             start = mdates.date2num(pd.to_datetime(r["開始時間"]))
             end = mdates.date2num(pd.to_datetime(r["結束時間"]))
             width = max(end - start, 1 / 1440)
-            proc = r["製程"]
-            y = self._row_index(proc)
-            color = self.proc_colors["EAF" if proc in ("EAFA", "EAFB") else proc]
+            raw_proc = r.get("製程")
+            proc = "EAF" if raw_proc in ("EAFA", "EAFB") else raw_proc
+            y = self._row_index(raw_proc)
+            color = self.proc_colors.get(proc, "#888")
 
             rect = self.ax.barh(
                 y=y, width=width, left=start, height=self.row_height,
@@ -111,60 +119,94 @@ class GanttCanvas(FigureCanvas):
                 edgecolor="white", linewidth=1.0, zorder=3
             )[0]
 
-            # ■ 收集 hover 用 metadata
+            # 收集 hover 用 metadata
             furnace = str(r.get("爐號", "")) or ""
-            status = str(r.get("製程狀態", "")) or ""  # 只有 current 有
+            # 將「狀態」對齊原本程式用的 key（之前寫的是 "製程狀態"）
+            status = (str(r.get("製程狀態", "")) or str(r.get("狀態", "")) or "").strip()
+            status_end = r.get("狀態結束")
+
             self._bars.append({
                 "patch": rect,
-                "proc": "EAF" if proc in ("EAFA", "EAFB") else proc,
+                "proc": proc,  # "EAF" / "LF1-1" / "LF1-2" / "LF1" / "LF2"
+                "raw_proc": raw_proc,  # 保留 EAFA/EAFB 以利判斷
                 "furnace": furnace,
-                "start": pd.to_datetime(r["開始時間"]),
-                "end": pd.to_datetime(r["結束時間"]),
+                "start": pd.to_datetime(r.get("表定開始時間") or r["開始時間"]),
+                "end": pd.to_datetime(r.get("表定結束時間") or r["結束時間"]),
                 "state": state,
                 "status": status,
-                "actual_start": r.get("實際開始時間"),        # 目前還沒有 (None)
-                "actual_end": r.get("實際結束時間"),          # 目前還沒有 (None)
+                "status_end": status_end,
+                "actual_start": r.get("實際開始時間"),
+                "actual_end": r.get("實際結束時間"),
             })
 
-            # 可留「爐號」小標在方塊上（不影響 hover）
-            label = furnace
-            if label:
+            # 爐號小標
+            if furnace:
                 x_center = start + width / 2.0
-                self.ax.text(x_center, y, label, ha="center", va="center",
-                             fontsize=9, color=self.text_color, zorder=5)
+                txt = self.ax.text(x_center, y, furnace, ha="center", va="center",
+                                   fontsize=9, color=self.text_color, zorder=5)
+                self._layer_artists.append(txt)
+
+            self._layer_artists.append(rect)
 
     def _format_tip(self, info: dict) -> str:
-        proc = info['proc']  # "EAF" or "LF1-1" / "LF1-2"
-        furnace = info['furnace'] or ""
-        start = info['start'];
-        end = info['end']
-        a_st = info.get('actual_start');
-        a_ed = info.get('actual_end')
-        state = info.get('state');
+        """
+        規則：
+          - EAF 需顯示 (A爐)/(B爐)
+          - Past:  第2行顯示「表定」，第3行顯示「實際」
+          - Current:
+              * 顯示「表定」
+              * 若有 status_end（狀態結束） → 額外加「預計HH:MM結束」
+              * 僅 EAF/LF1-1/LF1-2 顯示「狀態：xxx」
+          - Future: 顯示「表定」
+        """
+        proc = info['proc']  # "EAF" / "LF1-1" / "LF1-2" / ...
+        raw_proc = info.get('raw_proc', "")  # EAFA / EAFB / ...
+        furnace = info.get('furnace', "") or ""
+        state = info.get('state', "")
         status = (info.get('status') or "").strip()
+        status_end = info.get('status_end')
 
-        # 第一行
+        start = info['start']  # 表定開始（已在 _bars_from_df 塞好）
+        end = info['end']  # 表定結束
+        a_st = info.get('actual_start')
+        a_ed = info.get('actual_end')
+
+        def hhmm(ts):
+            try:
+                return pd.Timestamp(ts).strftime("%H:%M")
+            except Exception:
+                return "--:--"
+
+        # 第一行：EAF 顯示 A/B 爐
         if proc == "EAF":
-            # 從原始製程判斷 A/B 爐：我們在 _bars_from_df 轉成了 EAF，所以用 furnace 判
-            # 常見爐號像 A101/B203；若你要更嚴謹，可另外存 "raw_proc": EAFA/EAFB
-            first = (f"A爐 {furnace}" if furnace.upper().startswith("A")
-                     else f"B爐 {furnace}" if furnace.upper().startswith("B")
-            else f"EAF {furnace}")
+            suffix = " (A爐)" if str(raw_proc) == "EAFA" or furnace.upper().startswith("A") else \
+                " (B爐)" if str(raw_proc) == "EAFB" or furnace.upper().startswith("B") else ""
+            first = f"EAF{suffix} {furnace}".strip()
         else:
-            first = f"{furnace}"
+            first = f"{proc} {furnace}".strip()
 
-        # 第二行（表定）
-        second = f"表定: {start:%H:%M} ~ {end:%H:%M}"
+        lines = [first]
 
-        # 第三行
-        third = ""
-        if state == "current" and status:
-            third = f"狀態：{status}"
-        elif a_st is not None and a_ed is not None:
-            third = f"實際: {pd.Timestamp(a_st):%H:%M} ~ {pd.Timestamp(a_ed):%H:%M}"
-        # 如果沒有狀態也沒有實際時間，就不顯示第三行
+        # 第二行：表定
+        lines.append(f"表定：{hhmm(start)} ~ {hhmm(end)}")
 
-        return "\n".join([t for t in (first, second, third) if t])
+        # 第三行起：依 phase
+        if state == "past":
+            # Past 顯示實際
+            if a_st is not None and a_ed is not None:
+                lines.append(f"實際：{hhmm(a_st)} ~ {hhmm(a_ed)}")
+
+        elif state == "current":
+            # 有狀態結束 → 預計 xx:xx 結束
+            if status_end is not None and pd.notna(status_end):
+                lines.append(f"預計{hhmm(status_end)}結束")
+            # 僅 EAF / LF1-1 / LF1-2 顯示製程狀態
+            if proc in ("EAF", "LF1-1", "LF1-2") and status:
+                lines.append(f"製程狀態：{status}")
+
+        # Future 不再額外加行
+
+        return "\n".join([t for t in lines if t])
 
     def _update_annot(self, patch, info):
         # 將註解框移到滑鼠附近；以 bar 中心點當 anchor
@@ -215,206 +257,137 @@ class GanttCanvas(FigureCanvas):
             tl.set_rotation(0)  # 水平
 
     def _clear_layers(self):
-        """只移除上一次繪製出來的 bar/文字，不動軸設定。"""
-        try:
-            for a in self._layer_artists:
+        """移除上一張圖所有動態圖層（bar/文字/輔助線/時間徽章…），避免重繪殘留。"""
+        # 1) 先移除以往收集的動態 artist（bar、文字標籤等）
+        if hasattr(self, "_layer_artists") and self._layer_artists:
+            for art in self._layer_artists:
                 try:
-                    a.remove()
+                    art.remove()
                 except Exception:
                     pass
-        finally:
             self._layer_artists = []
-            self._bars = []  # hover 用的 bar metadata 也要清
-            # 註解框不移除（保留），僅清文字與隱藏
-            if hasattr(self, "_annot") and self._annot:
-                self._annot.set_visible(False)
-                self._annot.set_text("")
 
-    def _clear_layers(self):
-        """只移除上一次繪製出來的 bar/文字，不動軸設定。"""
-        try:
-            for a in self._layer_artists:
-                try:
-                    a.remove()
-                except Exception:
-                    pass
-        finally:
-            self._layer_artists = []
-            self._bars = []  # hover 用的 bar metadata 也要清
-            # 註解框不移除（保留），僅清文字與隱藏
-            if hasattr(self, "_annot") and self._annot:
-                self._annot.set_visible(False)
-                self._annot.set_text("")
+        # 2) 清空 hover 需要的 bars 資訊
+        self._bars = [] if hasattr(self, "_bars") else []
+
+        # 3) 專門處理「現在時間」的垂直線與時間徽章
+        if hasattr(self, "_time_line") and self._time_line is not None:
+            try:
+                self._time_line.remove()
+            except Exception:
+                pass
+            self._time_line = None
+
+        if hasattr(self, "_time_label") and self._time_label is not None:
+            try:
+                self._time_label.remove()
+            except Exception:
+                pass
+            self._time_label = None
+
+        # 4) 不要用 ax.cla()，以免把座標軸/格式全清掉；只移除我們管理的圖層
 
     def plot(self, past_df, current_df, future_df):
-        # 0) 僅清舊圖層，不 cla()（避免打掉軸設定）
+        """
+        依 phase 轉換時間欄位後畫圖：
+          - Past:    用 實際開始/實際結束 畫 bar（若缺值則跳過）
+          - Current: 用 表定開始/表定結束 畫 bar；EAF/LF1-1/LF1-2 若「狀態結束」有值，終點覆蓋為 狀態結束
+          - Future:  用 表定開始/表定結束 畫 bar
+        並加入「現在時間」垂直虛線與 X 軸下方時間徽章（虛線 zorder 調低，不覆蓋 bar）。
+        """
+        # 僅清舊圖層
         self._clear_layers()
+        self._bars = []
 
-        # 1) 依你要的列順序（EAF 置頂）正規化 row_order（預防外部新增列順序跑掉）
+        # 1) 正規化列順序
         pref = ["EAF", "LF1-1", "LF1-2", "LF1", "LF2"]
         uniq = []
         for k in self.row_order:
             kk = "EAF" if k in ("EAFA", "EAFB") else k
-            if kk not in uniq: uniq.append(kk)
+            if kk not in uniq:
+                uniq.append(kk)
         self.row_order = [k for k in pref if k in uniq] + [k for k in uniq if k not in pref]
 
-        # 2) y 軸刻度與方向
+        # 2) y 軸
         self.ax.set_yticks(range(len(self.row_order)))
         self.ax.set_yticklabels(self.row_order)
-        # 這裡不動 grid/formatter/背景等軸級樣式（因為都留在 __init__ 了）
-        # 你之前有遇到 invert 後被 set_ylim 打回來的問題 → 先 set_ylim 再 invert
         n_rows = len(self.row_order)
         self.ax.set_ylim(-0.5, n_rows - 0.5)
         self.ax.invert_yaxis()
 
-        # 3) 疊上 past / future / current（current 疊最上層）
-        def draw_df(df, state):
+        def _prep(df, phase: str):
             if df is None or df.empty:
-                return
-            for _, r in df.iterrows():
-                start = mdates.date2num(pd.to_datetime(r["開始時間"]))
-                end = mdates.date2num(pd.to_datetime(r["結束時間"]))
-                width = max(end - start, 1 / 1440)
-                proc = r["製程"]
-                y = self._row_index(proc)
-                color = self.proc_colors["EAF" if proc in ("EAFA", "EAFB") else proc]
-                rect = self.ax.barh(
-                    y=y, width=width, left=start, height=0.6,
-                    color=color, alpha=self.state_alpha.get(state, 0.8),
-                    edgecolor="white", linewidth=1.0, zorder=3
-                )[0]
-                # 收集 hover metadata
-                furnace = str(r.get("爐號", "")) or ""
-                status = str(r.get("製程狀態", "")) or ""
-                self._bars.append({
-                    "patch": rect,
-                    "proc": "EAF" if proc in ("EAFA", "EAFB") else proc,
-                    "furnace": furnace,
-                    "start": pd.to_datetime(r["開始時間"]),
-                    "end": pd.to_datetime(r["結束時間"]),
-                    "state": state,
-                    "status": status,
-                })
-                # 爐號小標
-                if furnace:
-                    x_center = start + width / 2.0
-                    txt = self.ax.text(x_center, y, furnace, ha="center", va="center",
-                                       fontsize=9, color=self.text_color, zorder=5)
-                    self._layer_artists.append(txt)
-                self._layer_artists.append(rect)
+                return df
+            x = df.copy()
 
-        draw_df(past_df, "past")
-        draw_df(future_df, "future")
-        draw_df(current_df, "current")
+            # 統一補上「製程狀態」欄位，來源為「狀態」
+            if "製程狀態" not in x.columns and "狀態" in x.columns:
+                x["製程狀態"] = x["狀態"]
+
+            if phase == "past":
+                x["g_start"] = x.get("實際開始時間")
+                x["g_end"] = x.get("實際結束時間")
+            elif phase == "current":
+                x["g_start"] = x.get("表定開始時間", x.get("開始時間"))
+                # 終點預設表定；EAF/LF1-1/LF1-2 若狀態結束非 NaT，覆蓋
+                x["g_end"] = x.get("表定結束時間", x.get("結束時間"))
+                mask = x["製程"].isin(["EAFA", "EAFB", "LF1-1", "LF1-2"]) & x.get("狀態結束").notna()
+                x.loc[mask, "g_end"] = x.loc[mask, "狀態結束"]
+            else:  # future
+                x["g_start"] = x.get("表定開始時間", x.get("開始時間"))
+                x["g_end"] = x.get("表定結束時間", x.get("結束時間"))
+
+            # 丟掉缺值
+            x = x[(x["g_start"].notna()) & (x["g_end"].notna())].copy()
+
+            # 讓 _bars_from_df 畫圖時吃到「開始時間/結束時間」與 hover 顯示需要的欄位
+            x["開始時間"] = x["g_start"]
+            x["結束時間"] = x["g_end"]
+            return x
+
+        past_v = _prep(past_df, "past")
+        current_v = _prep(current_df, "current")
+        future_v = _prep(future_df, "future")
+
+        # 3) 畫圖（past -> future -> current 疊層）
+        self._bars_from_df(past_v, "past")
+        self._bars_from_df(future_v, "future")
+        self._bars_from_df(current_v, "current")
 
         # 4) 自動 X 範圍 + 留白
         all_times = []
-        for df in (past_df, current_df, future_df):
+        for df in (past_v, current_v, future_v):
             if df is not None and not df.empty:
                 all_times += list(pd.to_datetime(df["開始時間"]).values)
                 all_times += list(pd.to_datetime(df["結束時間"]).values)
         if all_times:
-            lo = mdates.date2num(min(pd.to_datetime(all_times)))
-            hi = mdates.date2num(max(pd.to_datetime(all_times)))
-            pad = max((hi - lo) * 0.06, 1 / 24)  # 至少 1 小時 padding
-            self.ax.set_xlim(lo - pad, hi + pad)
+            tmin = pd.to_datetime(min(all_times))
+            tmax = pd.to_datetime(max(all_times))
+            pad = pd.Timedelta(minutes=15)
+            self.ax.set_xlim(mdates.date2num((tmin - pad).to_pydatetime()),
+                             mdates.date2num((tmax + pad).to_pydatetime()))
 
-        # 5) X 軸主刻度 / 格式器維持不動（__init__ 已設定），僅處理字級壅擠
-        ticks = self.ax.get_xticklabels()
-        if len(ticks) >= 10:
-            fs = 8
-        elif len(ticks) >= 6:
-            fs = 9
-        else:
-            fs = 10
-        for tl in ticks:
-            tl.set_rotation(0)
-            tl.set_fontsize(fs)
+        # 5) 現在時間：垂直虛線 + X 軸下方時間徽章
+        now = pd.Timestamp.now()
+        x_now = mdates.date2num(now.to_pydatetime())
+        # 虛線（zorder 低於 bar，避免蓋住）
+        self._time_line = self.ax.axvline(
+            x=x_now, linestyle=(0, (4, 4)), linewidth=1.0, color="#555", alpha=0.7, zorder=1)
 
-        # 6) 依列數微調 ytick 字級/視覺密度（不必改 fig 高度也行）
-        y_fs = 10 if n_rows <= 4 else 9 if n_rows <= 6 else 8
-        for tl in self.ax.get_yticklabels():
-            tl.set_fontsize(y_fs)
-        # 如要更緊：self.ax.margins(y=0.08)
-
-        self.draw()
-
-    def plot2(self, past_df, current_df, future_df):
-        #self.ax.cla()
-        self._clear_layers()
-        self._bars = []  # 先清空舊的
-
-        # ★ 重新建立 hover 註解（因為 cla() 會把舊的 annotation 清掉）
-        self._annot = self.ax.annotate(
-            "", xy=(0, 0), xytext=(12, 14),
-            textcoords="offset points",
-            bbox=dict(boxstyle="round", fc="w", ec="#666", alpha=0.95),
-            fontsize=9
+        # 時間徽章（貼齊 x 軸下方）
+        self._time_label = self.ax.annotate(
+            now.strftime("%H:%M"),
+            xy=(x_now, 0), xycoords=("data", "axes fraction"),
+            xytext=(0, -3), textcoords="offset points",
+            ha="center", va="top",
+            bbox=dict(boxstyle="round,pad=0.25", fc="black", ec="none", alpha=0.85),
+            color="white", fontsize=9, zorder=10
         )
-        self._apply_style()
 
-        self._annot.set_visible(False)
-        # 重畫座標設定
-        self.ax.grid(True, axis="x", linestyle=":", linewidth=0.8, alpha=0.5)
-        self.ax.set_yticks(range(len(self.row_order)))
-        self.ax.set_yticklabels(self.row_order)
-
-        # 疊上 past / current / future（讓 current 在最上層可讀性較好）
-        self._bars_from_df(past_df, "past")
-        self._bars_from_df(future_df, "future")
-        self._bars_from_df(current_df, "current")
-
-        # 自動調整 X 軸範圍（含一點左右留白）
-        all_times = []
-        for df in (past_df, current_df, future_df):
-            if df is not None and not df.empty:
-                all_times += list(pd.to_datetime(df["開始時間"]).values)
-                all_times += list(pd.to_datetime(df["結束時間"]).values)
-        if all_times:
-            lo = mdates.date2num(min(pd.to_datetime(all_times)))
-            hi = mdates.date2num(max(pd.to_datetime(all_times)))
-            pad = max((hi - lo) * 0.06, 1/24)  # 至少 1 小時 padding
-            self.ax.set_xlim(lo - pad, hi + pad)
-
-        # X 軸：每小時刻度 + HH:MM；水平顯示
-        self.ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
-        self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        # 不要自動轉 45°
-        for tl in self.ax.get_xticklabels():
-            tl.set_rotation(0)
-
-        # 若刻度太密，略縮小字級避免重疊（非常簡單的啟發式）
-        ticks = self.ax.get_xticklabels()
-        if len(ticks) >= 10:
-            for tl in ticks:
-                tl.set_fontsize(8)
-        elif len(ticks) >= 6:
-            for tl in ticks:
-                tl.set_fontsize(9)
-        else:
-            for tl in ticks:
-                tl.set_fontsize(10)
-
-        # Y 軸收緊 + 邊距 + 依列數自適應字級與圖高
-        n_rows = len(self.row_order)
-        self.ax.set_ylim(-0.5, n_rows - 0.5)
-
-        # 邊距（若外部沒設定，給預設值）
-        y_margin = getattr(self, "y_margin", 0.08)
-        self.ax.margins(y=y_margin)
-
-        # ytick 字級隨列數微調
+        # 6) ytick 字級微調
         y_fs = 10 if n_rows <= 4 else 9 if n_rows <= 6 else 8
         for tl in self.ax.get_yticklabels():
             tl.set_fontsize(y_fs)
-
-        # 設定完範圍後，再反轉，確保index 0 在最上面
-        self.ax.invert_yaxis()
-
-        # 圖高隨列數微調，避免太擠或太空
-        base_h = 2.6
-        per_row = 0.35  # 每多一列增加的高度
-        self.fig.set_figheight(max(base_h, 1.8 + per_row * n_rows))
 
         self.draw()
 

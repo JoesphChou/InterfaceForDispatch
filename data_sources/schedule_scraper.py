@@ -1,28 +1,31 @@
 """schedule_scraper.py
 
-A standalone helper that scrapes Dragon Steel MES “2138” (schedule chart) and “2137”
-(status page) and classifies each record into **past**, **current** or **future**
-relative to *now*.
+Scrapes Dragon Steel MES “2138” (schedule chart) and “2137” (status page),
+and “2133/2143” (LF) then classifies each record into **past**, **current** or
+**future** relative to *now*.
 
-The implementation is refactored from the former ``scrapy_schedule`` routine in
-``main.py`` so that the UI layer no longer owns heavy parsing logic.
+Key points
+----------
+- **2138 duplicate-in-same-process fix**:
+  When the same furnace re-enters the same process and a single rectangle title
+  contains multiple time spans (e.g. two HH:MM~HH:MM pairs), we now **pair the
+  X-coordinate with times by position inside each (furnace, process, label) group**.
+  Concretely, we rank records twice per group—once by start-time and once by X—
+  and merge on the positional index so that:
+      smallest X ↔ earliest time, next X ↔ next time, ...
+  This preserves the intended positive correlation between X (left→right) and time.
 
-Usage
------
-- >>> from schedule_scraper import scrape_schedule
-- >>> past, current, future = scrape_schedule()  # returns three DataFrames
+- 2137/2143 provide channel-wise “current” status (furnace id and a time window)
+  to split 2138/2133 rectangles into past / current / future.
 
-Each DataFrame columns
-----------------------
-* 開始時間 (datetime64[ns])
-* 結束時間 (datetime64[ns])
-* 爐號       (str)
-* 製程       (str) – EAFA / EAFB / LF1-1 / LF1-2
-* 製程狀態   (only for ``current``)
+- The UI no longer owns heavy parsing logic; this helper returns data frames
+  ready for rendering.
 
-The function purposefully keeps the original heuristics for de‑duplication,
-cross‑day correction and coordinate‑based sorting so that the UI’s downstream
-logic remains unchanged.
+Returned data frames (past/current/future) include at least:
+* 表定開始時間 / 表定結束時間
+* 實際開始時間 / 實際結束時間
+* 爐號, 製程, phase（分類結果）
+* current 另帶製程狀態（便於著色/提示）
 """
 
 from __future__ import annotations
@@ -188,6 +191,16 @@ def scrape_schedule(
         - future：表定開始/結束皆在 now 之後，且（若 2143 有同通道爐號）表定開始與狀態開始差 > 30 分鐘
         - current：與 2143 同通道爐號匹配，且表定開始與狀態開始差 < 30 分鐘
 
+    2138 的多時段同爐修正
+    --------------------
+    同一爐號在同一製程（含相同 label，例如「表定」或「實際」）若於單一 title 中出現
+    多組時間（HH:MM~HH:MM），會先把每筆解析成 (x, start, end, 爐號, 製程, label)。
+    接著於「(爐號, 製程, label)」各組內：
+      1) 依 start 升冪標上位置索引 _pos
+      2) 依 x 升冪標上位置索引 _pos
+      3) 以 (keys + _pos) merge，得到「最小 x ↔ 最早 start」的一一對應
+    配對後的正確 (x, start, end) 會回填進後續流程，避免 phase 判斷混亂。
+
     回傳欄位
     --------
     ScheduleResult（past/current/future 皆為 DataFrame）：
@@ -232,6 +245,7 @@ def scrape_schedule(
     areas = soup_2138.find_all("area")
     raw_sched: List[Tuple[int, datetime, datetime, str, str, str]] = []
     fixed_2138 = _FIXED_LANES_2138
+    multi_proc = []  # 儲存發生相同爐號重覆進同一個製程時的記錄，並用來判斷是否做後續動作。
 
     for area in areas:
         title = area.get("title", "")
@@ -251,22 +265,69 @@ def scrape_schedule(
         furnace_id = furnace_match.group(1) if furnace_match else "未知"
 
         # The times in the green rectangles don't include seconds, so we have to handle them separately.
+        """
+        debug: 相同爐號重覆進同一個製程 (EAF、LF1-1、LF1-2)，在_preprocess_schedule() 後會發生製程錯誤
+        re 在匹配時，改用findall 以list 的方式，回傳所有匹配的資料
+        """
         if res.label == "輔助":
-            m = re.search(rf"{process_type}送電:\s*(\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}})", title)
+            #m = re.search(rf"{process_type}送電:\s*(\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}})", title)
+            m = re.findall(rf"{process_type}送電:\s*(\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}})", title)
         else:
-            m = re.search(_TIME_PATTERNS[process_type], title)
+            #m = re.search(_TIME_PATTERNS[process_type], title)
+            m = re.findall(_TIME_PATTERNS[process_type], title)
 
+        today = now.date().isoformat()
         if not m:
             continue
-        start_ts, end_ts = m.groups()
-        today = now.date().isoformat()
-        start = pd.to_datetime(f"{today} {start_ts}")
-        end = pd.to_datetime(f"{today} {end_ts}")
+        """ 
+            如果匹配出來的時間<2, 代表同一爐號沒有重覆進同一製程的問題
+            >=，也存在另一個list，待後續匹配正確的x座標和開始時間。
+        """
+        if len(m) < 2:
+           start_ts, end_ts = m[0]
+           start = pd.to_datetime(f"{today} {start_ts}")
+           end = pd.to_datetime(f"{today} {end_ts}")
+           raw_sched.append((coords[0], start, end, furnace_id, process_type, res.label))
+        else:
+            for i in range(len(m)):
+                start_ts, end_ts = m[i]
+                start = pd.to_datetime(f"{today} {start_ts}")
+                end = pd.to_datetime(f"{today} {end_ts}")
+                multi_proc.append((coords[0], start, end, furnace_id, process_type, res.label))
 
-        raw_sched.append((coords[0], start, end, furnace_id, process_type, res.label))
+    if multi_proc:
+        # 同爐號在同製程同 label 的「多時間段」情境：
+        # 以 (爐號, 製程, 類別) 為分組鍵，對時間與 x 各自排序並標上 cumcount() 位置，
+        # 再以 (keys + _pos) merge 取得「最小 x ↔ 最早時間」的正相關一一配對，
+        # 之後將修正過的清單 append 回 raw_sched，避免後續 _preprocess_schedule() 出現錯位。
+        multi_proc_df = pd.DataFrame(multi_proc)
 
-    # Sort, adjust cross day, and merge schedule
-    schedule_2138 = _preprocess_schedule(raw_sched)
+        # keys: 你要在同一群組內配對；這裡用(爐號，製程，種類)
+        keys = [3,4,5]
+        # 1)依時間排序並標上組內位置
+        left = (multi_proc_df.sort_values(keys + [1])
+                .assign(_pos = lambda d: d.groupby(keys).cumcount()))
+        # 2) 依座標排序並標上組內位置 (只保留座標欄)
+        right = (multi_proc_df.sort_values(keys + [0])  # 0 是「座標」
+        .assign(_pos=lambda d: d.groupby(keys).cumcount())
+        [keys + ['_pos', 0]])
+
+        # 3) 用 (keys + 位置) 對齊，得到正確配對後的座標
+        correct_df = (left.drop(columns=[0])  # 先把原本的 0 刪掉
+               .merge(right, on=keys + ['_pos'], how='left')
+               .drop(columns=['_pos']))
+        correct_df = correct_df[[0,1,2,3,4,5]]
+        correct_list = list(correct_df.itertuples(index=False, name=None))
+        raw_sched = raw_sched + correct_list
+
+    # If no schedule is found after parsing the webpage, initialize schedule_2133 as an
+    # empty DataFrame with predefined columns.
+    if raw_sched:
+        # Sort, adjust cross day, and merge schedule
+        schedule_2138 = _preprocess_schedule(raw_sched)
+    else:
+        schedule_2138 = pd.DataFrame(columns=['製程', '爐號','表定開始時間',
+                                              '表定結束時間','實際開始時間','實際結束時間'])
 
     # ------------------------------------------------------------------
     # 2. Process status from 2137 and merge with 2138 ------------------
@@ -388,7 +449,15 @@ def scrape_schedule(
             continue
 
         raw_sched.append((coords[0], start, end, furnace_id, process_type, res.label))
-    schedule_2133 = _preprocess_schedule(raw_sched, is_2138=False)
+
+    # If no schedule is found after parsing the webpage, initialize schedule_2133 as an
+    # empty DataFrame with predefined columns.
+    if raw_sched:
+        # Sort, adjust cross day, and merge schedule
+        schedule_2133 = _preprocess_schedule(raw_sched)
+    else:
+        schedule_2133 = pd.DataFrame(columns=['爐號','製程','表定開始時間',
+                                              '表定結束時間','實際開始時間','實際結束時間'])
 
     # ------------------------------------------------------------------
     # 4. Process status from 2143 and merge with 2133 ------------------
@@ -458,7 +527,10 @@ def scrape_schedule(
         default='unknown'
     )
     out_df = pd.concat([s_2138_classify, s_2133_classify], join='inner')
-    out_df.rename(columns={"表定開始時間": "開始時間", "表定結束時間": "結束時間"}, inplace = True)
+
+    # This is a temporary workaround until the downstream code is updated.
+    out_df = out_df.assign(開始時間=out_df["表定開始時間"], 結束時間=out_df["表定結束時間"])
+
     past_df = out_df.loc[out_df['phase'].eq('past'), :]
     current_df = out_df.loc[out_df['phase'].eq('current'), :]
     future_df = out_df.loc[out_df['phase'].eq('future'), :]
@@ -527,8 +599,12 @@ def _scrape_2137_labels(*, pool: Optional[urllib3.PoolManager] = None,
 
     def _simple_adjust_cross(a, b):
         if a and b:
-            b += pd.Timedelta(days=1) if a < b else b
-        return b
+            if a > b:
+                return (b+ pd.Timedelta(days=1))
+            else:
+                return b
+            #b += pd.Timedelta(days=1) if a > b else b
+        #return b
     # 簡易的跨天判斷
     eafa_f = _simple_adjust_cross(eafa_s, eafa_f)
     eafb_f = _simple_adjust_cross(eafb_s, eafb_f)
@@ -627,12 +703,12 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
 
     lf1_s = _parse_time(get("lblLf1_Stime"))
     lf1_e = _simple_adjust_cross(lf1_s, _parse_time(get("lbllf1_Etime")))
-    lf1_stop = _parse_time(get("lblLF1Stime"))
-
+    #lf1_stop = _parse_time(get("lblLF1Stime"))
+    lf1_stop = None
     lf2_s = _parse_time(get("lbllf2_stime"))
     lf2_e = _simple_adjust_cross(lf2_s, _parse_time(get("lbllf2_Etime")))
-    lf2_stop = _parse_time(get("lblLF2Stime"))
-
+    #lf2_stop = _parse_time(get("lblLF2Stime"))
+    lf2_stop = None
     data = {
         "LF1": {
             "爐號": get("lbllf1_heat"),
@@ -733,9 +809,9 @@ def _preprocess_schedule(raw_sched: List, is_2138: bool = True):
 
     # ------------ 排序、調整跨天 ---------------
     # by 製程，並依照x 座標排序、開始時間排程, 結束後轉為list
+    # 等等需要再安排其它邏輯
     sorted_df = df.sort_values([4, 0, 1])
-    #m = m.sort_values(['index', 'has_overlap', 'overlap_pos', 'distance'],
-    #                  ascending=[True, False, False, True])
+
     sorted_list = list(sorted_df.itertuples(index=False, name=None))
 
     # 處理跨天後, 將結果轉為pd.DataFrame
@@ -823,11 +899,6 @@ def _lane_by_y(y_mid: float, fixed_lanes: Optional[Dict[str, Dict[str, float]]])
         if y0 is None or y1 is None:
             continue
         if y0 <= y_mid <= y1:
-            # 將 'LF1-1'/'LF1-2' 正規化成 'LF1'
-            #if name.upper().startswith("LF1-"):
-            #    return "LF1"
-            #if name.upper().startswith("LF2-"):
-            #    return "LF2"
             return name
     return None
 
@@ -1288,7 +1359,8 @@ def _adjust_cross_day(records, now: datetime):
             label = rest[0]
 
         # MES rectangles wrap at 00:00 so end might be earlier than start.
-        grp = unify(proc)
+        #grp = unify(proc)
+        grp = proc
 
         if end < start:
             end += pd.Timedelta(days=1)

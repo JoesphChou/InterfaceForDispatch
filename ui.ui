@@ -4857,7 +4857,7 @@ Runner</string>
        <rect>
         <x>10</x>
         <y>430</y>
-        <width>771</width>
+        <width>801</width>
         <height>331</height>
        </rect>
       </property>
@@ -4973,8 +4973,8 @@ Runner</string>
          <rect>
           <x>20</x>
           <y>20</y>
-          <width>721</width>
-          <height>211</height>
+          <width>781</width>
+          <height>311</height>
          </rect>
         </property>
         <layout class="QVBoxLayout" name="verticalLayout_5"/>
@@ -5010,6 +5010,47 @@ Runner</string>
         <string>產線排程</string>
        </property>
       </item>
+     </widget>
+     <widget class="QLabel" name="label_42">
+      <property name="geometry">
+       <rect>
+        <x>400</x>
+        <y>210</y>
+        <width>91</width>
+        <height>21</height>
+       </rect>
+      </property>
+      <property name="font">
+       <font>
+        <family>微軟正黑體</family>
+        <pointsize>12</pointsize>
+       </font>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">color: rgb(255, 0, 0);</string>
+      </property>
+      <property name="text">
+       <string>100 MW</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_43">
+      <property name="geometry">
+       <rect>
+        <x>320</x>
+        <y>210</y>
+        <width>81</width>
+        <height>21</height>
+       </rect>
+      </property>
+      <property name="font">
+       <font>
+        <family>微軟正黑體</family>
+        <pointsize>12</pointsize>
+       </font>
+      </property>
+      <property name="text">
+       <string>需量預測：</string>
+      </property>
      </widget>
     </widget>
     <widget class="QWidget" name="tab_4">

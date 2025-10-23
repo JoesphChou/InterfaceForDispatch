@@ -394,28 +394,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if not hasattr(self, "canvas_gantt") or self.canvas_gantt is None:
             self.canvas_gantt = GanttCanvas()
             self.verticalLayout_5.addWidget(self.canvas_gantt)
-        #res.past = self._gantt_fill_start_end(res.past)
         # 繪圖
         self.canvas_gantt.plot(res.past, res.current, res.future)
-
-    def _gantt_fill_start_end(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        給 Gantt 用的欄位補齊：
-        - 開始時間若為 NaT，且有「實際開始時間」→ 補上
-        - 結束時間若為 NaT，且有「實際結束時間」→ 補上
-        不改動原本的「實際開始時間／實際結束時間」欄位。
-        """
-        if df is None or df.empty:
-            return df
-        out = df.copy()
-        # 只在 NaT 時才補；避免覆蓋本來就有的值
-        mask_s = out["開始時間"].isna() & out["實際開始時間"].notna()
-        mask_e = out["結束時間"].isna() & out["實際結束時間"].notna()
-        if mask_s.any():
-            out.loc[mask_s, "開始時間"] = out.loc[mask_s, "實際開始時間"]
-        if mask_e.any():
-            out.loc[mask_e, "結束時間"] = out.loc[mask_e, "實際結束時間"]
-        return out
 
     def start_schedule_thread(self):
         """
@@ -454,7 +434,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             具備 ok/reason/past/current/future 的結果物件；DataFrame 欄位格式
             與 GanttCanvas.plot(...) 的期望一致。
         """
-
 
         if not res.ok:
             self.statusBar().showMessage(f"排程更新失敗:{res.reason}")
@@ -585,16 +564,17 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                            future_df: pd.DataFrame):
         """
         依 scrape_schedule() 的結果，將「產線即時狀況」寫入 tw2_2 的 column 2。
-        製程對應：EAF(=EAFA/B 合併)、LF1-1、LF1-2。HSM 由 real_time_hsm_cycle() 填入。
+        製程對應：EAF(=EAFA/B 合併)、LF1-1、LF1-2、LF1、LF2。HSM 由 real_time_hsm_cycle() 填入。
         規則：
-          1) 尚未開始： Next: HH:MM 開始生產 (X分後)
-          2) 正在生產： <爐別>生產中。預計HH:MM結束。Next HH:MM 開始（若無下一爐，省略 Next）
+          1) 尚未開始： 若有排程 → 取「表定開始時間」作為 Next；若無排程 → 顯示「目前未有排程」
+          2) 正在生產： <爐別>生產中。預計HH:MM結束（結束時間優先「狀態結束」，NaT 才用「表定結束時間」）。
+                        若有下一筆 → 加上 " Next HH:MM 開始"
           3) 無排程：   目前未有排程
         """
         if not hasattr(self, "tw2_2") or self.tw2_2 is None or self.tw2_2.columnCount() <= 2:
             return
 
-        MAP = {"HSM": 0, "EAF": 1, "LF1-1": 2, "LF1-2": 3}
+        MAP = {"HSM": 0, "EAF": 1, "LF1-1": 2, "LF1-2": 3, "LF1": 4 ,"LF2": 5}
         now = pd.Timestamp.now()
 
         def fmt_hhmm(ts):
@@ -623,7 +603,18 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             except Exception:
                 pass
 
+        def _pick_current_end(row):
+            """正在生產時的預計結束時間：狀態結束 -> 表定結束時間 -> 結束時間（最後保險）"""
+            se = row.get("狀態結束")
+            if pd.notna(se):
+                return se
+            pe = row.get("表定結束時間")
+            if pd.notna(pe):
+                return pe
+            return row.get("結束時間")
+
         def status_for(proc_name: str):
+            # 先切分對應製程
             if proc_name == "EAF":
                 active = current_df[current_df["製程"].isin(["EAFA", "EAFB"])].copy()
                 future = future_df[future_df["製程"].isin(["EAFA", "EAFB"])].copy()
@@ -631,8 +622,9 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 active = current_df[current_df["製程"] == proc_name].copy()
                 future = future_df[future_df["製程"] == proc_name].copy()
 
-            # 正在生產
+            # （A）正在生產
             if not active.empty:
+                # EAF 顯示 A/B 爐彙整前綴
                 furnaces = []
                 if proc_name == "EAF":
                     for _, r in active.iterrows():
@@ -641,26 +633,37 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     prefix = ("、".join(furnaces) + " ") if furnaces else ""
                 else:
                     prefix = ""
-                end = fmt_hhmm(active["結束時間"].max())
+
+                picked = active.apply(_pick_current_end, axis=1)
+                end = fmt_hhmm(pd.to_datetime(picked).max())
+
                 nxt_txt = ""
                 if not future.empty:
-                    nxt = future.sort_values(by="開始時間").iloc[0]
-                    nxt_txt = f" Next {fmt_hhmm(nxt['開始時間'])} 開始"
+                    # 「尚未開始」的下一筆，時間以「表定開始時間」為準；若該欄不存在，退回「開始時間」
+                    crt = future.copy()
+                    col = "表定開始時間" if "表定開始時間" in crt.columns else "開始時間"
+                    crt = crt.sort_values(by=col)
+                    nxt = crt.iloc[0]
+                    nxt_txt = f" Next {fmt_hhmm(nxt[col])} 開始"
+
                 return f"{prefix}生產中。預計{end} 結束。" + nxt_txt
 
-            # 尚未開始（最近未來）
+            # （B）尚未開始：有最近的未來排程
             if not future.empty:
-                nxt = future.sort_values(by="開始時間").iloc[0]
-                hhmm = fmt_hhmm(nxt["開始時間"])
-                mins = mins_delta(nxt["開始時間"])
+                crt = future.copy()
+                col = "表定開始時間" if "表定開始時間" in crt.columns else "開始時間"
+                crt = crt.sort_values(by=col)
+                nxt = crt.iloc[0]
+                hhmm = fmt_hhmm(nxt[col])
+                mins = mins_delta(nxt[col])
                 tail = f" ({mins}分後)" if mins is not None else ""
                 return f"Next: {hhmm} 開始生產{tail}"
 
-            # 完全無排程
+            # （C）完全無排程
             return "目前未有排程"
 
         # 寫回 tw2_2（HSM 仍由 real_time_hsm_cycle() 處理）
-        for proc in ("EAF", "LF1-1", "LF1-2"):
+        for proc in ("EAF", "LF1-1", "LF1-2", "LF1", "LF2"):
             set_status_row(proc, status_for(proc))
 
     def _reapply_tree_header_styles(self):
@@ -2340,7 +2343,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         wx.index = wx.index.get_level_values(0)
         c_values = pd.concat([c_values, wx],axis=0)  # 7
         self.realtime_update_to_tws(c_values)
+
+        # update predict demand
         self.label_23.setText(str(f'%s MW' %(self.predict_demand())))
+        self.label_42.setText(str(f'%s MW' % (self.predict_demand())))
 
         # 更新hsm 目前速率及每卷需量
         self.real_time_hsm_cycle()
