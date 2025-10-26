@@ -1,11 +1,12 @@
 from logging_utils import setup_logging, log_exceptions, timeit, get_logger
 
-setup_logging("logs/app.log", level="INFO")
+setup_logging("../logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
 import sys, re, math, time
-from typing import Tuple, Optional, List, Protocol, runtime_checkable, cast
 import pandas as pd
+import numpy as np
+from typing import Tuple, Optional, List, Protocol, runtime_checkable, cast
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
 from UI import Ui_MainWindow
@@ -16,7 +17,8 @@ from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
-import numpy as np
+from src.utils.sample_io import save_sample_df, load_sample_df
+from utils.debug_snapshot import export_debug_snapshot
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -290,10 +292,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.pi_client = pi_client
 
         # -------- 從外部資料讀取設定檔，並儲存成這個實例本身的成員變數 -----------
-        self.tag_list = pd.read_excel('.\parameter.xlsx', sheet_name=0).dropna(how='all')
-        self.special_dates = pd.read_excel('.\parameter.xlsx', sheet_name=1)
-        self.unit_prices = pd.read_excel('.\parameter.xlsx', sheet_name=2, index_col=0)
-        self.time_of_use = pd.read_excel('.\parameter.xlsx', sheet_name=3)
+        self.tag_list = pd.read_excel('../parameter.xlsx', sheet_name=0).dropna(how='all')
+        self.special_dates = pd.read_excel('../parameter.xlsx', sheet_name=1)
+        self.unit_prices = pd.read_excel('../parameter.xlsx', sheet_name=2, index_col=0)
+        self.time_of_use = pd.read_excel('../parameter.xlsx', sheet_name=3)
 
         # ---------------統一設定即時值、平均值的背景及文字顏色----------------------
         self.real_time_text = "#145A32"   # 即時量文字顏色 深綠色文字
@@ -320,7 +322,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
         self.pushButton_9.clicked.connect(self.on_show_trend)
-        #self.pushButton_7.clicked.connect(self.show_gantt_window)
+        self.pushButton_7.clicked.connect(self.snapshot)
 
         self.listWidget_2.addItems(['HSM 軋延機組'])
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
@@ -367,6 +369,9 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
         except Exception:
             pass
+
+    def snapshot(self):
+        export_debug_snapshot(main_window=self, pi_client=self.pi_client)
 
     @QtCore.pyqtSlot(object)
     def on_schedule_result(self, res_obj: object) -> None:
@@ -2331,6 +2336,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.statusBar().showMessage("⚠⚠ 無法連線到 PI Server，請檢查網路或憑證 ⚠⚠", 0)
             return # 直接結束，避免後面用到 current 而再度崩潰！
 
+        #save_sample_df(current, "tests/data/test_series.csv", fmt="csv")
         buffer = pd.DataFrame({
             'tag_name': name_list,
             'value': current.values

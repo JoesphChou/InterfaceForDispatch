@@ -32,11 +32,11 @@ from __future__ import annotations
 from bs4 import BeautifulSoup
 import re, urllib3
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List, Tuple, Set, Sequence, Any
+from typing import Optional, Dict, List, Tuple, Sequence, Any
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from logging_utils import get_logger
+from src.logging_utils import get_logger
 logger = get_logger(__name__)
 
 # 公開介面宣告：意思是當其它 使用用【from schedule_scraper import *】 時，
@@ -345,7 +345,7 @@ def scrape_schedule(
         'status': '狀態'
     })
     )
-
+    # 這邊有個bug，如果在跨天沒多久，該爐的起始時間點是在前一天的話，指定的日期會是系統的今天，而非昨天
     status_2137['狀態開始'] = pd.to_datetime(status_2137['狀態開始'])
     status_2137['狀態結束'] = pd.to_datetime(status_2137['狀態結束'])
     s_2138_classify = schedule_2138.merge(status_2137, left_on=['製程', '爐號'], right_on=['製程', '狀態爐號'], how='left')
@@ -704,7 +704,9 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
 
     def _simple_adjust_cross(a, b):
         if a and b:
-            b += pd.Timedelta(days=1) if a < b else b
+            if a < b:
+                b += pd.Timedelta(days=1)
+            #b += pd.Timedelta(days=1) if a < b else b
         return b
 
     lf1_s = _parse_time(get("lblLf1_Stime"))

@@ -1,4 +1,4 @@
-# Form implementation generated from reading ui file 'D:\036303\PythonProject\InterfaceForDispatch/ui.ui'
+# Form implementation generated from reading ui file 'D:\036303\PythonProject\InterfaceForDispatch\src/ui.ui'
 #
 # Created by: PyQt6 UI code generator 6.4.2
 #
@@ -1831,7 +1831,7 @@ class Ui_MainWindow(object):
         self.checkBox_3.setChecked(False)
         self.checkBox_3.setObjectName("checkBox_3")
         self.pushButton_7 = QtWidgets.QPushButton(parent=self.tab_4)
-        self.pushButton_7.setGeometry(QtCore.QRect(630, 400, 61, 31))
+        self.pushButton_7.setGeometry(QtCore.QRect(410, 500, 141, 31))
         self.pushButton_7.setObjectName("pushButton_7")
         self.spinBox_6 = QtWidgets.QSpinBox(parent=self.tab_4)
         self.spinBox_6.setGeometry(QtCore.QRect(140, 460, 51, 21))
@@ -1873,7 +1873,7 @@ class Ui_MainWindow(object):
         self.menuBar.addAction(self.menu_2.menuAction())
 
         self.retranslateUi(MainWindow)
-        self.tabWidget.setCurrentIndex(3)
+        self.tabWidget.setCurrentIndex(4)
         self.chartHost.setCurrentIndex(3)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
         MainWindow.setTabOrder(self.tabWidget, self.dateEdit)
@@ -2302,7 +2302,7 @@ class Ui_MainWindow(object):
         self.radioButton_4.setText(_translate("MainWindow", "P值"))
         self.pushButton_9.setText(_translate("MainWindow", "Apply"))
         self.checkBox_3.setText(_translate("MainWindow", "多迴路相加"))
-        self.pushButton_7.setText(_translate("MainWindow", "測試"))
+        self.pushButton_7.setText(_translate("MainWindow", "snapshot test"))
         self.label_40.setText(_translate("MainWindow", "時間解析度"))
         self.label_41.setText(_translate("MainWindow", "秒"))
         self.label_93.setText(_translate("MainWindow", "堆疊圖"))

@@ -1,6 +1,6 @@
 import PIconnect as PI
 from PyQt6 import QtCore, QtWidgets, QtGui
-from UI import Ui_Form
+from src.UI import Ui_Form
 import sys
 import pandas as pd
 import time
