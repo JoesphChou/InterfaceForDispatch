@@ -569,6 +569,7 @@ def _scrape_2137_labels(*, pool: Optional[urllib3.PoolManager] = None,
       {
         "EAFA": {"爐號": str, "start": Timestamp|None, "finish": Timestamp|None, "status": str},
         "EAFB": {...}, "LF1-1": {...}, "LF1-2": {...}
+       OA 時間 (ph_lblShowNow_header)
       }
     """
     pool = pool or _POOL
@@ -586,6 +587,10 @@ def _scrape_2137_labels(*, pool: Optional[urllib3.PoolManager] = None,
         if not hh or not mm or not hh.isdigit() or not mm.isdigit():
             return None
         t = pd.to_datetime(f"{now_date.date().isoformat()} {int(hh):02d}:{int(mm):02d}:00")
+        # 防止讀取到的"開始處理時間"為前一天，造成「開始時間」、「預計完成時間」的日期錯誤
+        # 目前暫時用解析出來的時間，與現在時間的差距是否超過10小時間判斷，並處理。
+        if abs(t-now) > pd.Timedelta(hours=10):
+            t -= pd.Timedelta(days=1)
         return t
 
     eafa_s = _parse_time(_txt("lbl_eafa_eh"), _txt("lbl_eafa_em"), now)
@@ -659,6 +664,7 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
         結束(lbllf1_Etime)、
         狀態(lblLF1sts)、
         停機(lblLF1Stime)
+        OA 時間 (ph_lblShowNow_header)
     - LF2：
         爐號(lbllf2_heat)、
         開始(lbllf2_Stime)、
@@ -702,12 +708,18 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
         return b
 
     lf1_s = _parse_time(get("lblLf1_Stime"))
+    # 防止讀取到的"開始處理時間"為前一天，造成「開始處理時間」、「處理結束時間」的日期錯誤
+    # 目前暫時用「開始處理時間」與現在時間的差距是否超過10小時間判斷，並處理。
+    if abs(now - lf1_s) > pd.Timedelta(hours=10):
+        lf1_s -= pd.Timedelta(days=1)
     lf1_e = _simple_adjust_cross(lf1_s, _parse_time(get("lbllf1_Etime")))
-    #lf1_stop = _parse_time(get("lblLF1Stime"))
     lf1_stop = None
     lf2_s = _parse_time(get("lbllf2_stime"))
+    # 目前暫時用「開始處理時間」與現在時間的差距是否超過10小時間判斷，並處理。
+    if abs(now - lf2_s) > pd.Timedelta(hours=10):
+        lf1_s -= pd.Timedelta(days=1)
     lf2_e = _simple_adjust_cross(lf2_s, _parse_time(get("lbllf2_Etime")))
-    #lf2_stop = _parse_time(get("lblLF2Stime"))
+
     lf2_stop = None
     data = {
         "LF1": {
