@@ -357,6 +357,7 @@ def scrape_schedule(
 
     # A schedule is classified as "past" if both columns ('actual start time' and 'actual end time')
     # are notna().
+
     mask_1 = a_s.notna() & a_e.notna()
 
     # A schedule is classified as "future" if all the following conditions are met:
@@ -368,7 +369,7 @@ def scrape_schedule(
 
     s_furnace_id = s_2138_classify['狀態爐號']
     s_s = s_2138_classify["狀態開始"]
-    diff = ~(p_s.sub(s_s) < pd.Timedelta(minutes=30))
+    diff = ~(p_s.sub(s_s) < pd.Timedelta(minutes=50))
 
     mask_2 = (p_s.gt(now)
               & p_e.gt(now)
@@ -878,10 +879,8 @@ def _preprocess_schedule(raw_sched: List, is_2138: bool = True):
         # 對每筆pre_merge_df 挑 overlap 最大的那一筆 actual
         best = m.groupby('index', as_index=False).head(1)
 
-        # 只要真的有候選 (「開始時間」,「結束時間」非NaT) 就回寫；允許「沒重疊但最近」
-        # exclude the row with NaT at actual start and end time during 2nd merge
-        hit = (best['開始時間'].notna() & best['結束時間'].notna() &
-               best['實際開始時間'].notna() & best['實際結束時間'].notna())
+        # Accept candidate start/end only if timestamp is NaN and has_overlap == True
+        hit = (best['has_overlap'] == True) & best['開始時間'].notna() & best['結束時間'].notna()
 
         # 等號右邊轉為 numpy，是為了避免標籤對齊，改用純位置寫入，穩定且更快速
         final_merge_df.loc[best.loc[hit, 'index'], ['實際開始時間', '實際結束時間']] = (
