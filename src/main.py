@@ -17,8 +17,7 @@ from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
-from src.utils.sample_io import save_sample_df, load_sample_df
-from utils.debug_snapshot import export_debug_snapshot
+from utils.offline_capture import capture_offline_bundle
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -292,10 +291,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.pi_client = pi_client
 
         # -------- 從外部資料讀取設定檔，並儲存成這個實例本身的成員變數 -----------
-        self.tag_list = pd.read_excel('../parameter.xlsx', sheet_name=0).dropna(how='all')
-        self.special_dates = pd.read_excel('../parameter.xlsx', sheet_name=1)
-        self.unit_prices = pd.read_excel('../parameter.xlsx', sheet_name=2, index_col=0)
-        self.time_of_use = pd.read_excel('../parameter.xlsx', sheet_name=3)
+        self.tag_list = pd.read_excel('./parameter.xlsx', sheet_name=0).dropna(how='all')
+        self.special_dates = pd.read_excel('./parameter.xlsx', sheet_name=1)
+        self.unit_prices = pd.read_excel('./parameter.xlsx', sheet_name=2, index_col=0)
+        self.time_of_use = pd.read_excel('./parameter.xlsx', sheet_name=3)
 
         # ---------------統一設定即時值、平均值的背景及文字顏色----------------------
         self.real_time_text = "#145A32"   # 即時量文字顏色 深綠色文字
@@ -322,7 +321,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
         self.pushButton_9.clicked.connect(self.on_show_trend)
-        self.pushButton_7.clicked.connect(self.snapshot)
+        #self.pushButton_7.clicked.connect(self.snapshot)
 
         self.listWidget_2.addItems(['HSM 軋延機組'])
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
@@ -348,6 +347,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # ===== 燃氣發電佔比的 pie chart 相關初始化 =====
         self.pie = PieChartArea(self.verticalLayout_2, with_toolbar=False)
+        self.pie.set_title(title="TG 燃料配比(即時)")
         self._last_pie_series: Optional[pd.Series] = None   # 用來暫存最後一筆要給pie chart 用的資料
         self.comboBox.currentIndexChanged.connect(self._on_tg_switch)
         self.tw3_2.itemSelectionChanged.connect(self._on_tw3_2_select) #tw3_2 點選 TG 節點切換
@@ -364,14 +364,12 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
         self.checkBox_5.setChecked(True)
         self.comboBox_3.setCurrentIndex(3)
+        self.comboBox_3.setCurrentText("產線排程")
 
         try:
             self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
         except Exception:
             pass
-
-    def snapshot(self):
-        export_debug_snapshot(main_window=self, pi_client=self.pi_client)
 
     @QtCore.pyqtSlot(object)
     def on_schedule_result(self, res_obj: object) -> None:
@@ -731,15 +729,26 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         此函式只負責「顯示/切換哪一個 chart 容器頁籤」，實際資料繪製與更新
         由其他 slot（例如 `on_stack_df`）處理。
         """
+        # 根據"顯示圖表"的選項勾選與否，決定要不要顯示相關widget
         if not self.checkBox_5.isChecked():
             self.chartHost.setVisible(False)
             self.comboBox_3.setVisible(False)
+            self.label_46.setVisible(False)
+            self.comboBox.setVisible(False)
             return
         self.chartHost.setVisible(True)
         self.comboBox_3.setVisible(True)
 
         mode = self.comboBox_3.currentIndex()
         self.chartHost.setCurrentIndex(mode)
+
+        # 根據顯示圖表的範圍，決定要不要顯示發電機編號的選項
+        if mode == 0:
+            self.label_46.setVisible(True)
+            self.comboBox.setVisible(True)
+        else:
+            self.label_46.setVisible(False)
+            self.comboBox.setVisible(False)
 
     def fetch_stack_raw_df(self) -> pd.DataFrame:
         """
@@ -839,7 +848,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.canvas_fuel.mode = "by_fuel"
             self.canvas_fuel.colors = {"NG": "#4E79A7", "COG": "#F28E2B", "MG": "#59A14F"}
             cols = [c for c in ["NG", "COG", "MG"] if c in df.columns]
-            self.canvas_fuel.plot(df[cols])
+            self.canvas_fuel.plot(df[cols],legend_title="TGs 過去兩小時燃氣使用狀況")
 
 
     @log_exceptions()
@@ -1220,7 +1229,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             show_ring = True
         else:
             show_ring = False
-        
+
         if idx == 0:
             metrics = self.compute_pie_metrics(self._last_pie_series)
             self.pie.update_from_metrics(
@@ -1230,7 +1239,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 tg_count=metrics["tg_count"],
                 order=('NG', 'MG', 'COG'),
                 show_diff_ring=show_ring,
-                title = None,
+                center_title= None,
                 #title=f"TG1~TG4 燃料發電比例",
             )
         else:
@@ -1242,14 +1251,14 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             title = None
             metrics = self.compute_pie_metrics_by_tg(self._last_pie_series, tg_no)
             if metrics.get('inactive'):
-                self.pie.render_inactive(title=title, message="未運轉 / 無資料")
+                self.pie.render_inactive(message="未運轉 / 無資料")
             else:
                 self.pie.set_show_diff_ring(show_ring) # 這個部份後續可能會有選項勾選與否，與現況未即時同步的情況
                 self.pie.update_from_metrics(flows = metrics['flows'],
                                              est_power = metrics['mw_est'],
                                              real_total = metrics ['mw_real'],
                                              tg_count = 1,
-                                             title = title,
+                                             center_title= title,
                                              group_label = tg_name)
 
     def _on_tw3_2_select(self):
@@ -1287,16 +1296,15 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 tg_no = int(text[2:])
                 if 1 <= tg_no <= 4 and hasattr(self, "_last_pie_series"):
                     metrics = self.compute_pie_metrics_by_tg(self._last_pie_series, tg_no)
-                    #title = f"TG{tg_no} 燃料發電比例"
                     title = None
                     if metrics.get('inactive'):
-                        self.pie.render_inactive(title=title, message="未運轉 / 無資料")
-                    self.pie.set_title(title) if hasattr(self, "pie") else None
+                        self.pie.render_inactive(message="未運轉 / 無資料")
+
                     self.pie.update_from_metrics(flows = metrics['flows'],
                                                  est_power = metrics['mw_est'],
                                                  real_total = metrics ['mw_real'],
                                                  tg_count = 1,
-                                                 title = title,
+                                                 center_title= title,
                                                  group_label=text,
                                                  )
             else:
@@ -1308,7 +1316,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     tg_count=metrics["tg_count"],
                     order=('NG', 'MG', 'COG'),
                     show_diff_ring=show_ring,
-                    title=None,
+                    center_title=None,
                     #title=f"TG1~TG4 燃料發電比例",
                 )
 

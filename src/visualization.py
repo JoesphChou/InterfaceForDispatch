@@ -53,7 +53,7 @@ class GanttCanvas(FigureCanvas):
             "EAF":  "#4E79A7",
             "LF1-1":"#F28E2B",
             "LF1-2":"#4DB5B2",
-            "LF1":  "#FF62CD",
+            "LF1":  "#A89E2F",
             "LF2":  "#59A14F",
         }
         self.state_alpha = {
@@ -569,7 +569,7 @@ class PieChartArea(QtCore.QObject):
                     arrowprops=dict(arrowstyle="-", lw=0.9, color="#666"),
                 )
 
-    def _build_mini_flow_legend(self, *, flows: Dict[str, float], tg_count: int, anchor: str = "ll") -> None:
+    def _build_mini_flow_legend(self, *, flows: Dict[str, float], tg_count: int) -> None:
         """
         於圖角落建立小型流量圖例：「目前流量/安全上限 Nm³/h (xx%)」。
 
@@ -578,8 +578,7 @@ class PieChartArea(QtCore.QObject):
         - 以每台 TG 的安全上限：COG=24,000、MG=200,000、NG=10,000（Nm³/h），
           乘上 tg_count 推得當前上限，並以 flows[k]/limit 計算百分比。
         - 僅顯示流量大於 0 的燃氣鍵值；顏色沿用各扇區顏色。
-        - anchor 控制角落位置："ll"=左下、"lr"=右下；標籤字型採等寬以利數字對齊。
-        - 此 legend 透過 bbox_to_anchor 固定在圖視窗角落，與扇區標籤相互獨立。
+        - 此 legend 透過 bbox_to_anchor 固定在圖視窗正方方，與扇區標籤相互獨立。
 
         Parameters
         ----------
@@ -587,8 +586,6 @@ class PieChartArea(QtCore.QObject):
             各燃氣流量（Nm³/h），為 0 的燃氣不顯示。
         tg_count : int
             目前運轉的 TG 台數，用於計算總安全上限。
-        anchor : str, optional
-            "ll" 或 "lr"；預設左下 ("ll")，可視扇區標籤分佈動態切換以減少重疊。
         """
         # from matplotlib.patches import Rectangle
         per_tg_limit = {"COG": 24000, "MG": 200000, "NG": 10000}
@@ -608,13 +605,8 @@ class PieChartArea(QtCore.QObject):
         if not handles:
             return
 
-        # 動態角落：左下或右下
-        if anchor == "lr":
-            bta = (0.98, 0.02)  # 右下
-            loc = "lower right"
-        else:
-            bta = (0.02, 0.02)  # 左下
-            loc = "lower left"
+        loc = "lower center"
+        bta = (0.5, 0)
 
         leg = self._ax.legend(
             handles, labels,
@@ -672,7 +664,7 @@ class PieChartArea(QtCore.QObject):
         order: Optional[Iterable[str]] = None,
         colors: Optional[Dict[str, str]] = None,
         show_diff_ring: Optional[bool] = None,
-        title: Optional[str] = None,
+        center_title: Optional[str] = None,
         tg_count: Optional[int] = None,
         group_label: Optional[str] = None,
     ) -> None:
@@ -692,8 +684,7 @@ class PieChartArea(QtCore.QObject):
             * `show_diff_ring=True`：顯示「估算、實際、誤差」三行。
             * `show_diff_ring=False`：顯示群組名稱（或 `group_label`）＋第二行為實際 MW。
           摘要字級由 _fit_center_text() 自動縮放。
-        - 左下角 legend：呼叫 _build_mini_flow_legend() 以「目前流量/安全上限 Nm³/h (xx%)」樣式，
-          並依扇區方位自動選擇左下或右下角，盡量避開標籤重疊。
+        - 下方中央呼叫 _build_mini_flow_legend() 以「目前流量/安全上限 Nm³/h (xx%)」樣式，
 
         Parameters
         ----------
@@ -709,8 +700,8 @@ class PieChartArea(QtCore.QObject):
             各燃氣顏色表。
         show_diff_ring : bool, optional
             是否顯示差額外環（不提供則沿用現狀）。
-        title : str, optional
-            圖表標題；若外層以 QLabel 呈現標題，此參數可為 None。
+        center_title : str, optional
+            圖表中央標題； 圓餅圖中心呈現的標題內容。
         tg_count : int, optional
             目前運轉 TG 數量，供流量安全上限計算用。
         group_label : str, optional
@@ -730,10 +721,10 @@ class PieChartArea(QtCore.QObject):
             self.set_show_diff_ring(show_diff_ring)
         # ----- 標題與上緣間距 -----
         if self._title:
-            self._ax.set_title(self._title, fontsize=11, pad=14)
+            self._ax.set_title(self._title, fontsize=12, pad=6, fontweight="bold", color="#222222")
             # 有標題：留一點頭部空間
             try:
-                self._fig.subplots_adjust(top=0.88)
+                self._fig.subplots_adjust(top=0.90)
             except Exception:
                 pass
         else:
@@ -779,7 +770,7 @@ class PieChartArea(QtCore.QObject):
         total = sum(float(disp_power.get(k, 0.0)) for k in self._order)
         if total <= 1e-9:
             msg = "未運轉 / 無資料"
-            self.render_inactive(title=title or self._title, message=msg)
+            self.render_inactive(message=msg)
             return
 
         self._ax.clear()
@@ -831,12 +822,13 @@ class PieChartArea(QtCore.QObject):
         grp = (group_label or "").strip()
         if not grp:
             grp = "TGs"
-        if title:
-            head = str(title).strip().split()[0]
+        if center_title:
+            head = str(center_title).strip().split()[0]
             if head.upper().startswith("TG"):
                 grp = head
+
         if self._show_diff_ring:
-            # 解析群組標籤：優先 group_label（若你已有）；否則從 title 首字抓 "TGx"；最後預設 "TGs"
+            # 解析群組標籤：優先 group_label（若你已有）；否則從 center_title 首字抓 "TGx"；最後預設 "TGs"
             gap = float(real_total - est_total)
             gap_sign = "＋" if gap >= 0 else "－"
             gap_rate = (gap / real_total * 100.0) if real_total > 1e-9 else 0.0
@@ -850,36 +842,20 @@ class PieChartArea(QtCore.QObject):
             center_text = f"{grp} 發電量\n{real_total:.2f} MW"
         self._fit_center_text(center_text)
 
-        # ---- 外標籤預估落點（用扇區中線角度），若左下太擠就把 legend 放到右下 ----
-        mid_angles = [0.5 * (w.theta1 + w.theta2) for w in wedges]  # 角度 0~360，0 在 x+，逆時針
-
-        def quadrant(angle_deg):
-            a = (angle_deg % 360)
-            # 我們關心下半部：左下 ~225±45、右下 ~315±45
-            if 180 <= a < 270:  # 第三象限（左下）
-                return "LL"
-            if 270 <= a < 360:  # 第四象限（右下）
-                return "LR"
-            return "OTHER"
-
-        ll_count = sum(1 for a in mid_angles if quadrant(a) == "LL")
-        lr_count = sum(1 for a in mid_angles if quadrant(a) == "LR")
-        anchor = "ll" if ll_count <= lr_count else "lr"
-
-        self._build_mini_flow_legend(flows=flows, tg_count=tg_count or 4, anchor=anchor)
+        # ---- 外標籤預估落點（由原本動態調整改為固定在下方中央） ----
+        self._build_mini_flow_legend(flows=flows, tg_count=tg_count or 4)
 
         if self._title:
-            self._ax.set_title(self._title, fontsize=11, pad=16)
+            self._ax.set_title(self._title, fontsize = 12, pad = 6, fontweight = "bold", color = "#222222")
 
         self._ax.axis("equal")
         self._fig.canvas.draw_idle()
 
-    def render_inactive(self, *, title: str = None, message: str = "未運轉 / 無資料") -> None:
+    def render_inactive(self, *, message: str = "未運轉 / 無資料") -> None:
         """
         在沒有有效數據時安全顯示「未運轉 / 無資料」狀態。
 
         Args:
-            title (str, optional): 圖表標題，若提供則會更新標題。
             message (str, optional): 中央顯示的訊息，預設為「未運轉 / 無資料」。
 
         Notes:
@@ -889,9 +865,6 @@ class PieChartArea(QtCore.QObject):
         """
         self._ax.clear()
 
-        # 更新顏色/標題（若有）
-        if title is not None:
-            self._title = title  # 你若有上方 QLabel，可無視這行；保留不影響
         # 畫一個淡淡的甜甜圈底環當占位（可選）
         ring = mpatches.Wedge(center=(0, 0), r=1.0, theta1=0, theta2=360,
                               width=self._donut_width, facecolor="#e6e6e6", edgecolor="white", linewidth=1.0)
@@ -905,8 +878,6 @@ class PieChartArea(QtCore.QObject):
         if leg is not None:
             leg.remove()
 
-        if self._title:
-            self._ax.set_title(self._title, fontsize=11, pad=16)
         self._ax.axis("equal")
         self._fig.canvas.draw_idle()
 
@@ -1239,7 +1210,7 @@ class StackedAreaCanvas(FigureCanvas):
         self._last_idx = -1
 
         # ✅ 固定邊界（下方給 legend）
-        self._pad = dict(left=0.08, right=0.98, top=0.94, bottom=0.32)
+        self._pad = dict(left=0.08, right=0.98, top=0.90, bottom=0.27)
         self.figure.subplots_adjust(**self._pad)
 
     def plot(self,
@@ -1348,7 +1319,11 @@ class StackedAreaCanvas(FigureCanvas):
 
         # --- legend：兩行自動換行（第一行不溢出，多的分類放到第二行；總計在第二行） ---
         # 預留底部空間（兩行 legend）
-        self.figure.subplots_adjust(bottom=0.32)
+
+        if legend_title:
+            self.ax.set_title(
+                legend_title, fontsize=12, fontweight="bold", pad=14, color="#222222"
+            )
 
         # 先確保 renderer 可用
         self.draw()
@@ -1541,6 +1516,7 @@ class StackedAreaCanvas(FigureCanvas):
             except Exception:
                 pass
         self._move_cid = self.mpl_connect('motion_notify_event', self._on_mouse_move)
+
 
     def _update_bottom_legend(self, idx: int):
         """
