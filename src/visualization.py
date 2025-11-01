@@ -51,10 +51,10 @@ class GanttCanvas(FigureCanvas):
         # 顏色配置（可依喜好微調）
         self.proc_colors = {
             "EAF":  "#4E79A7",
-            "LF1-1":"#F28E2B",
+            "LF1-1":"#2EBA1F",
             "LF1-2":"#4DB5B2",
             "LF1":  "#A89E2F",
-            "LF2":  "#59A14F",
+            "LF2":  "#B85451",
         }
         self.state_alpha = {
             "past":   0.35,

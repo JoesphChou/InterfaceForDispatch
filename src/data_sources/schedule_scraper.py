@@ -85,9 +85,12 @@ _HEIGHT_RULES: Dict[str, Dict[str, Dict[str, Any]]] = {
 }
 
 # Title patterns used by MES page when hovering the area map.
+# 針對2138 title 中，出現不含"A"、"B" 文字內容時，可能會造成該排程無法被辨識
 _TIME_PATTERNS: Dict[str, str] = {
-    proc: rf"{proc}時間:\s*(\d{{2}}:\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}}:\d{{2}})"  # noqa: E501
-    for proc in _FIXED_LANES_2138
+    'EAFA': r"EAF[AB]?時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})",
+    'EAFB': r"EAF[AB]?時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})",
+    'LF1-1': r"LF1-1時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})",
+    'LF1-2': r"LF1-2時間:\s*(\d{2}:\d{2}:\d{2})\s*~\s*(\d{2}:\d{2}:\d{2})",
 }
 
 # 2133：title 辨識
@@ -256,7 +259,8 @@ def scrape_schedule(
         x1, y1, x2, y2 = coords
         y_mid = (y1+y2)/2
         process_type = _lane_by_y(y_mid, fixed_2138)
-        if process_type is None or process_type not in title:
+        # 移除process_type not in title 的條件，避免單獨只有"EAF" 關鍵字的title 被略過
+        if process_type is None:
             continue
 
         res = _classify_rectangle("2138", coords, title, fixed_2138)
@@ -270,10 +274,8 @@ def scrape_schedule(
         re 在匹配時，改用findall 以list 的方式，回傳所有匹配的資料
         """
         if res.label == "輔助":
-            #m = re.search(rf"{process_type}送電:\s*(\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}})", title)
             m = re.findall(rf"{process_type}送電:\s*(\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}})", title)
         else:
-            #m = re.search(_TIME_PATTERNS[process_type], title)
             m = re.findall(_TIME_PATTERNS[process_type], title)
 
         today = now.date().isoformat()
@@ -768,128 +770,217 @@ def _preprocess_schedule(raw_sched: List, is_2138: bool = True):
         - 計算時間窗重疊量 overlap（>0 視為重疊），以及距離 distance
         - 以 has_overlap DESC, overlap_pos DESC, distance ASC 取最佳一筆
         - 命中者回寫至「實際開始時間/實際結束時間」
+
     4) 若是 is_2138=True，再用「輔助層」做第二次對齊（EAFA/EAFB）：
-        - 以（製程）左連結 aux，重算 overlap/distance
-        - 僅當第一階段已具「實際開始/實際結束」時，才用 aux 覆寫為更精準的時間窗
-        - 目的是把 EAFA/EAFB 的綠色「送電刻度」時間窗對齊到相對的表定區段
+        - 以（製程）左連接 aux（aux 沒有爐號），展開候選
+        - 兩階段一對一指派：
+            (A) 重疊優先：overlap_pos DESC, gap ASC, plan_start ASC
+            (B) 最近距離保底：gap ASC, Δs ASC, Δe ASC, plan_start ASC
+        - 覆寫策略：
+            overlap → 允許覆寫既有實際時間（更精準）
+            nearest → 僅在實際時間為 NaT 時填入（避免誤覆寫）
+
+    距離與比較鍵（tie-break）
+    ------------------------
+    gap(A,P) = max(P.start - A.end, A.start - P.end, 0)
+    比較順序：
+        1) gap 由小到大
+        2) Δs = |A.start - P.start| 由小到大
+        3) Δe = |A.end   - P.end  | 由小到大
+        4) plan_start 較早者優先（穩定排序）
 
     回傳
     ----
     pd.DataFrame
         欄位至少包含：
         ['爐號','製程','表定開始時間','表定結束時間','實際開始時間','實際結束時間']
-        （呼叫端可再將欄位轉為「開始時間/結束時間」再行分類）
 
     備註
     ----
     - 本函式不做 past/current/future 的切桶；分類在上層以 now 與 2137/2143 狀態完成。
-    - 合併策略允許「未重疊但最近」的匹配，以支援 MES 實務中偶發的剪裁或位移。
+    - 第二階段的 EAF/aux 僅在 2138 啟用；其它製程或頁面不受影響。
     """
+
+    # -----------------------------
+    # 內部：第一階段合併（表定×實際）
+    # -----------------------------
     def _merge(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
         """
-            整合排程的表定、實際時間
+        整合排程的表定、實際時間（重疊優先；若無重疊採最近）
         """
-        # 以pre_merge_df 和 actual 的 ['爐號','製程'] 左連接，展開候選
         m = (
             df1.reset_index()      # 保存原索引，等一下回寫用的
             .merge(df2[['開始時間', '結束時間', '爐號', '製程']],
                    left_on=['爐號','製程'], right_on=['爐號','製程'], how='left')
         )
 
-        # 計算時間窗重疊度: overlap = max(0, min(c,i) -max(b,h)
+        # 計算時間窗重疊度與距離
         start_max = m[['表定開始時間','開始時間']].max(axis=1)
-        end_min = m[['表定結束時間', '結束時間']].min(axis=1)
+        end_min   = m[['表定結束時間', '結束時間']].min(axis=1)
         m['overlap_pos'] = (end_min - start_max).clip(lower=pd.Timedelta(0))
-        m['distance'] = (start_max - end_min).clip(lower=pd.Timedelta(0))
+        m['distance']    = (start_max - end_min).clip(lower=pd.Timedelta(0))
         m['has_overlap'] = m['overlap_pos'] > pd.Timedelta(0)
 
         m = m.sort_values(['index', 'has_overlap', 'overlap_pos', 'distance'],
                           ascending=[True, False, False, True])
-        # 對每筆pre_merge_df 挑 overlap 最大的那一筆 actual
+        # 對每筆 df1 挑 overlap 最大、距離最小的那一筆 actual
         best = m.groupby('index', as_index=False).head(1)
 
-        # 只要真的有候選 (「開始時間」,「結束時間」非NaT) 就回寫；允許「沒重疊但最近」
         hit = best['開始時間'].notna() & best['結束時間'].notna()
 
-        # 等號右邊轉為 numpy，是為了避免標籤對齊，改用純位置寫入，穩定且更快速
+        # 回寫（使用 to_numpy 避免標籤對齊問題）
         df1.loc[best.loc[hit, 'index'], ['實際開始時間', '實際結束時間']] = (
-            best.loc[hit,['開始時間','結束時間']].to_numpy())
+            best.loc[hit, ['開始時間','結束時間']].to_numpy()
+        )
 
-        # numpy 轉存進來的格式為是object，把格式由object 轉成datetime64[ns]
+        # 正規化格式
         df1[['實際開始時間', '實際結束時間']] = df1[['實際開始時間', '實際結束時間']].apply(pd.to_datetime)
-        out = df1.copy()
-        return out
+        return df1
 
+    # ---------- 將 raw_sched 轉為 DataFrame、排序並做跨日展開 ----------
     df = pd.DataFrame(raw_sched)
-
-    # ------------ 排序、調整跨天 ---------------
-    # by 製程，並依照x 座標排序、開始時間排程, 結束後轉為list
-    # 等等需要再安排其它邏輯
-    sorted_df = df.sort_values([4, 0, 1])
-
+    sorted_df = df.sort_values([4, 0, 1])  # 依 製程(第4欄)、x座標(第0欄)、開始時間(第1欄)
     sorted_list = list(sorted_df.itertuples(index=False, name=None))
 
-    # 處理跨天後, 將結果轉為pd.DataFrame
     adjusted_cross_day_list = _adjust_cross_day(sorted_list, pd.Timestamp.now())
     adjusted_cross_day_df = pd.DataFrame(adjusted_cross_day_list)
     adjusted_cross_day_df.columns = ['x座標', '開始時間', '結束時間', '爐號', '製程', '類別']
-    # ------------ 將離散的表定、實際、輔助記錄，配對及合併起來 ------------
-    # 讀取記錄中有那些製程
-    proc_set = set(pd.unique(adjusted_cross_day_df.loc[:,'製程'].dropna()))
 
-    # 取出表定、實際、輔助的資料
+    # ---------- 分拆 plan / actual / aux ----------
     planed = adjusted_cross_day_df.loc[adjusted_cross_day_df['類別'].eq("表定")].copy()
     actual = adjusted_cross_day_df.loc[adjusted_cross_day_df['類別'].eq("實際")].copy()
-    aux = adjusted_cross_day_df.loc[adjusted_cross_day_df['類別'].eq("輔助")].copy()
+    aux    = adjusted_cross_day_df.loc[adjusted_cross_day_df['類別'].eq("輔助")].copy()
 
-    pre_merge_df = planed.copy()
-    pre_merge_df = pre_merge_df[['爐號','製程','開始時間','結束時間']]
-    pre_merge_df = pre_merge_df.rename(columns={"開始時間": "表定開始時間", "結束時間": "表定結束時間"})
-    pre_merge_df["實際開始時間"] = None
-    pre_merge_df["實際結束時間"] = None
+    pre_merge_df = planed[['爐號','製程','開始時間','結束時間']].rename(
+        columns={"開始時間": "表定開始時間", "結束時間": "表定結束時間"}
+    )
+    pre_merge_df["實際開始時間"] = pd.NaT
+    pre_merge_df["實際結束時間"] = pd.NaT
 
-    # ["爐號","製程","開始時間","結束時間","實際開始時間","實際結束時間","預計完成時間","製程狀態"]
+    # 時間欄位正規化
+    for col in ['表定開始時間','表定結束時間']:
+        pre_merge_df[col] = pd.to_datetime(pre_merge_df[col], errors='coerce')
+    for col in ['開始時間','結束時間']:
+        if col in actual.columns:
+            actual[col] = pd.to_datetime(actual[col], errors='coerce')
 
-    # 確保時間是 datetime
-    for col in ['表定開始時間','表定結束時間']: pre_merge_df[col] = pd.to_datetime(pre_merge_df[col])
-    for col in ['開始時間','結束時間']: actual[col] = pd.to_datetime(actual[col])
-
-    second_merge_df = _merge(pre_merge_df, actual)
-
+    # ---------- 第一階段：表定×實際（以爐號+製程） ----------
+    second_merge_df = _merge(pre_merge_df.copy(), actual)
     out = second_merge_df.copy()
-    # ------- 解析2138 時，EAF lane 會有 aux 資料需要再處理 ------------
+
+    # ---------- 第二階段（僅 2138 啟用）：EAF 專屬 aux 一對一配對 ----------
     if is_2138:
         final_merge_df = second_merge_df.copy()
-        # 以final_merge_df 和 aux 的 ['製程'] 左連接，展開候選 (aux 沒有爐號)
-        m = (
-            final_merge_df.reset_index()  # 保存原索引，等一下回寫用的
-            .merge(aux[['開始時間', '結束時間', '製程']],
-                   left_on=['製程'], right_on=['製程'], how='left')
-        )
 
-        # 計算時間窗重疊度: overlap = max(0, min(c,i) -max(b,h)
-        start_max = m[['表定開始時間', '開始時間']].max(axis=1)
-        end_min = m[['表定結束時間', '結束時間']].min(axis=1)
-        m['overlap_pos'] = (end_min - start_max).clip(lower=pd.Timedelta(0))
-        m['distance'] = (start_max - end_min).clip(lower=pd.Timedelta(0))
-        m['has_overlap'] = m['overlap_pos'] > pd.Timedelta(0)
+        # 僅處理 EAF 範疇（EAFA/EAFB）
+        final_merge_df['_is_eaf'] = final_merge_df['製程'].isin(['EAFA', 'EAFB'])
+        aux_eaf = aux[aux['製程'].isin(['EAFA', 'EAFB'])].copy()
 
-        m = m.sort_values(['index', 'has_overlap', 'overlap_pos', 'distance'],
-                          ascending=[True, False, False, True])
-        # 對每筆pre_merge_df 挑 overlap 最大的那一筆 actual
-        best = m.groupby('index', as_index=False).head(1)
+        if not aux_eaf.empty and final_merge_df['_is_eaf'].any():
+            # 給 aux 唯一 id（供一對一配對使用）
+            aux_eaf = aux_eaf.reset_index().rename(columns={'index': 'aux_id'})
 
-        # Accept candidate start/end only if timestamp is NaN and has_overlap == True
-        hit = (best['has_overlap'] == True) & best['開始時間'].notna() & best['結束時間'].notna()
+            # 展開 plan × aux 候選（以製程連接；aux 無爐號）
+            m = (
+                final_merge_df.reset_index()  # 產生 plan_index：欄名 'index'
+                .merge(aux_eaf[['aux_id', '開始時間', '結束時間', '製程']],
+                       on='製程', how='left')
+            )
 
-        # 等號右邊轉為 numpy，是為了避免標籤對齊，改用純位置寫入，穩定且更快速
-        final_merge_df.loc[best.loc[hit, 'index'], ['實際開始時間', '實際結束時間']] = (
-            best.loc[hit, ['開始時間', '結束時間']].to_numpy())
+            # 僅保留 EAF rows 且 aux 時間完整者
+            m['_aux_valid'] = m['開始時間'].notna() & m['結束時間'].notna()
+            m = m[m['_aux_valid'] & final_merge_df.loc[m['index'], '_is_eaf'].values].copy()
 
-        # numpy 轉存進來的格式為是object，把格式由object 轉成datetime64[ns]
-        final_merge_df[['實際開始時間', '實際結束時間']] = (final_merge_df[['實際開始時間', '實際結束時間']]
-                                                            .apply(pd.to_datetime))
-        out = final_merge_df.copy()
+            # 計算重疊與距離：overlap_pos、gap、Δs、Δe
+            start_max = m[['表定開始時間','開始時間']].max(axis=1)
+            end_min   = m[['表定結束時間','結束時間']].min(axis=1)
+
+            m['overlap_pos'] = (end_min - start_max).clip(lower=pd.Timedelta(0))
+            m['gap']         = (start_max - end_min).clip(lower=pd.Timedelta(0))
+            m['has_overlap'] = m['overlap_pos'] > pd.Timedelta(0)
+
+            m['Δs'] = (m['開始時間'] - m['表定開始時間']).abs()
+            m['Δe'] = (m['結束時間'] - m['表定結束時間']).abs()
+
+            used_aux: set = set()
+            used_plan: set = set()
+            chosen: list = []  # (plan_index, aux_id, aux_start, aux_end, how)
+
+            # (A) 重疊優先：overlap_pos DESC, gap ASC, plan_start ASC
+            cand_overlap = (
+                m[m['has_overlap']]
+                .sort_values(by=['overlap_pos', 'gap', '表定開始時間'],
+                             ascending=[False, True, True])
+            )
+            for r in cand_overlap.itertuples(index=False):
+                plan_idx = r.index
+                aux_id   = r.aux_id
+                if (plan_idx in used_plan) or (aux_id in used_aux):
+                    continue
+                used_plan.add(plan_idx)
+                used_aux.add(aux_id)
+                chosen.append((plan_idx, aux_id, r.開始時間, r.結束時間, 'overlap'))
+
+            # (B) 最近距離保底：gap ASC, Δs ASC, Δe ASC, plan_start ASC
+            cand_gap = m[~m['has_overlap']].copy()
+            if not cand_gap.empty:
+                cand_gap = cand_gap.sort_values(
+                    by=['gap', 'Δs', 'Δe', '表定開始時間'],
+                    ascending=[True, True, True, True]
+                )
+                for r in cand_gap.itertuples(index=False):
+                    plan_idx = r.index
+                    aux_id   = r.aux_id
+                    if (plan_idx in used_plan) or (aux_id in used_aux):
+                        continue
+                    used_plan.add(plan_idx)
+                    used_aux.add(aux_id)
+                    chosen.append((plan_idx, aux_id, r.開始時間, r.結束時間, 'nearest'))
+
+            # 寫回：overlap 可覆寫；nearest 僅在 NaT 時填入
+            if chosen:
+                chosen_df = pd.DataFrame(
+                    chosen, columns=['plan_index', 'aux_id', 'aux_start', 'aux_end', 'how']
+                )
+
+                # overlap 覆寫
+                overlap_pairs = chosen_df[chosen_df['how'].eq('overlap')]
+                if not overlap_pairs.empty:
+                    final_merge_df.loc[overlap_pairs['plan_index'], ['實際開始時間','實際結束時間']] = (
+                        overlap_pairs[['aux_start','aux_end']].to_numpy()
+                    )
+
+                # nearest 僅在 NaT 時填入
+                nearest_pairs = chosen_df[chosen_df['how'].eq('nearest')]
+                if not nearest_pairs.empty:
+                    sel = nearest_pairs['plan_index']
+                    mask_na = (final_merge_df.loc[sel, '實際開始時間'].isna() &
+                               final_merge_df.loc[sel, '實際結束時間'].isna())
+                    if mask_na.any():
+                        idx_to_fill = sel[mask_na.values].to_numpy()
+                        fill_rows   = nearest_pairs.loc[mask_na.values, ['aux_start','aux_end']].to_numpy()
+                        final_merge_df.loc[idx_to_fill, ['實際開始時間','實際結束時間']] = fill_rows
+
+                # 正規化為 datetime64[ns]
+                final_merge_df[['實際開始時間','實際結束時間']] = (
+                    final_merge_df[['實際開始時間','實際結束時間']].apply(pd.to_datetime)
+                )
+
+                # 除錯統計輸出（若 logger 不存在則忽略）
+                try:
+                    overlap_n = int((chosen_df['how'] == 'overlap').sum())
+                    nearest_n = int((chosen_df['how'] == 'nearest').sum())
+                    logger.debug(
+                        "2138/EAF aux 配對：重疊配對 %d 筆，最近距離補配對 %d 筆；剩餘未配對 aux %d",
+                        overlap_n, nearest_n,
+                        max(0, len(aux_eaf) - (overlap_n + nearest_n))
+                    )
+                except Exception:
+                    pass
+
+            final_merge_df.drop(columns=['_is_eaf'], inplace=True)
+            out = final_merge_df.copy()
+
     return out
 
 def _lane_by_y(y_mid: float, fixed_lanes: Optional[Dict[str, Dict[str, float]]]) -> Optional[str]:
