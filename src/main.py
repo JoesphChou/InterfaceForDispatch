@@ -1,6 +1,6 @@
 from logging_utils import setup_logging, log_exceptions, timeit, get_logger
 
-setup_logging("../logs/app.log", level="INFO")
+setup_logging("./logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
 import sys, re, math, time
@@ -17,7 +17,6 @@ from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
-from utils.offline_capture import capture_offline_bundle
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -291,10 +290,10 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.pi_client = pi_client
 
         # -------- 從外部資料讀取設定檔，並儲存成這個實例本身的成員變數 -----------
-        self.tag_list = pd.read_excel('./parameter.xlsx', sheet_name=0).dropna(how='all')
-        self.special_dates = pd.read_excel('./parameter.xlsx', sheet_name=1)
-        self.unit_prices = pd.read_excel('./parameter.xlsx', sheet_name=2, index_col=0)
-        self.time_of_use = pd.read_excel('./parameter.xlsx', sheet_name=3)
+        self.tag_list = pd.read_excel('../parameter.xlsx', sheet_name=0).dropna(how='all')
+        self.special_dates = pd.read_excel('../parameter.xlsx', sheet_name=1)
+        self.unit_prices = pd.read_excel('../parameter.xlsx', sheet_name=2, index_col=0)
+        self.time_of_use = pd.read_excel('../parameter.xlsx', sheet_name=3)
 
         # ---------------統一設定即時值、平均值的背景及文字顏色----------------------
         self.real_time_text = "#145A32"   # 即時量文字顏色 深綠色文字
@@ -393,6 +392,8 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         res = cast(ScheduleResult, res_obj)
         self.update_tw4_schedule(res)
+        if not res.ok:
+            self.statusBar().showMessage(f"排程更新失敗:{res.reason}",msecs=0)
 
         if not hasattr(self, "canvas_gantt") or self.canvas_gantt is None:
             self.canvas_gantt = GanttCanvas()
@@ -440,6 +441,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         if not res.ok:
             self.statusBar().showMessage(f"排程更新失敗:{res.reason}")
+            return
 
         past_df = res.past
         current_df = res.current

@@ -36,6 +36,7 @@ from typing import Optional, Dict, List, Tuple, Sequence, Any
 import pandas as pd
 import numpy as np
 from datetime import datetime
+
 from src.logging_utils import get_logger
 logger = get_logger(__name__)
 
@@ -235,300 +236,309 @@ def scrape_schedule(
     # ------------------------------------------------------------------
     soup_2138 = _fetch_soup(URL_2138, _POOL)
     soup_2137 = _fetch_soup(URL_2137, _POOL)
+    failure_2138: Optional[bool] = None
+    failure_2137: Optional[bool] = None
+    reason: str = ""
+
 
     if soup_2138 is None or soup_2137 is None:
-        return ScheduleResult(
-            ok=False,
-            past=_empty_df(),
-            current=_empty_df(),
-            future=_empty_df(),
-            reason="連線逾時或伺服器暫時無回應",
+        failure_2138 = True
+        failure_2137 = True
+        reason = " 2138 2137"
+
+    if not (failure_2138 or failure_2137):
+        areas = soup_2138.find_all("area")
+        raw_sched: List[Tuple[int, datetime, datetime, str, str, str]] = []
+        fixed_2138 = _FIXED_LANES_2138
+        multi_proc = []  # 儲存發生相同爐號重覆進同一個製程時的記錄，並用來判斷是否做後續動作。
+
+        for area in areas:
+            title = area.get("title", "")
+            coords = [int(x) for x in re.findall(r"\d+", area.get("coords", ""))]
+
+            if len(coords) < 4:
+                continue
+            x1, y1, x2, y2 = coords
+            y_mid = (y1+y2)/2
+            process_type = _lane_by_y(y_mid, fixed_2138)
+            if process_type is None:
+                continue
+
+            res = _classify_rectangle("2138", coords, title, fixed_2138)
+
+            furnace_match = re.search(r"爐號[＝>:\s]*([A-Za-z0-9]+)", title)
+            furnace_id = furnace_match.group(1) if furnace_match else "未知"
+
+            # The times in the green rectangles don't include seconds, so we have to handle them separately.
+            """
+            debug: 相同爐號重覆進同一個製程 (EAF、LF1-1、LF1-2)，在_preprocess_schedule() 後會發生製程錯誤
+            re 在匹配時，改用findall 以list 的方式，回傳所有匹配的資料
+            """
+            if res.label == "輔助":
+                m = re.findall(rf"{process_type}送電:\s*(\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}})", title)
+            else:
+                m = re.findall(_TIME_PATTERNS[process_type], title)
+
+            today = now.date().isoformat()
+            if not m:
+                continue
+            """ 
+                如果匹配出來的時間<2, 代表同一爐號沒有重覆進同一製程的問題
+                >=，也存在另一個list，待後續匹配正確的x座標和開始時間。
+            """
+            if len(m) < 2:
+               start_ts, end_ts = m[0]
+               start = pd.to_datetime(f"{today} {start_ts}")
+               end = pd.to_datetime(f"{today} {end_ts}")
+               raw_sched.append((coords[0], start, end, furnace_id, process_type, res.label))
+            else:
+                for i in range(len(m)):
+                    start_ts, end_ts = m[i]
+                    start = pd.to_datetime(f"{today} {start_ts}")
+                    end = pd.to_datetime(f"{today} {end_ts}")
+                    multi_proc.append((coords[0], start, end, furnace_id, process_type, res.label))
+
+        if multi_proc:
+            # 同爐號在同製程同 label 的「多時間段」情境：
+            # 以 (爐號, 製程, 類別) 為分組鍵，對時間與 x 各自排序並標上 cumcount() 位置，
+            # 再以 (keys + _pos) merge 取得「最小 x ↔ 最早時間」的正相關一一配對，
+            # 之後將修正過的清單 append 回 raw_sched，避免後續 _preprocess_schedule() 出現錯位。
+            multi_proc_df = pd.DataFrame(multi_proc)
+
+            # keys: 你要在同一群組內配對；這裡用(爐號，製程，種類)
+            keys = [3,4,5]
+            # 1)依時間排序並標上組內位置
+            left = (multi_proc_df.sort_values(keys + [1])
+                    .assign(_pos = lambda d: d.groupby(keys).cumcount()))
+            # 2) 依座標排序並標上組內位置 (只保留座標欄)
+            right = (multi_proc_df.sort_values(keys + [0])  # 0 是「座標」
+            .assign(_pos=lambda d: d.groupby(keys).cumcount())
+            [keys + ['_pos', 0]])
+
+            # 3) 用 (keys + 位置) 對齊，得到正確配對後的座標
+            correct_df = (left.drop(columns=[0])  # 先把原本的 0 刪掉
+                   .merge(right, on=keys + ['_pos'], how='left')
+                   .drop(columns=['_pos']))
+            correct_df = correct_df[[0,1,2,3,4,5]]
+            correct_list = list(correct_df.itertuples(index=False, name=None))
+            raw_sched = raw_sched + correct_list
+
+        # If no schedule is found after parsing the webpage, initialize schedule_2133 as an
+        # empty DataFrame with predefined columns.
+        if raw_sched:
+            # Sort, adjust cross day, and merge schedule
+            schedule_2138 = _preprocess_schedule(raw_sched)
+        else:
+            schedule_2138 = pd.DataFrame(columns=['製程', '爐號','表定開始時間',
+                                                  '表定結束時間','實際開始時間','實際結束時間'])
+
+        # ------------------------------------------------------------------
+        # 2. Process status from 2137 and merge with 2138 ------------------
+        # ------------------------------------------------------------------
+        labels_2137 = _scrape_2137_labels(pool=_POOL, now=now)
+        status_2137_df = pd.DataFrame(labels_2137)
+        status_2137 = (status_2137_df
+        .T
+        .reset_index()
+        .rename(columns={
+            'index': '製程',
+            '爐號': '狀態爐號',
+            'start': '狀態開始',
+            'finish': '狀態結束',
+            'status': '狀態'
+        })
         )
 
-    areas = soup_2138.find_all("area")
-    raw_sched: List[Tuple[int, datetime, datetime, str, str, str]] = []
-    fixed_2138 = _FIXED_LANES_2138
-    multi_proc = []  # 儲存發生相同爐號重覆進同一個製程時的記錄，並用來判斷是否做後續動作。
+        status_2137['狀態開始'] = pd.to_datetime(status_2137['狀態開始'])
+        status_2137['狀態結束'] = pd.to_datetime(status_2137['狀態結束'])
+        s_2138_classify = schedule_2138.merge(status_2137, left_on=['製程', '爐號'], right_on=['製程', '狀態爐號'], how='left')
 
-    for area in areas:
-        title = area.get("title", "")
-        coords = [int(x) for x in re.findall(r"\d+", area.get("coords", ""))]
+        a_s = pd.to_datetime(s_2138_classify['實際開始時間'])
+        a_e = pd.to_datetime(s_2138_classify['實際結束時間'])
+        p_s = pd.to_datetime(s_2138_classify['表定開始時間'])
+        p_e = pd.to_datetime(s_2138_classify['表定結束時間'])
 
-        if len(coords) < 4:
-            continue
-        x1, y1, x2, y2 = coords
-        y_mid = (y1+y2)/2
-        process_type = _lane_by_y(y_mid, fixed_2138)
-        # 移除process_type not in title 的條件，避免單獨只有"EAF" 關鍵字的title 被略過
-        if process_type is None:
-            continue
+        # A schedule is classified as "past" if both columns ('actual start time' and 'actual end time')
+        # are notna().
 
-        res = _classify_rectangle("2138", coords, title, fixed_2138)
+        mask_1 = a_s.notna() & a_e.notna()
 
-        furnace_match = re.search(r"爐號[＝>:\s]*([A-Za-z0-9]+)", title)
-        furnace_id = furnace_match.group(1) if furnace_match else "未知"
+        # A schedule is classified as "future" if all the following conditions are met:
+        # (1) Both columns('plan start time' and 'plan end time') are greater than current time.
+        # (2) 'Status furnace id' matches 'furnace id', and the time difference between 'plan start'
+        #     and 'status start' is greater than 30 minutes. This prevents a subsequent scheduled
+        #     entry for the same furnace (e.g. a second run) from being incorrectly treated as the
+        #     current run.
 
-        # The times in the green rectangles don't include seconds, so we have to handle them separately.
-        """
-        debug: 相同爐號重覆進同一個製程 (EAF、LF1-1、LF1-2)，在_preprocess_schedule() 後會發生製程錯誤
-        re 在匹配時，改用findall 以list 的方式，回傳所有匹配的資料
-        """
-        if res.label == "輔助":
-            m = re.findall(rf"{process_type}送電:\s*(\d{{2}}:\d{{2}})\s*~\s*(\d{{2}}:\d{{2}})", title)
-        else:
-            m = re.findall(_TIME_PATTERNS[process_type], title)
+        s_furnace_id = s_2138_classify['狀態爐號']
+        s_s = s_2138_classify["狀態開始"]
+        diff = ~(p_s.sub(s_s) < pd.Timedelta(minutes=50))
 
-        today = now.date().isoformat()
-        if not m:
-            continue
-        """ 
-            如果匹配出來的時間<2, 代表同一爐號沒有重覆進同一製程的問題
-            >=，也存在另一個list，待後續匹配正確的x座標和開始時間。
-        """
-        if len(m) < 2:
-           start_ts, end_ts = m[0]
-           start = pd.to_datetime(f"{today} {start_ts}")
-           end = pd.to_datetime(f"{today} {end_ts}")
-           raw_sched.append((coords[0], start, end, furnace_id, process_type, res.label))
-        else:
-            for i in range(len(m)):
-                start_ts, end_ts = m[i]
-                start = pd.to_datetime(f"{today} {start_ts}")
-                end = pd.to_datetime(f"{today} {end_ts}")
-                multi_proc.append((coords[0], start, end, furnace_id, process_type, res.label))
+        mask_2 = (p_s.gt(now)
+                  & p_e.gt(now)
+                  & (s_furnace_id.isna()
+                     | (~s_furnace_id.isna()
+                        & diff
+                        )
+                )
+        )
+        # A schedule is classified as "current" if 'Status furnace id' matches 'furnace id',
+        # and the time difference between 'plan start' and 'status start' is less than 30 minutes.
+        mask_3 = ~diff
 
-    if multi_proc:
-        # 同爐號在同製程同 label 的「多時間段」情境：
-        # 以 (爐號, 製程, 類別) 為分組鍵，對時間與 x 各自排序並標上 cumcount() 位置，
-        # 再以 (keys + _pos) merge 取得「最小 x ↔ 最早時間」的正相關一一配對，
-        # 之後將修正過的清單 append 回 raw_sched，避免後續 _preprocess_schedule() 出現錯位。
-        multi_proc_df = pd.DataFrame(multi_proc)
-
-        # keys: 你要在同一群組內配對；這裡用(爐號，製程，種類)
-        keys = [3,4,5]
-        # 1)依時間排序並標上組內位置
-        left = (multi_proc_df.sort_values(keys + [1])
-                .assign(_pos = lambda d: d.groupby(keys).cumcount()))
-        # 2) 依座標排序並標上組內位置 (只保留座標欄)
-        right = (multi_proc_df.sort_values(keys + [0])  # 0 是「座標」
-        .assign(_pos=lambda d: d.groupby(keys).cumcount())
-        [keys + ['_pos', 0]])
-
-        # 3) 用 (keys + 位置) 對齊，得到正確配對後的座標
-        correct_df = (left.drop(columns=[0])  # 先把原本的 0 刪掉
-               .merge(right, on=keys + ['_pos'], how='left')
-               .drop(columns=['_pos']))
-        correct_df = correct_df[[0,1,2,3,4,5]]
-        correct_list = list(correct_df.itertuples(index=False, name=None))
-        raw_sched = raw_sched + correct_list
-
-    # If no schedule is found after parsing the webpage, initialize schedule_2133 as an
-    # empty DataFrame with predefined columns.
-    if raw_sched:
-        # Sort, adjust cross day, and merge schedule
-        schedule_2138 = _preprocess_schedule(raw_sched)
+        s_2138_classify['phase'] = np.select(
+            [mask_1, mask_2, mask_3],
+            ['past', 'future', 'current'],
+            default='unknown'
+        )
     else:
-        schedule_2138 = pd.DataFrame(columns=['製程', '爐號','表定開始時間',
-                                              '表定結束時間','實際開始時間','實際結束時間'])
-
-    # ------------------------------------------------------------------
-    # 2. Process status from 2137 and merge with 2138 ------------------
-    # ------------------------------------------------------------------
-    labels_2137 = _scrape_2137_labels(pool=_POOL, now=now)  # 你新增的 2137 抓取函式；或先用硬編輯測試
-    status_2137_df = pd.DataFrame(labels_2137)
-    status_2137 = (status_2137_df
-    .T
-    .reset_index()
-    .rename(columns={
-        'index': '製程',
-        '爐號': '狀態爐號',
-        'start': '狀態開始',
-        'finish': '狀態結束',
-        'status': '狀態'
-    })
-    )
-    # 這邊有個bug，如果在跨天沒多久，該爐的起始時間點是在前一天的話，指定的日期會是系統的今天，而非昨天
-    status_2137['狀態開始'] = pd.to_datetime(status_2137['狀態開始'])
-    status_2137['狀態結束'] = pd.to_datetime(status_2137['狀態結束'])
-    s_2138_classify = schedule_2138.merge(status_2137, left_on=['製程', '爐號'], right_on=['製程', '狀態爐號'], how='left')
-
-    a_s = pd.to_datetime(s_2138_classify['實際開始時間'])
-    a_e = pd.to_datetime(s_2138_classify['實際結束時間'])
-    p_s = pd.to_datetime(s_2138_classify['表定開始時間'])
-    p_e = pd.to_datetime(s_2138_classify['表定結束時間'])
-
-    # A schedule is classified as "past" if both columns ('actual start time' and 'actual end time')
-    # are notna().
-
-    mask_1 = a_s.notna() & a_e.notna()
-
-    # A schedule is classified as "future" if all the following conditions are met:
-    # (1) Both columns('plan start time' and 'plan end time') are greater than current time.
-    # (2) 'Status furnace id' matches 'furnace id', and the time difference between 'plan start'
-    #     and 'status start' is greater than 30 minutes. This prevents a subsequent scheduled
-    #     entry for the same furnace (e.g. a second run) from being incorrectly treated as the
-    #     current run.
-
-    s_furnace_id = s_2138_classify['狀態爐號']
-    s_s = s_2138_classify["狀態開始"]
-    diff = ~(p_s.sub(s_s) < pd.Timedelta(minutes=50))
-
-    mask_2 = (p_s.gt(now)
-              & p_e.gt(now)
-              & (s_furnace_id.isna()
-                 | (~s_furnace_id.isna()
-                    & diff
-                    )
-            )
-    )
-    # A schedule is classified as "current" if 'Status furnace id' matches 'furnace id',
-    # and the time difference between 'plan start' and 'status start' is less than 30 minutes.
-    mask_3 = ~diff
-
-    s_2138_classify['phase'] = np.select(
-        [mask_1, mask_2, mask_3],
-        ['past', 'future', 'current'],
-        default='unknown'
-    )
+        s_2138_classify = pd.DataFrame(columns=['爐號', '製程','表定開始時間', '表定結束時間',
+                                                '實際開始時間','實際結束時間', '狀態爐號', '狀態開始','狀態結束',
+                                                '狀態', '停機時間', 'phase'])
 
     # ------------------------------------------------------------------
     # 3. Schedule rectangles from 2133 ---------------------------------
     # ------------------------------------------------------------------
-    areas_2133 = _fetch_2133_areas(_POOL)
+    a_2133 = _fetch_2133_areas(_POOL)
     soup_2133 = _fetch_soup(URL_2133, _POOL)
     soup_2143 = _fetch_soup(URL_2143, _POOL)
     raw_sched: List[Tuple[int, datetime, datetime, str, str, str]] = []
     fixed_2133 = _FIXED_LANES_2133
+    failure_2133: Optional[bool] = None
+    failure_2143: Optional[bool] = None
+    scc_failure: Optional[bool] = None
+    reason2: str = ""
 
     if soup_2133 is None or soup_2143 is None:
-        return ScheduleResult(
-            ok=False,
-            past=_empty_df(),
-            current=_empty_df(),
-            future=_empty_df(),
-            reason="連線逾時或伺服器暫時無回應",
+        failure_2133 = True
+        failure_2143 = True
+        reason += " 2133 2143"
+
+    if not failure_2133:
+        fixed_scc = {k: v for k, v in fixed_2133.items() if k.startswith("SCC")} or None
+        xs, ts = _collect_scc_calibration_by_lane(a_2133, now, fixed_scc_lanes=fixed_scc)
+        if len(xs) < 2:
+            scc_failure = True
+            reason2 = " SCC 標定點不足，轉爐精煉排程無法顯示"
+        else:
+            reason2 = ""
+
+    if not(failure_2133 or failure_2143 or scc_failure):
+        # 掃描所有矩形，找屬於 LF 的灰/紅矩形，將 x1→start、x2→end
+        areas_2133 = soup_2133.find_all("area")
+        for area in areas_2133:
+            title = area.get("title", "")
+            coords = [int(x) for x in re.findall(r"\d+", area.get("coords", ""))]
+            if len(coords) < 4:
+                continue
+            x1, y1, x2, y2 = coords
+            y_mid = (y1+y2)/2
+
+            process_type = _lane_by_y(y_mid, fixed_2133)
+            if process_type is None:
+                continue
+            if process_type not in ("LF1", "LF2"):
+                continue
+
+            res = _classify_rectangle("2133", coords, title, fixed_2133)
+            furnace_match = re.search(r"爐號[＝>:\s]*([A-Za-z0-9]+)", title)
+            furnace_id = furnace_match.group(1) if furnace_match else "未知"
+
+            # x→time（用分段線性插值；先把查詢點插到 xs/ts上）
+            start = _piecewise_linear(coords[0], xs, ts)
+            end   = _piecewise_linear(coords[2], xs, ts)
+
+            # 跨天檢查
+            if end < start:
+                end += pd.Timedelta(days=1)
+
+            # 去掉時間過短的紅色rectangle
+            if (end - start) < pd.Timedelta(minutes=5) and res.label == '實際':
+                continue
+
+            raw_sched.append((coords[0], start, end, furnace_id, process_type, res.label))
+
+        # If no schedule is found after parsing the webpage, initialize schedule_2133 as an
+        # empty DataFrame with predefined columns.
+        if raw_sched:
+            # Sort, adjust cross day, and merge schedule
+            schedule_2133 = _preprocess_schedule(raw_sched)
+        else:
+            schedule_2133 = pd.DataFrame(columns=['爐號','製程','表定開始時間',
+                                                  '表定結束時間','實際開始時間','實際結束時間'])
+
+        # ------------------------------------------------------------------
+        # 4. Process status from 2143 and merge with 2133 ------------------
+        # ------------------------------------------------------------------
+        labels_2143 = _scrape_lf_status_2143(pool=_POOL, now=now)  # 你新增的 2137 抓取函式；或先用硬編輯測試
+        status_2143 = (pd.DataFrame(labels_2143)
+        .T
+        .reset_index()
+        .rename(columns={
+            'index': '製程',
+            '爐號': '狀態爐號',
+            '開始處理時間': '狀態開始',
+            '處理結束時間': '狀態結束',
+            '生產狀態': '狀態'
+            })
         )
-    a_2133 = _fetch_2133_areas(_POOL)
-    if not areas_2133:
-        return ScheduleResult(False, _empty_df(), _empty_df(), _empty_df(), "連線逾時或頁面無資料")
+        status_2143['狀態開始'] = pd.to_datetime(status_2143['狀態開始'])
+        status_2143['狀態結束'] = pd.to_datetime(status_2143['狀態結束'])
+        s_2133_classify = schedule_2133.merge(status_2143, left_on=['製程', '爐號'], right_on=['製程', '狀態爐號'], how='left')
 
-    fixed_scc = {k: v for k, v in fixed_2133.items() if k.startswith("SCC")} or None
-    xs, ts = _collect_scc_calibration_by_lane(a_2133, now, fixed_scc_lanes=fixed_scc)
+        a_s = pd.to_datetime(s_2133_classify['實際開始時間'])
+        a_e = pd.to_datetime(s_2133_classify['實際結束時間'])
+        p_s = pd.to_datetime(s_2133_classify['表定開始時間'])
+        p_e = pd.to_datetime(s_2133_classify['表定結束時間'])
 
-    if len(xs) < 2:
-        return ScheduleResult(False, _empty_df(), _empty_df(), _empty_df(), "SCC 標定點不足，無法校準")
-
-    # 掃描所有矩形，找屬於 LF 的灰/紅矩形，將 x1→start、x2→end
-
-    areas_2133 = soup_2133.find_all("area")
-    for area in areas_2133:
-        title = area.get("title", "")
-        coords = [int(x) for x in re.findall(r"\d+", area.get("coords", ""))]
-        if len(coords) < 4:
-            continue
-        x1, y1, x2, y2 = coords
-        y_mid = (y1+y2)/2
-
-        process_type = _lane_by_y(y_mid, fixed_2133)
-        if process_type is None:
-            continue
-        if process_type not in ("LF1", "LF2"):
-            continue
-
-        res = _classify_rectangle("2133", coords, title, fixed_2133)
-        furnace_match = re.search(r"爐號[＝>:\s]*([A-Za-z0-9]+)", title)
-        furnace_id = furnace_match.group(1) if furnace_match else "未知"
-
-        # x→time（用分段線性插值；先把查詢點插到 xs/ts上）
-        start = _piecewise_linear(coords[0], xs, ts)
-        end   = _piecewise_linear(coords[2], xs, ts)
-
-        # 跨天檢查
-        if end < start:
-            end += pd.Timedelta(days=1)
-
-        # 去掉時間過短的紅色rectangle
-        if (end - start) < pd.Timedelta(minutes=5) and res.label == '實際':
-            continue
-
-        raw_sched.append((coords[0], start, end, furnace_id, process_type, res.label))
-
-    # If no schedule is found after parsing the webpage, initialize schedule_2133 as an
-    # empty DataFrame with predefined columns.
-    if raw_sched:
-        # Sort, adjust cross day, and merge schedule
-        schedule_2133 = _preprocess_schedule(raw_sched)
-    else:
-        schedule_2133 = pd.DataFrame(columns=['爐號','製程','表定開始時間',
-                                              '表定結束時間','實際開始時間','實際結束時間'])
-
-    # ------------------------------------------------------------------
-    # 4. Process status from 2143 and merge with 2133 ------------------
-    # ------------------------------------------------------------------
-    labels_2143 = _scrape_lf_status_2143(pool=_POOL, now=now)  # 你新增的 2137 抓取函式；或先用硬編輯測試
-    status_2143 = (pd.DataFrame(labels_2143)
-    .T
-    .reset_index()
-    .rename(columns={
-        'index': '製程',
-        '爐號': '狀態爐號',
-        '開始處理時間': '狀態開始',
-        '處理結束時間': '狀態結束',
-        '生產狀態': '狀態'
-        })
-    )
-    status_2143['狀態開始'] = pd.to_datetime(status_2143['狀態開始'])
-    status_2143['狀態結束'] = pd.to_datetime(status_2143['狀態結束'])
-    s_2133_classify = schedule_2133.merge(status_2143, left_on=['製程', '爐號'], right_on=['製程', '狀態爐號'], how='left')
-
-    a_s = pd.to_datetime(s_2133_classify['實際開始時間'])
-    a_e = pd.to_datetime(s_2133_classify['實際結束時間'])
-    p_s = pd.to_datetime(s_2133_classify['表定開始時間'])
-    p_e = pd.to_datetime(s_2133_classify['表定結束時間'])
-
-    # A schedule is classified as "past" if all the following conditions are met:
-    # (1) Both columns 'actual start time' and 'actual end time' are present (not NaT).
-    # (2) Either the furnace ID does not appear on page 2143,
-    #     or --if it does -- the 'status end time' is present (not NaT)
-    c_fid_met = (s_2133_classify['爐號'] == s_2133_classify['狀態爐號'])
-    proc_finished = ~(s_2133_classify['狀態結束'].isna())
-    mask_1 = (
-            a_s.notna()
-            & a_e.notna()
-            & ( ~c_fid_met |
-                ( c_fid_met
-                 & proc_finished
-                )
-            )
-    )
-
-    # A schedule is classified as "future" if all the following conditions are met:
-    # (1) Both columns('plan start time' and 'plan end time') are greater than current time.
-    # (2) 'Status furnace id' does not match 'furnace id', and if so the time difference
-    #     between 'plan start' and 'status start' is greater than 30 minutes. This prevents
-    #     a subsequent scheduled entry for the same furnace (e.g. a second run) from being
-    #     incorrectly treated as the current run.
-    s_furnace_id = s_2133_classify['狀態爐號']
-    s_s = s_2133_classify["狀態開始"]
-    mask_2 = (p_s.gt(now)
-              & p_e.gt(now)
-              & (s_furnace_id.isna()
-                 | (~s_furnace_id.isna()
-                    & (p_s.sub(s_s) > pd.Timedelta(minutes=30)
+        # A schedule is classified as "past" if all the following conditions are met:
+        # (1) Both columns 'actual start time' and 'actual end time' are present (not NaT).
+        # (2) Either the furnace ID does not appear on page 2143,
+        #     or --if it does -- the 'status end time' is present (not NaT)
+        c_fid_met = (s_2133_classify['爐號'] == s_2133_classify['狀態爐號'])
+        proc_finished = ~(s_2133_classify['狀態結束'].isna())
+        mask_1 = (
+                a_s.notna()
+                & a_e.notna()
+                & ( ~c_fid_met |
+                    ( c_fid_met
+                     & proc_finished
                     )
-                 )
-              )
-    )
+                )
+        )
 
-    # A schedule is classified as "current" if 'Status furnace id' matches 'furnace id',
-    # and the time difference between 'plan start' and 'status start' is less than 30 minutes.
-    mask_3 = p_s.sub(s_s) < pd.Timedelta(minutes=30)
+        # A schedule is classified as "future" if all the following conditions are met:
+        # (1) Both columns('plan start time' and 'plan end time') are greater than current time.
+        # (2) 'Status furnace id' does not match 'furnace id', and if so the time difference
+        #     between 'plan start' and 'status start' is greater than 30 minutes. This prevents
+        #     a subsequent scheduled entry for the same furnace (e.g. a second run) from being
+        #     incorrectly treated as the current run.
+        s_furnace_id = s_2133_classify['狀態爐號']
+        s_s = s_2133_classify["狀態開始"]
+        mask_2 = (p_s.gt(now)
+                  & p_e.gt(now)
+                  & (s_furnace_id.isna()
+                     | (~s_furnace_id.isna()
+                        & (p_s.sub(s_s) > pd.Timedelta(minutes=30)
+                        )
+                     )
+                  )
+        )
 
-    s_2133_classify['phase'] = np.select(
-        [mask_1, mask_2, mask_3],
-        ['past', 'future', 'current'],
-        default='unknown'
-    )
+        # A schedule is classified as "current" if 'Status furnace id' matches 'furnace id',
+        # and the time difference between 'plan start' and 'status start' is less than 30 minutes.
+        mask_3 = p_s.sub(s_s) < pd.Timedelta(minutes=30)
+
+        s_2133_classify['phase'] = np.select(
+            [mask_1, mask_2, mask_3],
+            ['past', 'future', 'current'],
+            default='unknown'
+        )
+    else:
+        s_2133_classify = pd.DataFrame(columns=['爐號', '製程','表定開始時間', '表定結束時間',
+                                                '實際開始時間','實際結束時間', '狀態爐號', '狀態開始','狀態結束',
+                                                '狀態', '停機時間', 'phase'])
+
     out_df = pd.concat([s_2138_classify, s_2133_classify], join='inner')
 
     # This is a temporary workaround until the downstream code is updated.
@@ -538,12 +548,24 @@ def scrape_schedule(
     current_df = out_df.loc[out_df['phase'].eq('current'), :]
     future_df = out_df.loc[out_df['phase'].eq('future'), :]
 
+    if failure_2138 or failure_2137 or failure_2133 or failure_2143 or scc_failure:
+        status = False
+        if failure_2138 or failure_2137 or failure_2133 or failure_2143:
+            reason = " MES" + reason + " 連線逾時或伺服器暫時無回應。"
+            if scc_failure:
+                reason += reason2
+        else:
+            reason = reason2
+    else:
+        status = True
+        reason = ""
+
     return ScheduleResult(
-        ok=True,
+        ok=status,
         past=past_df,
         current=current_df,
         future=future_df,
-        reason=""
+        reason=reason
     )
 
 # ---------------------------------------------------------------------------
@@ -968,8 +990,8 @@ def _preprocess_schedule(raw_sched: List, is_2138: bool = True):
 
                 # 除錯統計輸出（若 logger 不存在則忽略）
                 try:
-                    overlap_n = int((chosen_df['how'] == 'overlap').sum())
-                    nearest_n = int((chosen_df['how'] == 'nearest').sum())
+                    overlap_n = int((chosen_df['how'] == 'overlap').sum())  # type: ignore
+                    nearest_n = int((chosen_df['how'] == 'nearest').sum())  # type: ignore
                     logger.debug(
                         "2138/EAF aux 配對：重疊配對 %d 筆，最近距離補配對 %d 筆；剩餘未配對 aux %d",
                         overlap_n, nearest_n,
@@ -1448,22 +1470,15 @@ def _adjust_cross_day(records, now: datetime):
     """
 
     adjusted = list(records)
-
-    def unify(proc):
-        return "EAF" if proc in ("EAFA", "EAFB") else proc
-
     first_seen_done = set()         # 記錄每個「製程群組」是否已處理過第一筆
     last_start_by_group = {}        # 記錄各群組上一筆 start，用於偵測回捲
 
-    #for i, (x, start, end, furnace, proc, label) in enumerate(adjusted):
     for i, item in enumerate(adjusted):
-        # 新版scrape_schedule 呼叫時，會有6 個元素，舊版有5個。所以改成這樣以便相容
         x , start, end, furnace, proc, *rest = item
         if rest:
             label = rest[0]
 
         # MES rectangles wrap at 00:00 so end might be earlier than start.
-        #grp = unify(proc)
         grp = proc
 
         if end < start:
@@ -1475,7 +1490,6 @@ def _adjust_cross_day(records, now: datetime):
                 start -= pd.Timedelta(days=1)
                 end -= pd.Timedelta(days=1)
 
-        #elif i == 0 and abs(now - start) > pd.Timedelta(hours=10):
         elif (grp not in first_seen_done) and abs(now - start) > pd.Timedelta(hours=10):
             start += pd.Timedelta(days=1)
             end += pd.Timedelta(days=1)
@@ -1522,7 +1536,8 @@ def _empty_df() -> pd.DataFrame:
         pd.DataFrame: 空的 DataFrame。建議包含預期欄位
             （例如：["開始時間", "結束時間", "製程", "爐號", "製程狀態"]）。
     """
-    return pd.DataFrame()
+    return pd.DataFrame(['爐號','製程','表定開始時間','表定結束時間','實際結束時間','實際結束時間',])
 
 if __name__ == "__main__":  # pragma: no cover
+
     scrape_schedule()
