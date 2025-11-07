@@ -6,6 +6,7 @@ logger = get_logger(__name__)
 import sys, re, math, time
 import pandas as pd
 import numpy as np
+from pathlib import Path
 from typing import Tuple, Optional, List, Protocol, runtime_checkable, cast
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
@@ -17,6 +18,20 @@ from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
 from data_sources.schedule_scraper import scrape_schedule
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
+
+def get_resource_path(filename: str) -> Path:
+    """
+    取得檔案的實際路徑：
+    - 開發階段：以 main.py 的上一層為根目錄
+    - 打包後（exe 模式）：以 PyInstaller 的 _MEIPASS 暫存資料夾為根目錄
+    """
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # exe 模式
+        base_path = Path(sys._MEIPASS)
+    else:
+        # 開發模式 (main.py 在 src 裡，要回到上一層)
+        base_path = Path(__file__).resolve().parents[1]
+    return base_path / filename
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -281,6 +296,7 @@ class PiReader(QtCore.QThread):
             self.logger.exception("PI 查詢失敗")
             self.data_ready.emit(self.key, e)
 
+
 class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
         super(MyMainWindow, self).__init__()
@@ -289,11 +305,12 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- 用QThread 同時讀取兩組PI 資料的功能 (等待放到 ui_handler.py) ---
         self.pi_client = pi_client
 
+        excel_path = get_resource_path("parameter.xlsx")
         # -------- 從外部資料讀取設定檔，並儲存成這個實例本身的成員變數 -----------
-        self.tag_list = pd.read_excel('../parameter.xlsx', sheet_name=0).dropna(how='all')
-        self.special_dates = pd.read_excel('../parameter.xlsx', sheet_name=1)
-        self.unit_prices = pd.read_excel('../parameter.xlsx', sheet_name=2, index_col=0)
-        self.time_of_use = pd.read_excel('../parameter.xlsx', sheet_name=3)
+        self.tag_list = pd.read_excel(excel_path, sheet_name=0).dropna(how='all')
+        self.special_dates = pd.read_excel(excel_path, sheet_name=1)
+        self.unit_prices = pd.read_excel(excel_path, sheet_name=2, index_col=0)
+        self.time_of_use = pd.read_excel(excel_path, sheet_name=3)
 
         # ---------------統一設定即時值、平均值的背景及文字顏色----------------------
         self.real_time_text = "#145A32"   # 即時量文字顏色 深綠色文字
