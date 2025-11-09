@@ -399,9 +399,9 @@ def scrape_schedule(
     # ------------------------------------------------------------------
     # 3. Schedule rectangles from 2133 ---------------------------------
     # ------------------------------------------------------------------
-    a_2133 = _fetch_2133_areas(_POOL)
     soup_2133 = _fetch_soup(URL_2133, _POOL)
     soup_2143 = _fetch_soup(URL_2143, _POOL)
+    a_2133 = _parse_2133_areas(soup_2133)
     raw_sched: List[Tuple[int, datetime, datetime, str, str, str]] = []
     fixed_2133 = _FIXED_LANES_2133
     failure_2133: Optional[bool] = None
@@ -1089,9 +1089,19 @@ def _classify_rectangle(
     # 3) 無匹配 → unknown
     return RectClassify(page, lane, "unknown", "未知", 0.0, f"h={h} 未命中任何 {page} 規則；lane={lane}")
 
-def _fetch_2133_areas(pool: urllib3.PoolManager) -> List[dict]:
+def _parse_2133_areas(soup: BeautifulSoup) -> List[dict]:
     """
-    擷取 2133 頁面所有 <area> 並標準化為 dict。
+    Parse <area> elements from the 2133 MES page
+    解析 2133_soup 所有 <area> 並標準化為 dict。
+
+    Parameters
+    --------------------
+    soup: BeautifulSoup
+        從 _fetch_soup() 或離線快照讀入的2133 HTML。
+
+    Returns
+    --------------------
+    List[dict]
 
     回傳的每筆 dict 欄位
     --------------------
@@ -1104,11 +1114,11 @@ def _fetch_2133_areas(pool: urllib3.PoolManager) -> List[dict]:
     - 若連線失敗或頁面無資料，回傳空清單。
     - 非法座標（coords <4 個）會略過，避免影響流程。
     """
-    soup = _fetch_soup(URL_2133, pool)
-    if soup is None:
+    soup_2133 = soup
+    if soup_2133 is None:
         return []
     out = []
-    for a in soup.find_all("area"):
+    for a in soup_2133.find_all("area"):
         title = a.get("title", "") or ""
         coords = [int(x) for x in re.findall(r"\d+", a.get("coords",""))]
         if len(coords) < 4:
