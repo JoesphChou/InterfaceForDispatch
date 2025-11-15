@@ -300,27 +300,88 @@ def scrape_schedule(
 
         if multi_proc:
             # 同爐號在同製程同 label 的「多時間段」情境：
-            # 以 (爐號, 製程, 類別) 為分組鍵，對時間與 x 各自排序並標上 cumcount() 位置，
-            # 再以 (keys + _pos) merge 取得「最小 x ↔ 最早時間」的正相關一一配對，
-            # 之後將修正過的清單 append 回 raw_sched，避免後續 _preprocess_schedule() 出現錯位。
+            # - 先在 (爐號, 製程, label) 分組內處理跨天，讓時間順序反映真實先後
+            # - 再用「時間順位」對齊「x 座標順位」，達成最早時間 ↔ 最小 x 的一一配對
+            # - 最後以 (start, end, 爐號, 製程, label) 去重，只保留唯一一筆（x 採用最小值）
+
             multi_proc_df = pd.DataFrame(multi_proc)
 
-            # keys: 你要在同一群組內配對；這裡用(爐號，製程，種類)
-            keys = [3,4,5]
-            # 1)依時間排序並標上組內位置
-            left = (multi_proc_df.sort_values(keys + [1])
-                    .assign(_pos = lambda d: d.groupby(keys).cumcount()))
-            # 2) 依座標排序並標上組內位置 (只保留座標欄)
-            right = (multi_proc_df.sort_values(keys + [0])  # 0 是「座標」
-            .assign(_pos=lambda d: d.groupby(keys).cumcount())
-            [keys + ['_pos', 0]])
+            keys = [3, 4, 5]  # (爐號, 製程, label)
 
-            # 3) 用 (keys + 位置) 對齊，得到正確配對後的座標
-            correct_df = (left.drop(columns=[0])  # 先把原本的 0 刪掉
-                   .merge(right, on=keys + ['_pos'], how='left')
-                   .drop(columns=['_pos']))
-            correct_df = correct_df[[0,1,2,3,4,5]]
-            correct_list = list(correct_df.itertuples(index=False, name=None))
+            # --- 確保時間欄位為 datetime ---
+            for col in [1, 2]:
+                multi_proc_df[col] = pd.to_datetime(multi_proc_df[col])
+
+            # --- 以 start time 的「時:分:秒」判斷跨天群組 ---
+            # 將 start time 轉為「一天內的秒數」
+            seconds = (
+                    multi_proc_df[1].dt.hour * 3600
+                    + multi_proc_df[1].dt.minute * 60
+                    + multi_proc_df[1].dt.second
+            )
+            multi_proc_df["_seconds"] = seconds
+
+            grp = multi_proc_df.groupby(keys)["_seconds"]
+
+            # 每個 (爐號, 製程, label) group 的時間分布範圍（只看 clock time）
+            span = grp.transform(lambda s: s.max() - s.min())
+            # > 10 小時視為跨天情境
+            ten_hours_sec = 10 * 3600
+            multi_proc_df["_is_cross_day_grp"] = span > ten_hours_sec
+
+            # 對跨天 group，再計算「中間值」用來切出較小的那一群
+            mid = grp.transform(lambda s: (s.max() + s.min()) / 2.0)
+
+            # 較小那一群 (start 秒數 <= mid) 視為「隔天」，整筆 +1 天
+            mask_shift = multi_proc_df["_is_cross_day_grp"] & (multi_proc_df["_seconds"] <= mid)
+
+            if mask_shift.any():
+                delta = pd.Timedelta(days=1)
+                # start / end 一起往後平移 1 天
+                multi_proc_df.loc[mask_shift, 1] = multi_proc_df.loc[mask_shift, 1] + delta
+                multi_proc_df.loc[mask_shift, 2] = multi_proc_df.loc[mask_shift, 2] + delta
+
+            # --- 重新配對「時間 ↔ x 座標」 ---
+
+            # 1) 以「修正後時間」排序，給每組一個時間順位 _pos
+            left = (
+                multi_proc_df
+                .sort_values(keys + [1, 2, 0])  # 先爐號/製程/label，再開始、結束時間，最後 x
+                .assign(_pos=lambda d: d.groupby(keys).cumcount())
+            )
+
+            # 2) 以 x 排序，給每組一個 x 順位 _pos
+            right = (
+                multi_proc_df
+                .sort_values(keys + [0, 1, 2])  # 先爐號/製程/label，再 x，再時間當輔助排序
+                .assign(_pos=lambda d: d.groupby(keys).cumcount())
+                [keys + ["_pos", 0]]  # 保留 x 座標與對齊所需欄位
+            )
+
+            # 3) 用 (keys + _pos) 對齊，取得「每筆時間」應該對應的 x
+            correct_df = (
+                left
+                .drop(columns=[0])  # 先丟掉原本可能錯配的 x
+                .merge(right, on=keys + ["_pos"], how="left")
+                .drop(columns=["_pos", "_seconds", "_is_cross_day_grp"], errors="ignore")
+            )
+
+            # --- 去除重複時間區段 ---
+            # 目標：同一組 (start, end, 爐號, 製程, label) 只留一筆，x 採最小值
+            # 先排序：同組內較早時間 & 較小 x 在前
+            correct_df = correct_df.sort_values(keys + [1, 2, 0])
+
+            # 以 (start, end, 爐號, 製程, label) 為 key 去重
+            dedup_df = (
+                correct_df
+                .drop_duplicates(subset=[1, 2, 3, 4, 5], keep="first")
+                [[0, 1, 2, 3, 4, 5]]  # 還原成 (x, start, end, 爐號, 製程, label) 的欄位順序
+            )
+
+            # 轉回原本 raw_sched 使用的 tuple 形式
+            correct_list = list(dedup_df.itertuples(index=False, name=None))
+
+            # append 回 raw_sched（假設 multi_proc 對應的原始紀錄已從 raw_sched 中排除）
             raw_sched = raw_sched + correct_list
 
         # If no schedule is found after parsing the webpage, initialize schedule_2133 as an
