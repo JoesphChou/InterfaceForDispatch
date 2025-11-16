@@ -790,7 +790,7 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
 
     def _simple_adjust_cross(a, b):
         if a and b:
-            if a < b:
+            if a > b:
                 b += pd.Timedelta(days=1)
             #b += pd.Timedelta(days=1) if a < b else b
         return b
@@ -798,14 +798,16 @@ def _scrape_lf_status_2143(pool: Optional[urllib3.PoolManager]=None,
     lf1_s = _parse_time(get("lblLf1_Stime"))
     # 防止讀取到的"開始處理時間"為前一天，造成「開始處理時間」、「處理結束時間」的日期錯誤
     # 目前暫時用「開始處理時間」與現在時間的差距是否超過10小時間判斷，並處理。
+    # (此種狀況通常是出現在剛過00:00時，讀取前一天的起始時間。)
     if abs(now - lf1_s) > pd.Timedelta(hours=10):
         lf1_s -= pd.Timedelta(days=1)
     lf1_e = _simple_adjust_cross(lf1_s, _parse_time(get("lbllf1_Etime")))
     lf1_stop = None
     lf2_s = _parse_time(get("lbllf2_stime"))
     # 目前暫時用「開始處理時間」與現在時間的差距是否超過10小時間判斷，並處理。
+    # (此種狀況通常是出現在剛過00:00時，讀取前一天的起始時間。)
     if abs(now - lf2_s) > pd.Timedelta(hours=10):
-        lf1_s -= pd.Timedelta(days=1)
+        lf2_s -= pd.Timedelta(days=1)
     lf2_e = _simple_adjust_cross(lf2_s, _parse_time(get("lbllf2_Etime")))
 
     lf2_stop = None
