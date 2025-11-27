@@ -287,12 +287,13 @@ class GanttCanvas(FigureCanvas):
 
         # 4) 不要用 ax.cla()，以免把座標軸/格式全清掉；只移除我們管理的圖層
 
-    def plot(self, past_df, current_df, future_df):
+    def plot(self, past_df, current_df, future_df, fetched_at):
         """
         依 phase 轉換時間欄位後畫圖：
           - Past:    用 實際開始/實際結束 畫 bar（若缺值則跳過）
           - Current: 用 表定開始/表定結束 畫 bar；EAF/LF1-1/LF1-2 若「狀態結束」有值，終點覆蓋為 狀態結束
           - Future:  用 表定開始/表定結束 畫 bar
+          - fetched_at: 抓取資料的時間
         並加入「現在時間」垂直虛線與 X 軸下方時間徽章（虛線 zorder 調低，不覆蓋 bar）。
         """
         # 僅清舊圖層
@@ -368,7 +369,11 @@ class GanttCanvas(FigureCanvas):
                              mdates.date2num((tmax + pad).to_pydatetime()))
 
         # 5) 現在時間：垂直虛線 + X 軸下方時間徽章
-        now = pd.Timestamp.now()
+        if not fetched_at:
+            now = pd.Timestamp.now()
+        else:
+            now = fetched_at
+
         x_now = mdates.date2num(now.to_pydatetime())
         # 虛線（zorder 低於 bar，避免蓋住）
         self._time_line = self.ax.axvline(

@@ -1,13 +1,15 @@
+from PyQt6.QtWidgets import QFileDialog
 from logging_utils import setup_logging, log_exceptions, timeit, get_logger
 
 setup_logging("./logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
-import sys, re, math, time
+import sys, re, math, time, os
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Tuple, Optional, List, Protocol, runtime_checkable, cast
+from typing import Tuple, Optional, List, Protocol, runtime_checkable, cast, Dict
+from datetime import datetime
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtGui import QLinearGradient
 from UI import Ui_MainWindow
@@ -16,8 +18,18 @@ from make_item import make_item
 from visualization import TrendChartCanvas, TrendWindow, plot_tag_trends, PieChartArea, StackedAreaCanvas, GanttCanvas
 from ui_handler import setup_ui_behavior
 from data_sources.pi_client import PIClient
-from data_sources.schedule_scraper import scrape_schedule
+import data_sources.schedule_scraper as sc
 from data_sources.data_analysis import analyze_production_avg_cycle, estimate_speed_from_last_peaks
+from enum import Enum, auto
+from utils.mes_sample_tool import save_mes_snapshot, use_mes_snapshots
+
+# ------ Defines the paths for data of MES and train_data ------
+if getattr(sys, 'frozen', False):
+    # PyInstaller 執行檔狀態
+    ROOT = Path(os.path.dirname(sys.executable))
+else:
+    # 開發模式  (main.py)
+    ROOT = Path(__file__).resolve().parents[0]
 
 def get_resource_path(filename: str) -> Path:
     """
@@ -26,7 +38,7 @@ def get_resource_path(filename: str) -> Path:
     - 打包後（exe 模式）：以 PyInstaller 的 _MEIPASS 暫存資料夾為根目錄
     """
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        # exe 模式
+        # PyInstaller 執行檔狀態
         base_path = Path(sys._MEIPASS)
     else:
         # 開發模式 (main.py 在 src 裡，要回到上一層)
@@ -107,6 +119,19 @@ class DashboardThread(QtCore.QThread):
                 slept += 0.5
         logger.info("DashboardThread 己收到中斷，停止執行。")
 
+class MesMode(Enum):
+    """ Run mode for MES schedule scraping.
+    This enum records how the schedule scraping logic should obtain MES data.
+    Centralizing the mode here avoids scattering magic strings or booleans
+    across the codebase and makes the online/offline switch easier to maintain.
+
+    Members:
+        ONLINE: Fetch MES pages from the live MES website.
+        OFFLINE: Replay MES pages from local HTML snapshots stored on disk.
+    """
+    ONLINE = auto()
+    OFFLINE = auto()
+
 @runtime_checkable
 class ScheduleResult(Protocol):
     ok: bool
@@ -148,8 +173,26 @@ class ScheduleThread(QtCore.QThread):
         # 只要沒有被 requestInterruption() 就持續執行
         while not self.isInterruptionRequested():
             try:
-                res = scrape_schedule()
+                # 讀取目前模式 (Enum)，避免直接碰 UI 元件
+                mode = getattr(self.main_win, "mes_mode", MesMode.ONLINE)
+
+                if mode is MesMode.OFFLINE:
+                    # 1) 取得快照對應的 HTML 檔 mapping
+                    mapping = self.main_win.get_mes_snapshot_mapping()
+                    # 2) 根據快照資料夾名稱推回當時的時間戳記
+                    offline_now = self.main_win.get_mes_snapshot_now()
+
+                    # 3) 在 use_mes_snapshots context 裡，以 now=offline_now 重跑 scrape_schedule
+                    with use_mes_snapshots(mapping, schedule_module=sc):
+                        res = sc.scrape_schedule(now=offline_now)
+                        # 用來提供給Gantt 的垂直虛線 + X 軸下方時間徽章
+                        res.fetched_at = offline_now
+                else:
+                    # 線上模式：直接用現在時間（或 scrape_schedule 預設行為）
+                    res = sc.scrape_schedule()
+
                 self.sig_schedule.emit(res)     # 將爬取的排程資料丟回主執行緒
+
             except Exception:
                 # 記錄log
                 logger.error("背景排程發生錯誤", exc_info=True)
@@ -332,13 +375,24 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.dashboard_value()
         # 建立趨勢圖元件並加入版面配置
         self.trend_chart = TrendChartCanvas(self)
+
+        # ---- 以下變數，是為避免背景執行緒直接讀寫UI相關物件，造成錯誤或在C++層崩潰，而設計的 -----
+        # --- MES 排程模式：線上 / 離線 ---
+        self.mes_mode: MesMode = MesMode.ONLINE
+        # 預設離線快照路徑：src/mes（你可以依需求改成 lineEdit 選擇的路徑）
+        self.mes_snapshot_dir: Path = Path(__file__).resolve().parents[0] / "mes"
+        self.mes_snapshot_now: Optional[datetime] = None
+        # checkBox_10：勾選代表「離線模式」
+        self.checkBox_10.stateChanged.connect(self.on_mes_mode_changed)
+
         setup_ui_behavior(self)
 
         # --- 等待放到 ui_handler.py (這些都是功能試調區的部份)---
         self.pushButton_6.clicked.connect(self.analyze_hsm)
         self.pushButton_9.clicked.connect(self.on_show_trend)
-        #self.pushButton_7.clicked.connect(self.snapshot)
-
+        self.pushButton_7.clicked.connect(self.snapshot_mes)
+        self.pushButton_8.clicked.connect(self.select_folder)
+        self.lineEdit.setText(str(ROOT / "mes"))
         self.listWidget_2.addItems(['HSM 軋延機組'])
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
         self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
@@ -387,6 +441,240 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         except Exception:
             pass
 
+    @QtCore.pyqtSlot(int)
+    def on_mes_mode_changed(self, state: int) -> None:
+        """Handle UI changes when the MES mode checkbox is toggled.
+
+        This slot is connected to ``checkBox_10.stateChanged`` and is responsible
+        for updating the internal ``self.mes_mode`` value and showing feedback
+        in the status bar. The actual scraping behavior is driven by
+        :class:`MesMode` and consumed by :class:`ScheduleThread`, so that
+        background threads never read UI widgets directly.
+
+        Args:
+            state: The Qt check state emitted by ``stateChanged``. Non-zero means
+                the checkbox is checked and offline mode is enabled; zero means
+                online mode.
+
+        Side Effects:
+            - Updates ``self.mes_mode``.
+            - Emits a short message on the status bar to indicate the current mode.
+        """
+        if state == QtCore.Qt.CheckState.Checked.value:
+            self.mes_mode = MesMode.OFFLINE
+            msg = "排程解析模式：離線（使用 MES 快照）"
+        else:
+            self.mes_mode = MesMode.ONLINE
+            msg = "排程解析模式：線上（即時解析 MES 網頁）"
+
+        # 狀態列 + log 都保留
+        try:
+            self.statusBar().showMessage(msg, 5000)
+        except Exception:
+            pass
+        try:
+            logger.info(msg)
+        except Exception:
+            pass
+
+    def _get_mes_snapshot_root(self) -> Path:
+        """Return the root directory where MES snapshots are stored.
+
+        The root directory is used as the base for both writing new snapshots
+        (in :meth:`snapshot_mes`) and constructing the mapping for offline replay
+        (in :meth:`get_mes_snapshot_mapping`). Centralizing the logic here makes
+        it easy to change the snapshot layout in the future.
+
+        Returns:
+            Path: The directory that should contain per-timestamp subfolders,
+            e.g. ``src/mes/20250201_143320/``.
+        """
+        root = getattr(self, "mes_snapshot_dir", ROOT / "mes")
+        return Path(root)
+
+    def get_mes_snapshot_now(self) -> pd.Timestamp:
+        """Infer the logical ``now`` timestamp for offline schedule replay.
+
+        This helper reads the currently selected MES snapshot folder name
+        (for example ``\"20250201_143320\"``) and tries to parse it into a
+        :class:`pandas.Timestamp`. The resulting value is then passed to
+        :func:`scrape_schedule` as ``now=...``, so that the downstream Gantt chart
+        can reconstruct the schedule state at the time the snapshot was captured.
+
+        If the folder name does not follow the expected ``\"%Y%m%d_%H%M%S\"``
+        pattern or parsing fails for any reason, this method falls back to the
+        current wall-clock time.
+
+        Returns:
+            pd.Timestamp: The inferred replay timestamp based on the selected
+            snapshot folder, or ``pd.Timestamp.now()`` as a safe fallback.
+        """
+        root = self._get_mes_snapshot_root()
+        name = root.name  # 例如 "20250201_143320" 或 "mes"
+
+        try:
+            ts = pd.to_datetime(name, format="%Y%m%d_%H%M%S")
+        except Exception:
+            ts = pd.Timestamp.now()
+
+        return ts
+
+    def get_mes_snapshot_mapping(self) -> Dict[str, Path]:
+        """Build the mapping used by ``use_mes_snapshots`` for offline MES replay.
+
+        The mapping describes where HTML snapshots for each MES page are located.
+        It is passed to :func:`use_mes_snapshots` so that the context manager can
+        monkey-patch ``_fetch_soup`` and redirect all HTTP fetches to local files.
+
+        The current implementation assumes the following directory layout under
+        the snapshot root::
+
+            <root>/
+                2133*.html
+                2137*.html
+                2138*.html
+                2143*.html
+
+        If you change how :meth:`snapshot_mes` writes files (for example, moving
+        them into per-timestamp subfolders or switching patterns), you only need
+        to adapt this method accordingly.
+
+        Returns:
+            dict[str, Path]: A dictionary mapping MES page identifiers
+            (``\"2133\"``, ``\"2137\"``, ``\"2138\"``, ``\"2143\"``) to their
+            corresponding file patterns or directories under the snapshot root.
+        """
+        root = self._get_mes_snapshot_root()
+        return {
+            "2133": root / "2133*.html",
+            "2137": root / "2137*.html",
+            "2138": root / "2138*.html",
+            "2143": root / "2143*.html",
+        }
+
+    def select_folder(self) -> None:
+        """Open a folder selection dialog for choosing the MES snapshot root.
+
+        This method is connected to the UI button that lets the user pick where
+        MES snapshots are stored. It uses a non-native :class:`QFileDialog` to
+        avoid known issues with the Windows native dialog blocking the event loop.
+
+        On success, the selected path is written to ``self.lineEdit`` for visual
+        feedback and also stored as ``self.mes_snapshot_dir`` so that background
+        threads can read it without touching UI widgets.
+
+        Side Effects:
+            - Opens a modal :class:`QFileDialog`.
+            - Updates ``self.lineEdit`` with the chosen directory.
+            - Updates ``self.mes_snapshot_dir`` with a :class:`pathlib.Path`
+              instance pointing to that directory.
+        """
+
+        # 1) 安全的起始路徑：用使用者的「文件」資料夾
+        start_dir = str(ROOT / "mes")
+        if not start_dir:
+            start_dir = QtCore.QDir.homePath()
+
+        # 2) 建立非原生的對話框，避免 Windows 原生對話框卡住
+        dlg = QFileDialog(self, "選擇資料夾", start_dir)
+        dlg.setFileMode(QFileDialog.FileMode.Directory)
+        dlg.setOption(QFileDialog.Option.ShowDirsOnly, True)
+        dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)  # 關鍵：不用原生對話框
+
+        if dlg.exec():  # Modal；不會需要額外 processEvents
+            folder = dlg.selectedFiles()[0]
+            self.lineEdit.setText(folder)
+            # background thread 可以讀取用，替代直接碰UI元件。
+            self.mes_snapshot_dir = Path(folder)
+
+    def snapshot_mes(self) -> None:
+        """Capture a snapshot of MES schedule pages and save them to disk.
+
+        This method fetches the MES HTML pages (2133/2137/2138/2143) and stores
+        them in a new subdirectory named with the current timestamp
+        (``\"%Y%m%d_%H%M%S\"``) under the user-selected snapshot root.
+
+        For each enabled checkbox (2133/2137/2138/2143), it downloads the HTML
+        via ``urllib3.PoolManager().request(...)`` and delegates to
+        :func:`save_mes_snapshot` to persist the content alongside a JSON metadata
+        file.
+
+        The free-form description entered in ``self.textEdit`` is saved into the
+        metadata so that individual snapshots can later be identified and reused
+        for offline replay.
+
+        Side Effects:
+            - Creates a new subdirectory under the snapshot root, named by the
+              current timestamp.
+            - Writes one HTML file plus a corresponding ``*.meta.json`` file for
+              each checked page.
+        """
+        import urllib3
+
+        http = urllib3.PoolManager()
+
+        def get_html(url: str) -> str:
+            """
+            使用 urllib3 下載 MES HTML，並以 utf-8 decode（錯誤忽略）。
+            """
+            # 簡單設定 5 秒 timeout，行為上等同原本的 urlopen(timeout=5)
+            resp = http.request(
+                "GET",
+                url,
+                timeout=urllib3.Timeout(connect=5.0, read=5.0),
+                retries=False,
+            )
+            try:
+                return resp.data.decode("utf-8", "ignore")
+            finally:
+                # 明確釋放連線（雖然這裡用量不大，但寫清楚較乾淨）
+                resp.release_conn()
+
+        URL_2138 = "http://w3mes.dscsc.dragonsteel.com.tw/2138.aspx"
+        URL_2137 = "http://w3mes.dscsc.dragonsteel.com.tw/2137.aspx"
+        URL_2133 = "http://w3mes.dscsc.dragonsteel.com.tw/2133.aspx"
+        URL_2143 = "http://w3mes.dscsc.dragonsteel.com.tw/2143.aspx"
+
+        ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        base_dir = Path(self.lineEdit.text())
+        path = base_dir / ts
+        path.mkdir(parents=True, exist_ok=True)
+
+        description = self.textEdit.toPlainText()
+
+        if self.checkBox_6.isChecked():
+            save_mes_snapshot(
+                "2138",
+                kind="html",
+                content=get_html(URL_2138),
+                path=path,
+                description=description,
+            )
+        if self.checkBox_7.isChecked():
+            save_mes_snapshot(
+                "2137",
+                kind="html",
+                content=get_html(URL_2137),
+                path=path,
+                description=description,
+            )
+        if self.checkBox_8.isChecked():
+            save_mes_snapshot(
+                "2133",
+                kind="html",
+                content=get_html(URL_2133),
+                path=path,
+                description=description,
+            )
+        if self.checkBox_9.isChecked():
+            save_mes_snapshot(
+                "2143",
+                kind="html",
+                content=get_html(URL_2143),
+                path=path,
+                description=description,
+            )
+
     @QtCore.pyqtSlot(object)
     def on_schedule_result(self, res_obj: object) -> None:
         """
@@ -416,7 +704,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.canvas_gantt = GanttCanvas()
             self.verticalLayout_5.addWidget(self.canvas_gantt)
         # 繪圖
-        self.canvas_gantt.plot(res.past, res.current, res.future)
+        self.canvas_gantt.plot(res.past, res.current, res.future, res.fetched_at)
 
     def start_schedule_thread(self):
         """
@@ -2436,7 +2724,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
             # 查近time_window秒的平均需量，並計算出剩餘時間可能會增加的需量累計值
             result = pi_client.query(st=back_300s_from_now, et=back_300s_from_now + pd.offsets.Second(time_window),
-                                     tags=tags)
+                                     tags=tags, interval='5m')
             result = result.sum(axis=1) * 4   # MWH * 60min / 15min = MW/15min
             weight = 1 / time_window * diff_between_now_and_et
             predict = result * weight
