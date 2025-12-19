@@ -429,12 +429,14 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- Gantt chart 初始化：放在 __init__ 內合適位置 ---
         self.canvas_gantt = None
 
+        """
         # 圖表顯示相關設定
         self.checkBox_5.stateChanged.connect(self._apply_chart_mode)    # 是否顯示圖表的選項
         self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
         self.checkBox_5.setChecked(True)
         self.comboBox_3.setCurrentIndex(3)
         self.comboBox_3.setCurrentText("產線排程")
+        """
 
         try:
             self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
@@ -1160,7 +1162,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     @log_exceptions()
     @timeit(level=20)
-    def compute_stack_area_metrics(self, *_):
+    def _compute_stack_area_metrics(self, *_):
         """
         即時查詢 PI 系統近段時間資料，轉成堆疊圖所需三組 DataFrame，並依 UI 狀態繪製。
 
