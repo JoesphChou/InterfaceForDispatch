@@ -429,15 +429,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- Gantt chart 初始化：放在 __init__ 內合適位置 ---
         self.canvas_gantt = None
 
-        """
-        # 圖表顯示相關設定
-        self.checkBox_5.stateChanged.connect(self._apply_chart_mode)    # 是否顯示圖表的選項
-        self.comboBox_3.currentIndexChanged.connect(self._apply_chart_mode)     # chart 種類的選擇comboBox
-        self.checkBox_5.setChecked(True)
-        self.comboBox_3.setCurrentIndex(3)
-        self.comboBox_3.setCurrentText("產線排程")
-        """
-
         try:
             self.tw2_2.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
         except Exception:
@@ -1023,42 +1014,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     QtCore.QTimer.singleShot(0, self._reapply_tree_header_styles)
         return super().eventFilter(obj, e)
 
-    def _apply_chart_mode(self):
-        """
-        依目前 UI 狀態（checkBox_5、comboBox_3）切換圖表顯示的容器頁籤。
-
-        邏輯
-        ----
-        - 當 checkBox_5 未勾選時，隱藏整個圖表 Host 與種類下拉（僅 return）。
-        - 勾選時顯示 Host 與下拉，並依 comboBox_3 的 index 切換 chartHost 的頁面：
-          0=第一頁、1=第二頁、其他=第三頁。
-
-        Notes
-        -----
-        此函式只負責「顯示/切換哪一個 chart 容器頁籤」，實際資料繪製與更新
-        由其他 slot（例如 `on_stack_df`）處理。
-        """
-        # 根據"顯示圖表"的選項勾選與否，決定要不要顯示相關widget
-        if not self.checkBox_5.isChecked():
-            self.chartHost.setVisible(False)
-            self.comboBox_3.setVisible(False)
-            self.label_46.setVisible(False)
-            self.comboBox.setVisible(False)
-            return
-        self.chartHost.setVisible(True)
-        self.comboBox_3.setVisible(True)
-
-        mode = self.comboBox_3.currentIndex()
-        self.chartHost.setCurrentIndex(mode)
-
-        # 根據顯示圖表的範圍，決定要不要顯示發電機編號的選項
-        if mode == 0:
-            self.label_46.setVisible(True)
-            self.comboBox.setVisible(True)
-        else:
-            self.label_46.setVisible(False)
-            self.comboBox.setVisible(False)
-
     def fetch_stack_raw_df(self) -> pd.DataFrame:
         """
         從 PI 系統撈取堆疊圖所需的「原始時間序列資料」，並將欄名轉為迴路名稱。
@@ -1158,92 +1113,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.canvas_fuel.colors = {"NG": "#4E79A7", "COG": "#F28E2B", "MG": "#59A14F"}
             cols = [c for c in ["NG", "COG", "MG"] if c in df.columns]
             self.canvas_fuel.plot(df[cols],legend_title="TGs 過去兩小時燃氣使用狀況")
-
-
-    @log_exceptions()
-    @timeit(level=20)
-    def _compute_stack_area_metrics(self, *_):
-        """
-        即時查詢 PI 系統近段時間資料，轉成堆疊圖所需三組 DataFrame，並依 UI 狀態繪製。
-
-        Pipeline
-        --------
-        1) 讀原始資料：
-           - 呼叫 self.fetch_stack_raw_df() 取得最近區間（目前為 ~120 分鐘、8 秒粒度）之平均值序列。
-           - 以參照表（self.tag_list）將回傳之 tag 欄位轉成後續計算會用的「迴路名稱」。  # 例如 2H120, 4KA18 等
-        2) 組裝堆疊框架：
-           - frames = self.make_stacked_frames(df) 產生：
-             * by_unit_detail : 各 TG、CDQ#、TRT# 的明細功率
-             * by_unit        : 彙整後的 ["TG", "CDQ", "TRT"]
-             * by_fuel        : 先依（NG 固定公式）計出各 TG 的 NG 發電量；其餘（COG/MG）按 (總發電量−NG) 以自身占比回配
-        3) 繪圖（依 UI 下拉選單 comboBox_3）：
-           - index == 0 → 建立 `StackedAreaCanvas()`，使用 by_unit，設定建議色票與 tooltip 格式，加入 verticalLayout_4
-           - index == 1 → 建立 `StackedAreaCanvas()`，使用 by_fuel，設定建議色票與 tooltip 格式，加入 verticalLayout_3
-
-        Side Effects
-        ------------
-        - 視 UI 選擇建立並插入新的 FigureCanvas 到對應 layout
-        - 不回傳值，結果以 UI 呈現
-
-        See Also
-        --------
-        - `fetch_stack_raw_df()`：查詢時間區間與欄位轉名
-        - `make_stacked_frames()`：by_unit / by_fuel 的計算細節
-        """
-        df = self.fetch_stack_raw_df()
-
-        # colors 建議
-        UNIT_COLORS = {
-            "TG": "#6FB1FF",
-            "TRT": "#81C784",
-            "CDQ": "#FFB74D",
-        }
-        FUEL_COLORS = {
-            "NG": "#64B5F6",
-            "COG": "#BA68C8",
-            "MG": "#E57373",
-        }
-
-        frames = self.make_stacked_frames(df)  # df 為你 query 回來的 30 分鐘資料
-        df_unit = frames["by_unit"]
-        df_unit_det = frames["by_unit_detail"]
-        df_fuel = frames["by_fuel"]
-
-        if self.comboBox_3.currentIndex() == 0:
-            # (A) 機組別堆疊
-            canvas_unit = StackedAreaCanvas()
-
-            def fmt_unit(ts, series_dict, total_val):
-                # 白字＋白框；背景色由最大項自動套用，不需在這裡指定
-                lines = [f"{ts:%H:%M}"]
-                lines += [f"{k}: {v:,.1f}" for k, v in series_dict.items()]
-                lines.append(f"總發電量: {total_val:,.1f}")
-                return "\n".join(lines)
-
-            canvas_unit.plot(
-                df_unit,
-                colors=UNIT_COLORS,
-                legend_title="發電機組類別",
-                tooltip_fmt=fmt_unit,
-            )
-            self.verticalLayout_4.addWidget(canvas_unit)
-        else:
-            # (B) 燃氣別堆疊
-            canvas_fuel = StackedAreaCanvas()
-
-            def fmt_fuel(ts, series_dict, total_val):
-                lines = [f"{ts:%H:%M}"]
-                lines += [f"{k}: {v:,.1f}" for k, v in series_dict.items()]
-                lines.append(f"（總計以 TG 加總）: {total_val:,.1f}")
-                return "\n".join(lines)
-
-            canvas_fuel.plot(
-                df_fuel,
-                colors=FUEL_COLORS,
-                legend_title="燃氣別",
-                tooltip_fmt=fmt_fuel,
-            )
-            self.verticalLayout_3.addWidget(canvas_fuel)
 
     def make_stacked_frames(self, df: pd.DataFrame) -> dict:
         """
