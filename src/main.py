@@ -4,7 +4,7 @@ from logging_utils import setup_logging, log_exceptions, timeit, get_logger
 setup_logging("./logs/app.log", level="INFO")
 logger = get_logger(__name__)
 
-import sys, re, math, time, os
+import sys, re, math, time, os, shutil
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -23,27 +23,47 @@ from data_sources.data_analysis import analyze_production_avg_cycle, estimate_sp
 from enum import Enum, auto
 from utils.mes_sample_tool import save_mes_snapshot, use_mes_snapshots
 
-# ------ Defines the paths for data of MES and train_data ------
-if getattr(sys, 'frozen', False):
-    # PyInstaller 執行檔狀態
-    ROOT = Path(os.path.dirname(sys.executable))
-else:
-    # 開發模式  (main.py)
-    ROOT = Path(__file__).resolve().parents[0]
+def get_path(filename: str, is_config: bool = False) -> Path:
+    """
+    統一路徑取得函式：
+    :param filename: 檔案名稱
+    :param is_config: 是否為需要「可讀寫」的設定檔 (如 parameter.xlsx)
+    :return: 最終可用的 Path 物件
 
-def get_resource_path(filename: str) -> Path:
+    --- 使用方式範例 ---
+    1. 取得設定檔 (會自動處理 EXE 旁邊的初始化與讀寫)
+    CONFIG_PATH = get_path("parameter.xlsx", is_config=True)
+
+    2. 取得一般資源 (單純讀取)
+    LOG_DIR = get_path("logs")
     """
-    取得檔案的實際路徑：
-    - 開發階段：以 main.py 的上一層為根目錄
-    - 打包後（exe 模式）：以 PyInstaller 的 _MEIPASS 暫存資料夾為根目錄
-    """
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        # PyInstaller 執行檔狀態
-        base_path = Path(sys._MEIPASS)
+    # 判斷是否為 PyInstaller 封裝環境
+    is_frozen = getattr(sys, 'frozen', False)
+
+    if is_frozen:
+        # 封裝環境路徑
+        internal_base = Path(sys._MEIPASS)  # EXE 內部 (唯讀)
+        external_base = Path(sys.executable).parent  # EXE 旁邊 (可寫)
+
+        if is_config:
+            # --- 處理設定檔 (如 parameter.xlsx) ---
+            target_path = external_base / filename
+            # 如果 EXE 旁邊找不到設定檔，從內部複製一份初始模板出來
+            if not target_path.exists():
+                source_template = internal_base / filename
+                if source_template.exists():
+                    try:
+                        shutil.copy(source_template, target_path)
+                    except Exception as e:
+                        print(f"Initialization failed: {e}")
+            return target_path
+        else:
+            # --- 處理一般資源 (如 Icon, 圖片) ---
+            return internal_base / filename
     else:
-        # 開發模式 (main.py 在 src 裡，要回到上一層)
-        base_path = Path(__file__).resolve().parents[1]
-    return base_path / filename
+        # 開發環境路徑 (main.py 在 src 裡，向上跳一級回到根目錄)
+        dev_base = Path(__file__).resolve().parents[1]
+        return dev_base / filename
 
 # 設定全域未捕捉異常的 hook
 def handle_uncaught(exc_type, exc_value, exc_traceback):
@@ -347,8 +367,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # --- 用QThread 同時讀取兩組PI 資料的功能 (等待放到 ui_handler.py) ---
         self.pi_client = pi_client
-
-        excel_path = get_resource_path("parameter.xlsx")
+        excel_path = get_path("parameter.xlsx", is_config=True)
         # -------- 從外部資料讀取設定檔，並儲存成這個實例本身的成員變數 -----------
         self.tag_list = pd.read_excel(excel_path, sheet_name=0).dropna(how='all')
         self.special_dates = pd.read_excel(excel_path, sheet_name=1)
@@ -392,7 +411,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.pushButton_9.clicked.connect(self.on_show_trend)
         self.pushButton_7.clicked.connect(self.snapshot_mes)
         self.pushButton_8.clicked.connect(self.select_folder)
-        self.lineEdit.setText(str(ROOT / "mes"))
+        self.lineEdit.setText(str(get_path("mes")))
         self.listWidget_2.addItems(['HSM 軋延機組'])
         self.listWidget_2.addItems([str(name) for name in self.tag_list['name']])
         self.listWidget_2.itemDoubleClicked.connect(self.add_target_tag_to_list3)
@@ -482,7 +501,7 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             Path: The directory that should contain per-timestamp subfolders,
             e.g. ``src/mes/20250201_143320/``.
         """
-        root = getattr(self, "mes_snapshot_dir", ROOT / "mes")
+        root = getattr(self, "mes_snapshot_dir", get_path("mes"))
         return Path(root)
 
     def get_mes_snapshot_now(self) -> pd.Timestamp:
@@ -514,7 +533,6 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def get_mes_snapshot_mapping(self) -> Dict[str, Path]:
         """Build the mapping used by ``use_mes_snapshots`` for offline MES replay.
-
         The mapping describes where HTML snapshots for each MES page are located.
         It is passed to :func:`use_mes_snapshots` so that the context manager can
         monkey-patch ``_fetch_soup`` and redirect all HTTP fetches to local files.
@@ -560,11 +578,11 @@ class MyMainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             - Opens a modal :class:`QFileDialog`.
             - Updates ``self.lineEdit`` with the chosen directory.
             - Updates ``self.mes_snapshot_dir`` with a :class:`pathlib.Path`
-              instance pointing to that directory.
+              instance pointing to that directory
         """
 
         # 1) 安全的起始路徑：用使用者的「文件」資料夾
-        start_dir = str(ROOT / "mes")
+        start_dir = str(get_path("mes"))
         if not start_dir:
             start_dir = QtCore.QDir.homePath()
 
